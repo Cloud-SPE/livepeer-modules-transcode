@@ -24,6 +24,7 @@ import { createRenditionRepo } from "./repo/renditions.js";
 import { createEncodingJobRepo } from "./repo/encodingJobs.js";
 import { createLiveStreamRepo } from "./repo/liveStreams.js";
 import { createPlaybackIdRepo } from "./repo/playbackIds.js";
+import { createRtmpListener, type RtmpListenerHandle } from "./runtime/rtmp/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, "..", "migrations");
@@ -137,9 +138,33 @@ async function main(): Promise<void> {
     engineLogger: consoleLogger,
   });
 
+  // Gateway RTMP listener (plan 0007). Opt-in via
+  // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL. Disabled by default — plan-0006
+  // behavior preserved when env unset.
+  let rtmpHandle: RtmpListenerHandle | null = null;
+  if (config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL && config.RTMP_RELAY_ENABLED) {
+    rtmpHandle = createRtmpListener({
+      config,
+      liveStreamRepo,
+      liveSessions,
+      logger: consoleLogger,
+    });
+    consoleLogger.info("rtmp.listener.started", {
+      port: config.RTMP_LISTEN_PORT,
+      external_url: config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL,
+    });
+  } else {
+    consoleLogger.info("rtmp.listener.disabled", {
+      reason: config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL
+        ? "RTMP_RELAY_ENABLED=false"
+        : "LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL unset",
+    });
+  }
+
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "shutdown.starting");
     rateLimiter.stop();
+    if (rtmpHandle) await rtmpHandle.stop();
     await app.close();
     if (resolverHandle) await resolverHandle.close();
     if (payerDaemon) await payerDaemon.close();

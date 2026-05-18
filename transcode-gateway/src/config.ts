@@ -37,6 +37,15 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: z.string().optional(),
   VOD_UPLOAD_URL_TTL_SEC: z.coerce.number().int().positive().default(3600),
   VOD_PLAYBACK_URL_TTL_SEC: z.coerce.number().int().positive().default(3600),
+
+  // Gateway RTMP listener (plan 0007). All optional; when
+  // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL is unset the listener does not bind
+  // and the live route returns the broker's RTMP URL (plan 0006 default).
+  RTMP_LISTEN_PORT: z.coerce.number().int().positive().default(1935),
+  RTMP_LISTEN_HOST: z.string().default("0.0.0.0"),
+  LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL: z.string().optional(),
+  RTMP_RELAY_ENABLED: z.coerce.boolean().default(true),
+  RTMP_RELAY_FFMPEG_BIN: z.string().default("ffmpeg"),
 });
 
 export type Config = Readonly<z.infer<typeof envSchema>>;

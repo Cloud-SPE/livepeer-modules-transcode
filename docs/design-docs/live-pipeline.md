@@ -4,32 +4,32 @@ How a live stream moves from "customer's encoder pushes RTMP" to
 "viewer plays LL-HLS." VOD is covered in
 [transcode-pipeline.md](./transcode-pipeline.md).
 
-## Target end state vs v0 implementation reality
+## Two ingress modes — opt-in gateway relay
 
-**Target end state** (gateway-as-single-ingress): the customer's
-encoder pushes RTMP to the gateway. The gateway terminates RTMP,
-parses the stream key from the RTMP `connect` AMF0 message, looks up
-the assigned broker in `media.live_streams.worker_url`, and opens a
-per-stream TCP bridge to that broker. The gateway is the only ingress
-the customer ever sees.
+The gateway can act as the customer's RTMP ingress, or it can hand
+the broker's URL back and let the customer push directly. Mode is
+selected by the `LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL` env var.
 
-**v0 reality, post-plan 0006**: the live HTTP surface is shipped
-(session-open, get, end, HLS strict-proxy), but the gateway-side RTMP
-listener with per-stream broker routing has NOT yet shipped. For now,
-`POST /v1/live/streams` returns the **broker's** RTMP URL as
-`rtmp_push_url`. The customer pushes RTMP directly to the broker. The
-response also carries `rtmp_push_url_kind: "broker_direct"` so clients
-can distinguish.
+**Default (`LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL` unset)**: `POST
+/v1/live/streams` returns the **broker's** RTMP URL as `rtmp_push_url`
+with `rtmp_push_url_kind: "broker_direct"`. The customer's encoder
+pushes RTMP straight to the broker. The gateway is not in the RTMP
+byte path.
 
-**v0+, post-plan 0007**: the gateway-side RTMP listener lands. The
-route response flips `rtmp_push_url` to a gateway URL (the kind
-becomes `"gateway_relay"`). Customers using the URL field directly
-get the upgraded behavior without code changes. Plan 0007 will add a
-real RTMP-parsing library (node-media-server-class) + per-stream
-broker routing.
+**Opt-in (`LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL=rtmp://gateway:1935/live`)**:
+the route returns a **gateway-hosted** URL,
+`rtmp_push_url_kind: "gateway_relay"`. The customer pushes to the
+gateway; the gateway terminates RTMP via node-media-server, parses
+the stream key from the AMF0 publish path, looks up
+`media.live_streams.stream_key_hash`, finds the broker's RTMP URL in
+the in-memory `liveSessionDirectory`, and spawns an `ffmpeg`
+subprocess to relay the bytes (`-c copy -f flv`). Per-stream relay;
+multiple concurrent streams each get their own ffmpeg process.
 
-This is the only outstanding contract gap between the doc and the
-code. Plan 0007 closes it.
+Both modes use the same HTTP path for session-open
+(`POST /v1/live/streams` → `openRtmpSession` → broker `/v1/cap`).
+The only thing that varies is what URL the customer's encoder sees
+and whether bytes flow through the gateway socket.
 
 ## Surface
 

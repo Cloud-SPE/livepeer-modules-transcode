@@ -34,8 +34,12 @@ services:
       LOG_LEVEL: info
       ALLOWED_ORIGINS: "*"
       # RESEND_API_KEY unset — emails logged, not sent
+      # RTMP relay opt-in (plan 0007). Uncomment to enable:
+      # LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL: rtmp://localhost:1935/live
+      # RTMP_LISTEN_PORT: "1935"
     ports:
       - "4000:4000"
+      - "1935:1935"
 
 volumes:
   pgdata:

@@ -153,14 +153,23 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
       tokenRequired: false,
     });
 
-    // Plan-0007 swap point: gateway-hosted URL replaces brokerRtmpUrl here.
+    // Plan 0007: when LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL is set, return the
+    // gateway-hosted URL ("gateway_relay"); otherwise fall back to the
+    // broker's URL ("broker_direct", plan 0006 behavior).
+    const gwBase = deps.config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL;
+    const relayEnabled = Boolean(gwBase) && deps.config.RTMP_RELAY_ENABLED;
+    const rtmpPushUrl = relayEnabled
+      ? `${gwBase!.replace(/\/$/, "")}/${streamKey}`
+      : session.brokerRtmpUrl;
+    const rtmpPushUrlKind = relayEnabled ? "gateway_relay" : "broker_direct";
+
     reply.code(201).send({
       stream_id: streamId,
       api_key_id: apiKey.id,
       name,
       session_id: session.sessionId,
-      rtmp_push_url: session.brokerRtmpUrl,
-      rtmp_push_url_kind: "broker_direct",
+      rtmp_push_url: rtmpPushUrl,
+      rtmp_push_url_kind: rtmpPushUrlKind,
       stream_key: streamKey,
       hls_playback_url: session.hlsUrl,
       playback_id: playbackIdRow.id,

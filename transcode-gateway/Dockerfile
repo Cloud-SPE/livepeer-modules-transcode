@@ -24,6 +24,11 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
+# ffmpeg is used by the RTMP relay (plan 0007). When LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL
+# is unset the relay doesn't start, but ffmpeg is bundled regardless to keep the
+# image self-contained.
+RUN apk add --no-cache ffmpeg
+
 ENV NODE_ENV=production
 
 COPY --from=build /app/pnpm-workspace.yaml /app/package.json /app/pnpm-lock.yaml* ./
@@ -35,5 +40,5 @@ COPY transcode-gateway/proto/ transcode-gateway/proto/
 RUN pnpm install --filter @livepeer-modules-transcode/transcode-gateway --prod --frozen-lockfile
 
 WORKDIR /app/transcode-gateway
-EXPOSE 4000
+EXPOSE 4000 1935
 CMD ["node", "dist/index.js"]

@@ -32,15 +32,15 @@ The repo contains:
   auth + VOD regressions clean. `live-pipeline.md` updated to describe
   the two-plan transition.
 
-Gateway-side RTMP listener (plan 0007), runners, and frontends have
-not been ported yet. Each lands under its own numbered exec-plan,
-sequenced by the roadmap.
+Frontends (plans 0013–0015) and the e2e smoke (plan 0016) plus the
+integration smoke harness (plan 0012) have not been ported yet.
+Each lands under its own numbered exec-plan, sequenced by the roadmap.
 
 ## Active plans
 
 | Plan | Title | Status |
 |---|---|---|
-| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (scaffold + auth + engine + wire + VOD + live-HTTP + runners done; RTMP listener + tester + frontends queued) |
+| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (gateway + runners + RTMP listener done; tester + frontends queued) |
 
 ## Completed plans
 
@@ -51,6 +51,7 @@ sequenced by the roadmap.
 | [0004](./docs/exec-plans/completed/0004-wire-layer-port.md) | Wire layer — real WorkerClient + WorkerResolver (resolver-aware, payment-aware) | 2026-05-18 |
 | [0005](./docs/exec-plans/completed/0005-vod-routes-port.md) | VOD routes — upload + submit + asset + playback (API-key auth, real S3) | 2026-05-18 |
 | [0006](./docs/exec-plans/completed/0006-live-pipeline-port.md) | Live pipeline — `/v1/live/streams` + `/_hls/*` proxy + adapter + session directory + live selection hints | 2026-05-18 |
+| [0007](./docs/exec-plans/completed/0007-rtmp-listener.md) | Gateway RTMP listener (NMS + ffmpeg per-stream relay) — flips rtmp_push_url to gateway URL when env set | 2026-05-18 |
 | [0008](./docs/exec-plans/completed/0008-transcode-core-port.md) | transcode-core — Go shared library (FFmpeg + GPU + presets + HLS + progress + thumbnails + filters) | 2026-05-18 |
 | [0009](./docs/exec-plans/completed/0009-transcode-runner-port.md) | transcode-runner — Go single-rendition VOD binary | 2026-05-18 |
 | [0010](./docs/exec-plans/completed/0010-abr-runner-port.md) | abr-runner — Go multi-rendition (ABR ladder) VOD binary | 2026-05-18 |
@@ -69,7 +70,7 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 3 | Wire layer (capability map, headers, payment, resolver routing) | `transcode-gateway/src/livepeer/` | ✅ shipped (plan 0004) |
 | 4 | VOD pipeline routes (`/v1/uploads`, `/v1/vod/*`, `/v1/videos/assets`, `/v1/playback/:id`) | `transcode-gateway/src/routes/` | ✅ shipped (plan 0005) |
 | 5a | Live HTTP surface (`/v1/live/streams`, `/_hls/*` proxy, adapter, session directory) | `transcode-gateway/src/routes/live/` + `src/livepeer/` | ✅ shipped (plan 0006) |
-| 5b | Gateway-side RTMP listener with per-stream broker routing (RTMP-parsing lib) | `transcode-gateway/src/runtime/rtmp/` | ⏳ queued (plan 0007) |
+| 5b | Gateway-side RTMP listener with per-stream broker routing (RTMP-parsing lib) | `transcode-gateway/src/runtime/rtmp/` | ✅ shipped (plan 0007) |
 | 6 | `transcode-core` Go library port | `transcode-core/` | ✅ shipped (plan 0008) |
 | 7 | `transcode-runner` Go binary port | `transcode-runner/` | ✅ shipped (plan 0009) |
 | 8 | `abr-runner` Go binary port | `abr-runner/` | ✅ shipped (plan 0010) |
