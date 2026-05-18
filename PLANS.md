@@ -76,9 +76,9 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 8 | `abr-runner` Go binary port | `abr-runner/` | ✅ shipped (plan 0010) |
 | 9 | `codecs-builder` Docker base port | `codecs-builder/` | ✅ shipped (plan 0011) |
 | 10 | `transcode-tester` Node smoke harness port | `transcode-tester/` | ⏳ queued (plan 0012) |
-| 11 | `site/` waitlist signup (Lit, zero-build) | `site/` | ⏳ queued (plan 0013) |
-| 12 | `portal/` user portal (Lit, zero-build) | `portal/` | ⏳ queued (plan 0014) |
-| 13 | `admin/` admin dashboard (Lit, zero-build) | `admin/` | ⏳ queued (plan 0015) |
+| 11 | `site/` waitlist signup (Vite + Lit) | `site/` | ✅ shipped (plan 0013) |
+| 12 | `portal/` user portal (Vite + Lit) | `portal/` | ✅ shipped (plan 0014) |
+| 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ⏳ queued (plan 0015) |
 | 14 | End-to-end smoke (compose stack + fixture VOD + fixture live) | (cross-cutting) | ⏳ queued (plan 0016) |
 
 ## What does not exist yet

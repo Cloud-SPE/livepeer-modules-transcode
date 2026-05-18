@@ -13,3 +13,4 @@
 packages:
   - "transcode-gateway"
   - "site"
+  - "portal"
