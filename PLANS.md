@@ -40,7 +40,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 
 | Plan | Title | Status |
 |---|---|---|
-| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (all component ports done; e2e compose smoke is the last queued plan) |
+| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (every queued plan shipped; this roadmap can move to completed at the next user signal) |
 
 ## Completed plans
 
@@ -60,6 +60,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 | [0014](./docs/exec-plans/completed/0014-portal-port.md) | portal/ — Vite + Lit user portal (account + asset library + live streams + upload) | 2026-05-18 |
 | [0015](./docs/exec-plans/completed/0015-admin-port.md) | admin/ — Vite + Lit admin dashboard (waitlist approval + stats) | 2026-05-18 |
 | [0012](./docs/exec-plans/completed/0012-transcode-tester-port.md) | transcode-tester — Node integration smoke harness for transcode-runner + abr-runner | 2026-05-18 |
+| [0016](./docs/exec-plans/completed/0016-e2e-smoke.md) | e2e/ — compose-stack smoke (gateway + postgres + MinIO + fixture flows) | 2026-05-18 |
 
 ## Roadmap (rough; subject to change)
 
@@ -83,7 +84,7 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 11 | `site/` waitlist signup (Vite + Lit) | `site/` | ✅ shipped (plan 0013) |
 | 12 | `portal/` user portal (Vite + Lit) | `portal/` | ✅ shipped (plan 0014) |
 | 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ✅ shipped (plan 0015) |
-| 14 | End-to-end smoke (compose stack + fixture VOD + fixture live) | (cross-cutting) | ⏳ queued (plan 0016) |
+| 14 | End-to-end smoke (compose stack + fixture VOD + fixture live) | `e2e/` | ✅ shipped (plan 0016) |
 
 ## What does not exist yet
 
