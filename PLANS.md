@@ -40,7 +40,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 
 | Plan | Title | Status |
 |---|---|---|
-| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (gateway + runners + RTMP listener + frontends done; only tester + e2e smoke queued) |
+| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (all component ports done; e2e compose smoke is the last queued plan) |
 
 ## Completed plans
 
@@ -59,6 +59,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 | [0013](./docs/exec-plans/completed/0013-site-port.md) | site/ — Vite + Lit waitlist signup (public-facing marketing + signup form) | 2026-05-18 |
 | [0014](./docs/exec-plans/completed/0014-portal-port.md) | portal/ — Vite + Lit user portal (account + asset library + live streams + upload) | 2026-05-18 |
 | [0015](./docs/exec-plans/completed/0015-admin-port.md) | admin/ — Vite + Lit admin dashboard (waitlist approval + stats) | 2026-05-18 |
+| [0012](./docs/exec-plans/completed/0012-transcode-tester-port.md) | transcode-tester — Node integration smoke harness for transcode-runner + abr-runner | 2026-05-18 |
 
 ## Roadmap (rough; subject to change)
 
@@ -78,7 +79,7 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 7 | `transcode-runner` Go binary port | `transcode-runner/` | ✅ shipped (plan 0009) |
 | 8 | `abr-runner` Go binary port | `abr-runner/` | ✅ shipped (plan 0010) |
 | 9 | `codecs-builder` Docker base port | `codecs-builder/` | ✅ shipped (plan 0011) |
-| 10 | `transcode-tester` Node smoke harness port | `transcode-tester/` | ⏳ queued (plan 0012) |
+| 10 | `transcode-tester` Node smoke harness port | `transcode-tester/` | ✅ shipped (plan 0012) |
 | 11 | `site/` waitlist signup (Vite + Lit) | `site/` | ✅ shipped (plan 0013) |
 | 12 | `portal/` user portal (Vite + Lit) | `portal/` | ✅ shipped (plan 0014) |
 | 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ✅ shipped (plan 0015) |
