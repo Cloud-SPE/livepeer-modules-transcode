@@ -1,0 +1,36 @@
+{
+  "name": "@livepeer-modules-transcode/transcode-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Customer-facing gateway for the Livepeer transcode module (VOD + live RTMP). Owns auth + media.* schema; dispatches transcode work to the capability-broker.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "files": ["dist", "migrations", "proto", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "start": "node ./dist/index.js",
+    "test": "tsc -p tsconfig.test.json && node --test ./dist-test/test/**/*.test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
+    "@fastify/cors": "^11.0.0",
+    "@grpc/grpc-js": "^1.12.2",
+    "@grpc/proto-loader": "^0.8.1",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.0.0",
+    "pg": "^8.13.0",
+    "undici": "^7.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
