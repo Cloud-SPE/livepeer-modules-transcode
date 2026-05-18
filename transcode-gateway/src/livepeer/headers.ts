@@ -1,0 +1,15 @@
+// Modeled on livepeer-network-modules/video-gateway/src/livepeer/headers.ts.
+
+export const HEADER = {
+  CAPABILITY:   "Livepeer-Capability",
+  OFFERING:     "Livepeer-Offering",
+  PAYMENT:      "Livepeer-Payment",
+  SPEC_VERSION: "Livepeer-Spec-Version",
+  MODE:         "Livepeer-Mode",
+  REQUEST_ID:   "Livepeer-Request-Id",
+  BACKOFF:      "Livepeer-Backoff",
+  WORK_UNITS:   "Livepeer-Work-Units",
+  ERROR:        "Livepeer-Error",
+} as const;
+
+export const SPEC_VERSION = "0.1";
