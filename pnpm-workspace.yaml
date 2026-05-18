@@ -1,0 +1,14 @@
+# TypeScript / Node packages in this monorepo.
+# Packages land here as each component is ported per
+# `docs/exec-plans/active/0001-initial-port-roadmap.md`.
+#
+# Pending packages (added when their component subfolder lands):
+#   - site
+#   - portal
+#   - admin
+#   - transcode-tester
+#
+# Go modules (transcode-core / transcode-runner / abr-runner) are managed by
+# `go.mod` per-component, not by pnpm. `codecs-builder` is Dockerfile-only.
+packages:
+  - "transcode-gateway"
