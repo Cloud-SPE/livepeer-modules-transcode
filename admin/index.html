@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Livepeer Transcode — Admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+  <link rel="stylesheet" href="/admin.css">
+  <script>
+    (function () {
+      var s = localStorage.getItem("lmt-theme");
+      document.documentElement.setAttribute("data-theme",
+        s || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+    })();
+  </script>
+  <script type="module" src="/components/index.js"></script>
+</head>
+<body>
+  <admin-app></admin-app>
+  <lmt-toast></lmt-toast>
+</body>
+</html>

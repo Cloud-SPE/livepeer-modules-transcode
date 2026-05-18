@@ -40,7 +40,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 
 | Plan | Title | Status |
 |---|---|---|
-| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (gateway + runners + RTMP listener done; tester + frontends queued) |
+| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (gateway + runners + RTMP listener + frontends done; only tester + e2e smoke queued) |
 
 ## Completed plans
 
@@ -56,6 +56,9 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 | [0009](./docs/exec-plans/completed/0009-transcode-runner-port.md) | transcode-runner — Go single-rendition VOD binary | 2026-05-18 |
 | [0010](./docs/exec-plans/completed/0010-abr-runner-port.md) | abr-runner — Go multi-rendition (ABR ladder) VOD binary | 2026-05-18 |
 | [0011](./docs/exec-plans/completed/0011-codecs-builder-port.md) | codecs-builder — Dockerfile-only base image (x264 + SVT-AV1 + libopus + libvpx + libzimg) | 2026-05-18 |
+| [0013](./docs/exec-plans/completed/0013-site-port.md) | site/ — Vite + Lit waitlist signup (public-facing marketing + signup form) | 2026-05-18 |
+| [0014](./docs/exec-plans/completed/0014-portal-port.md) | portal/ — Vite + Lit user portal (account + asset library + live streams + upload) | 2026-05-18 |
+| [0015](./docs/exec-plans/completed/0015-admin-port.md) | admin/ — Vite + Lit admin dashboard (waitlist approval + stats) | 2026-05-18 |
 
 ## Roadmap (rough; subject to change)
 
@@ -78,7 +81,7 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 10 | `transcode-tester` Node smoke harness port | `transcode-tester/` | ⏳ queued (plan 0012) |
 | 11 | `site/` waitlist signup (Vite + Lit) | `site/` | ✅ shipped (plan 0013) |
 | 12 | `portal/` user portal (Vite + Lit) | `portal/` | ✅ shipped (plan 0014) |
-| 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ⏳ queued (plan 0015) |
+| 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ✅ shipped (plan 0015) |
 | 14 | End-to-end smoke (compose stack + fixture VOD + fixture live) | (cross-cutting) | ⏳ queued (plan 0016) |
 
 ## What does not exist yet

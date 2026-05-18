@@ -3,9 +3,6 @@
 # `docs/exec-plans/active/0001-initial-port-roadmap.md`.
 #
 # Pending packages (added when their component subfolder lands):
-#   - site
-#   - portal
-#   - admin
 #   - transcode-tester
 #
 # Go modules (transcode-core / transcode-runner / abr-runner) are managed by
@@ -14,3 +11,4 @@ packages:
   - "transcode-gateway"
   - "site"
   - "portal"
+  - "admin"
