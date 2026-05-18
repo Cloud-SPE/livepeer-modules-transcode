@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Livepeer Transcode — Sign up</title>
+  <meta name="description" content="VOD batch + live RTMP transcode. Sign up for the waitlist; we'll email you an API key when approved.">
+  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+  <link rel="stylesheet" href="/index.css">
+  <script>
+    // Set theme before first paint to prevent FOUC
+    (function () {
+      var s = localStorage.getItem("lmt-theme");
+      var t = s || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <script type="module" src="/components/index.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-brand">
+      <strong>Livepeer Transcode</strong>
+    </div>
+    <nav class="site-nav">
+      <lmt-theme-toggle></lmt-theme-toggle>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    <section class="hero">
+      <h1>VOD + live RTMP transcode, no rate limits.</h1>
+      <p class="lede">
+        Open-source Livepeer-backed video transcoding behind a single
+        API. Submit batch VOD jobs or push live RTMP — we resolve a
+        worker, mint payment, and return a playback URL.
+      </p>
+    </section>
+
+    <section class="signup-section">
+      <h2>Join the waitlist</h2>
+      <p>
+        We're inviting accounts in batches. Sign up; we'll email you an
+        API key when your account is approved.
+      </p>
+      <lmt-signup-form></lmt-signup-form>
+    </section>
+
+    <section class="how-it-works">
+      <h2>What's in the box</h2>
+      <ul>
+        <li><strong>VOD</strong> — presigned upload → ABR ladder
+          encode → signed HLS playback URL.</li>
+        <li><strong>Live</strong> — RTMP ingest → broker session →
+          LL-HLS strict-proxy.</li>
+        <li><strong>API-first</strong> — one bearer token gates the
+          whole product API.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Livepeer Transcode</p>
+  </footer>
+
+  <lmt-toast></lmt-toast>
+</body>
+</html>

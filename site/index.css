@@ -1,0 +1,207 @@
+/* Livepeer Transcode — site/. Light + dark themes via custom properties on
+   html[data-theme]. Per frontend-dom-and-css-invariants.md: light DOM only,
+   semantic-element + class selectors, no IDs, no inline styles. */
+
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 6px;
+  --gap-xs: 0.25rem;
+  --gap-sm: 0.5rem;
+  --gap-md: 1rem;
+  --gap-lg: 1.5rem;
+  --gap-xl: 2.5rem;
+  --max-width: 720px;
+}
+
+html[data-theme="light"] {
+  --bg: #fff;
+  --fg: #111;
+  --fg-muted: #555;
+  --surface: #f6f7f9;
+  --border: #d8dde3;
+  --accent: #111;
+  --accent-fg: #fff;
+  --success: #047a3d;
+  --error: #b00020;
+}
+
+html[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --fg-muted: #8b949e;
+  --surface: #161b22;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --accent-fg: #0d1117;
+  --success: #3fb950;
+  --error: #f85149;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover, a:focus-visible {
+  text-decoration: underline;
+}
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--gap-md) var(--gap-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.site-brand strong {
+  font-size: 1.1rem;
+}
+
+.site-nav {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+}
+
+.site-main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--gap-xl) var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xl);
+}
+
+.hero h1 {
+  font-size: 2rem;
+  margin: 0 0 var(--gap-md);
+}
+
+.hero .lede {
+  font-size: 1.05rem;
+  color: var(--fg-muted);
+}
+
+.signup-section,
+.how-it-works {
+  background: var(--surface);
+  padding: var(--gap-lg);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.signup-section h2,
+.how-it-works h2 {
+  margin-top: 0;
+}
+
+.how-it-works ul {
+  padding-left: var(--gap-lg);
+  margin: var(--gap-sm) 0;
+}
+
+.how-it-works li + li {
+  margin-top: var(--gap-sm);
+}
+
+.signup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+
+.signup-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.signup-form input {
+  font: inherit;
+  padding: var(--gap-sm) var(--gap-md);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.signup-form input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.signup-form button,
+.theme-toggle button {
+  font: inherit;
+  padding: var(--gap-sm) var(--gap-md);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+
+.signup-form button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.theme-toggle button {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.signup-form .message,
+.verify-result {
+  padding: var(--gap-md);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.signup-form .message.ok,
+.verify-result.ok {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.signup-form .message.error,
+.verify-result.error {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.toast {
+  position: fixed;
+  bottom: var(--gap-lg);
+  right: var(--gap-lg);
+  padding: var(--gap-md) var(--gap-lg);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.site-footer {
+  text-align: center;
+  padding: var(--gap-lg);
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+}

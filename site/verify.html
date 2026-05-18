@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Livepeer Transcode — Verify email</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+  <link rel="stylesheet" href="/index.css">
+  <script>
+    (function () {
+      var s = localStorage.getItem("lmt-theme");
+      var t = s || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <script type="module" src="/components/index.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-brand">
+      <a href="/">
+        <strong>Livepeer Transcode</strong>
+      </a>
+    </div>
+    <nav class="site-nav">
+      <lmt-theme-toggle></lmt-theme-toggle>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    <section>
+      <h1>Email verification</h1>
+      <lmt-email-verify></lmt-email-verify>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Livepeer Transcode</p>
+  </footer>
+
+  <lmt-toast></lmt-toast>
+</body>
+</html>

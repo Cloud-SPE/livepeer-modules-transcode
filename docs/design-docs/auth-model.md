@@ -138,7 +138,7 @@ Schema decisions:
 
 ## Frontends
 
-Three zero-build Lit sites, mirroring Blueclaw's layout:
+Three Vite-built Lit sites, mirroring Blueclaw's layout:
 
 | Site | Path | Purpose | Component prefix |
 |---|---|---|---|

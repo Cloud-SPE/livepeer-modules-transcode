@@ -12,3 +12,4 @@
 # `go.mod` per-component, not by pnpm. `codecs-builder` is Dockerfile-only.
 packages:
   - "transcode-gateway"
+  - "site"
