@@ -1,4 +1,4 @@
-.PHONY: help up smoke logs down reset
+.PHONY: help up smoke smoke-daemon logs down reset
 
 COMPOSE ?= docker compose -f compose.yaml
 
@@ -11,6 +11,10 @@ up: ## docker compose up -d --build
 smoke: up ## bring up the stack and run the smoke
 	@chmod +x smoke.sh
 	@COMPOSE='$(COMPOSE)' ./smoke.sh
+
+smoke-daemon: ## bring up the daemon-backed stack and run the real-wire smoke
+	@chmod +x smoke-daemon.sh
+	@COMPOSE='docker compose -f compose.daemon.yaml' ./smoke-daemon.sh
 
 logs: ## follow gateway logs
 	$(COMPOSE) logs -f gateway

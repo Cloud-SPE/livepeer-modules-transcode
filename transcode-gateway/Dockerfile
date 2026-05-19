@@ -34,7 +34,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/pnpm-workspace.yaml /app/package.json /app/pnpm-lock.yaml* ./
 COPY --from=build /app/transcode-gateway/package.json transcode-gateway/
 COPY --from=build /app/transcode-gateway/dist/ transcode-gateway/dist/
-COPY --from=build /app/transcode-gateway/migrations/ transcode-gateway/migrations/
+COPY transcode-gateway/migrations/ transcode-gateway/migrations/
 COPY transcode-gateway/proto/ transcode-gateway/proto/
 
 RUN pnpm install --filter @livepeer-modules-transcode/transcode-gateway --prod --frozen-lockfile

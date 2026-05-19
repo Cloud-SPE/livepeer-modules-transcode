@@ -1,0 +1,111 @@
+// Livepeer Payments v1 — wire-format and daemon-app types.
+//
+// Vendored subset from
+// livepeer-network-modules/livepeer-network-protocol/proto/livepeer/payments/v1/types.proto.
+
+syntax = "proto3";
+
+package livepeer.payments.v1;
+
+option go_package = "github.com/Cloud-SPE/livepeer-network-modules/livepeer-network-protocol/proto-go/livepeer/payments/v1;paymentsv1";
+
+message PriceInfo {
+  int64 price_per_unit = 1;
+  int64 pixels_per_unit = 2;
+  uint32 capability = 3;
+  string constraint = 4;
+}
+
+message TicketParams {
+  bytes recipient = 1;
+  bytes face_value = 2;
+  bytes win_prob = 3;
+  bytes recipient_rand_hash = 4;
+  bytes seed = 5;
+  bytes expiration_block = 6;
+  TicketExpirationParams expiration_params = 7;
+}
+
+message TicketSenderParams {
+  uint32 sender_nonce = 1;
+  bytes sig = 2;
+}
+
+message TicketExpirationParams {
+  int64 creation_round = 1;
+  bytes creation_round_block_hash = 2;
+}
+
+message Payment {
+  TicketParams ticket_params = 1;
+  bytes sender = 2;
+  TicketExpirationParams expiration_params = 3;
+  repeated TicketSenderParams ticket_sender_params = 4;
+  PriceInfo expected_price = 5;
+}
+
+message OfferingPrice {
+  string id = 1;
+  PriceInfo price_info = 2;
+}
+
+message CapabilityEntry {
+  string capability = 1;
+  string work_unit = 2;
+  repeated OfferingPrice offerings = 3;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+message BigUInt {
+  bytes value = 1;
+}
+
+message QuoteRef {
+  string quote_id = 1;
+  uint64 quote_version = 2;
+  bytes constraint_fingerprint = 3;
+  bytes route_fingerprint = 4;
+}
+
+message AcceptedPrice {
+  BigUInt price_per_unit_wei = 1;
+  uint64 units_per_price = 2;
+  string work_unit_name = 3;
+  string capability = 4;
+  string offering = 5;
+  QuoteRef quote_ref = 6;
+}
+
+message FundingIntent {
+  uint64 estimated_units = 1;
+  BigUInt funded_value_wei = 2;
+  uint64 max_total_units = 3;
+  bool top_up_allowed = 4;
+}
+
+message SettlementRecord {
+  QuoteRef accepted_quote_ref = 1;
+  string work_unit_name = 2;
+  uint64 estimated_units = 3;
+  uint64 actual_units = 4;
+  uint64 billed_units = 5;
+  BigUInt funded_value_wei = 6;
+  BigUInt billed_value_wei = 7;
+
+  enum SettlementOutcome {
+    SETTLEMENT_OUTCOME_UNSPECIFIED = 0;
+    EXACT = 1;
+    UNDERFUNDED = 2;
+    OVERFUNDED = 3;
+    STOPPED_AT_BUDGET = 4;
+    TOPPED_UP = 5;
+  }
+  SettlementOutcome outcome = 8;
+
+  map<string, string> breakdown = 9;
+}

@@ -40,7 +40,16 @@ export function createResolverWorkerResolver(
         capability: first.capability as Capability,
         offering: first.offering,
         pricePerWorkUnitWei: first.pricePerWorkUnitWei,
-        workUnit: defaultWorkUnit,
+        workUnit: first.workUnit || defaultWorkUnit,
+        ...(first.unitsPerPrice !== null ? { unitsPerPrice: first.unitsPerPrice } : {}),
+        ...(first.quoteId !== null ? { quoteId: first.quoteId } : {}),
+        ...(first.quoteVersion !== null ? { quoteVersion: first.quoteVersion } : {}),
+        ...(first.constraintFingerprint !== null
+          ? { constraintFingerprint: first.constraintFingerprint }
+          : {}),
+        ...(first.routeFingerprint !== null
+          ? { routeFingerprint: first.routeFingerprint }
+          : {}),
         ...(first.extra !== null ? { extra: { resolverExtra: first.extra } } : {}),
         ...(first.constraints !== null
           ? { constraints: { resolverConstraints: first.constraints } }

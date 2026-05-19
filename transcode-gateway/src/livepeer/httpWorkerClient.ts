@@ -15,8 +15,7 @@ import type { Capability } from "../engine/types/index.js";
 
 export interface HttpWorkerClientDeps {
   payerDaemon: PayerDaemonClient;
-  nodeId: string;
-  faceValueWei: string;
+  fundedValueWei: string;
 }
 
 export function createHttpWorkerClient(deps: HttpWorkerClientDeps): WorkerClient {
@@ -25,13 +24,19 @@ export function createHttpWorkerClient(deps: HttpWorkerClientDeps): WorkerClient
   return {
     async callWorker({ route, path, method, body, callerId, timeoutMs }) {
       const ticket = await buildPayment({
-        callerId,
         capability: route.capability,
         offering: route.offering,
         workUnits: 1n,
-        faceValueWei: deps.faceValueWei,
+        fundedValueWei: deps.fundedValueWei,
         recipientEthAddress: route.ethAddress,
-        nodeId: deps.nodeId,
+        brokerUrl: route.workerUrl,
+        workUnit: route.workUnit,
+        pricePerWorkUnitWei: route.pricePerWorkUnitWei,
+        unitsPerPrice: route.unitsPerPrice,
+        quoteId: route.quoteId,
+        quoteVersion: route.quoteVersion,
+        constraintFingerprint: route.constraintFingerprint,
+        routeFingerprint: route.routeFingerprint,
       });
 
       const headers: Record<string, string> = {

@@ -68,19 +68,19 @@ async function main(): Promise<void> {
   let routeSelector: VideoRouteSelector | null = null;
   let resolverHandle: { close(): Promise<void> } | null = null;
 
-  if (config.LIVEPEER_PAYER_SOCKET && config.LIVEPEER_NODE_ID) {
-    payerDaemon = createUnixSocketPayerDaemonClient({
+  if (config.LIVEPEER_PAYER_SOCKET) {
+    payerDaemon = await createUnixSocketPayerDaemonClient({
       socketPath: config.LIVEPEER_PAYER_SOCKET,
+      protoRoot: config.LIVEPEER_PAYER_PROTO_ROOT,
     });
     workerClient = createHttpWorkerClient({
       payerDaemon,
-      nodeId: config.LIVEPEER_NODE_ID,
-      faceValueWei: config.LIVEPEER_FACE_VALUE_WEI,
+      fundedValueWei: config.LIVEPEER_FUNDED_VALUE_WEI,
     });
     consoleLogger.info("wire.payerDaemon.connected", { socket: config.LIVEPEER_PAYER_SOCKET });
   } else {
     consoleLogger.info("wire.payerDaemon.stub", {
-      reason: "LIVEPEER_PAYER_SOCKET or LIVEPEER_NODE_ID unset",
+      reason: "LIVEPEER_PAYER_SOCKET unset",
     });
   }
 

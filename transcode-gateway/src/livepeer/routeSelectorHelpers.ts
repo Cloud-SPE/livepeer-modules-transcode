@@ -24,6 +24,24 @@ export function parseOpaqueJson(raw: Buffer | Uint8Array | string | undefined): 
   return JSON.parse(text) as JsonValue;
 }
 
+export function parseOpaqueBytes(raw: Buffer | Uint8Array | string | undefined): Uint8Array | null {
+  if (!raw) return null;
+  if (typeof raw === "string") return Buffer.from(raw, "utf8");
+  return Uint8Array.from(raw);
+}
+
+export function parseOptionalInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function mergeJsonObjects(a: JsonValue | null, b: JsonValue | null): JsonValue | null {
   if (!isJsonObject(a)) return b;
   if (!isJsonObject(b)) return a;

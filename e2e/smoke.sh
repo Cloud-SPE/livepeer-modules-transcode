@@ -85,12 +85,12 @@ UPLOAD_ID=$(printf "%s" "$UPLOAD" | grep -oE '"upload_id":"[^"]+"' | head -1 | c
 [[ -n "$UPLOAD_URL" && -n "$ASSET_ID" && -n "$UPLOAD_ID" ]] || fail "upload init missing fields"
 # Rewrite the presigned URL host: gateway returns minio:9000 (compose hostname),
 # we hit it from the host as localhost:9000.
-UPLOAD_URL_LOCAL=${UPLOAD_URL//minio:9000/localhost:9000}
 ok "asset_id=${ASSET_ID:0:14}..."
 
 step "vod: PUT bytes to MinIO via presigned URL"
 [[ -f "$FIXTURE" ]] || fail "fixture not found: $FIXTURE"
-curl -fsS -X PUT "$UPLOAD_URL_LOCAL" \
+curl -fsS -X PUT "$UPLOAD_URL" \
+  --resolve minio:9000:127.0.0.1 \
   -H "content-type: video/mp4" \
   --data-binary "@$FIXTURE" >/dev/null
 ok "presigned PUT to MinIO succeeded"

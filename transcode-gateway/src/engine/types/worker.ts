@@ -9,6 +9,11 @@ export interface SelectedWorkerRoute {
   offering: string;
   pricePerWorkUnitWei: string;
   workUnit: string;
+  unitsPerPrice?: number;
+  quoteId?: string;
+  quoteVersion?: number;
+  constraintFingerprint?: Uint8Array;
+  routeFingerprint?: Uint8Array;
   extra?: Record<string, unknown>;
   constraints?: Record<string, unknown>;
 }

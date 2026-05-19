@@ -21,10 +21,11 @@ const envSchema = z.object({
   LIVEPEER_RESOLVER_PROTO_ROOT: z.string().default("./proto"),
   LIVEPEER_RESOLVER_SNAPSHOT_TTL_MS: z.coerce.number().int().positive().default(15_000),
   LIVEPEER_PAYER_SOCKET: z.string().optional(),
-  LIVEPEER_NODE_ID: z.string().optional(),
+  LIVEPEER_PAYER_PROTO_ROOT: z.string().default("./proto"),
   LIVEPEER_ROUTE_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
   LIVEPEER_ROUTE_COOLDOWN_MS: z.coerce.number().int().positive().default(30_000),
-  LIVEPEER_FACE_VALUE_WEI: z.string().default("1000000000000000"),
+  LIVEPEER_FUNDED_VALUE_WEI: z.string().optional(),
+  LIVEPEER_FACE_VALUE_WEI: z.string().optional(),
   LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("default"),
 
   // VOD storage (plan 0005). All optional; routes return 503 s3_not_configured
@@ -48,7 +49,13 @@ const envSchema = z.object({
   RTMP_RELAY_FFMPEG_BIN: z.string().default("ffmpeg"),
 });
 
-export type Config = Readonly<z.infer<typeof envSchema>>;
+type ParsedConfig = z.infer<typeof envSchema>;
+
+export type Config = Readonly<
+  Omit<ParsedConfig, "LIVEPEER_FUNDED_VALUE_WEI"> & {
+    LIVEPEER_FUNDED_VALUE_WEI: string;
+  }
+>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
@@ -58,7 +65,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .join("\n");
     throw new Error(`Invalid environment:\n${issues}`);
   }
-  return Object.freeze(parsed.data);
+  const fundedValueWei =
+    parsed.data.LIVEPEER_FUNDED_VALUE_WEI ??
+    parsed.data.LIVEPEER_FACE_VALUE_WEI ??
+    "1000000000000000";
+  return Object.freeze({
+    ...parsed.data,
+    LIVEPEER_FUNDED_VALUE_WEI: fundedValueWei,
+  });
 }
 
 export function emailEnabled(config: Config): boolean {

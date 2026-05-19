@@ -31,6 +31,11 @@ The repo contains:
   will flip the URL to a gateway-hosted listener. 33 unit tests pass;
   auth + VOD regressions clean. `live-pipeline.md` updated to describe
   the two-plan transition.
+- The daemon alignment follow-up per plan 0017: current resolver
+  `SelectMany`, current payer-daemon gRPC `CreatePayment`, vendored
+  payment protos, route quote metadata threaded through the gateway,
+  payment + wire integration tests, and a daemon-backed `e2e` smoke
+  variant with contract-level mock resolver / payer / broker services.
 
 Frontends (plans 0013–0015) and the e2e smoke (plan 0016) plus the
 integration smoke harness (plan 0012) have not been ported yet.
@@ -61,6 +66,7 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 | [0015](./docs/exec-plans/completed/0015-admin-port.md) | admin/ — Vite + Lit admin dashboard (waitlist approval + stats) | 2026-05-18 |
 | [0012](./docs/exec-plans/completed/0012-transcode-tester-port.md) | transcode-tester — Node integration smoke harness for transcode-runner + abr-runner | 2026-05-18 |
 | [0016](./docs/exec-plans/completed/0016-e2e-smoke.md) | e2e/ — compose-stack smoke (gateway + postgres + MinIO + fixture flows) | 2026-05-18 |
+| [0017](./docs/exec-plans/completed/0017-daemon-alignment-v1-3-0.md) | Align transcode-gateway with current service-registry-daemon and payment-daemon contracts | 2026-05-19 |
 
 ## Roadmap (rough; subject to change)
 

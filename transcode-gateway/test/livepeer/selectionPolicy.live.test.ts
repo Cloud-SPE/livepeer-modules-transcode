@@ -10,6 +10,12 @@ function candidate(extra: VideoRouteCandidate["extra"]): VideoRouteCandidate {
     capability: "video:live.rtmp",
     offering: "default",
     pricePerWorkUnitWei: "0",
+    workUnit: "seconds",
+    quoteId: null,
+    quoteVersion: null,
+    constraintFingerprint: null,
+    routeFingerprint: null,
+    unitsPerPrice: null,
     extra,
     constraints: null,
   };

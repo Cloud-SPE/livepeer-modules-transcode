@@ -64,10 +64,17 @@ src/
     └── auth/             # public + user + admin route handlers
 ```
 
-Plus `proto/livepeer/registry/v1/{types,resolver}.proto` — vendored
-verbatim from `livepeer-network-modules/proto-contracts/`. Loaded at
-runtime by the resolver gRPC client when `LIVEPEER_RESOLVER_SOCKET` is
-set.
+Plus vendored proto contracts under `proto/livepeer/`:
+
+- `registry/v1/{types,resolver}.proto` — resolver contract from
+  `livepeer-network-modules/proto-contracts/`
+- `payments/v1/{types,payer_daemon}.proto` — payer-daemon contract from
+  `livepeer-network-protocol/proto/`
+
+The resolver protos are loaded at runtime by the resolver gRPC client
+when `LIVEPEER_RESOLVER_SOCKET` is set. The payment protos are vendored
+now so the payer-daemon migration can switch from the legacy wrapper to
+the current gRPC contract without another contract-vendoring step.
 
 `runtime/rtmp/` (live RTMP listener) lands under plan 0006. VOD routes
 land under plan 0005.

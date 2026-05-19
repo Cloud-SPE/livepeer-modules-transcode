@@ -1,9 +1,11 @@
 # AGENTS.md
 
-This is `e2e/` — the cross-cutting end-to-end smoke. Brings up
-postgres + MinIO + the gateway in compose and drives the full
-auth + VOD + live + HLS-proxy shape. Real broker, resolver, and
-payer-daemon are NOT included.
+This is `e2e/` — the cross-cutting end-to-end smoke. It now has two
+variants:
+
+- `make smoke` — stub-path smoke (resolver / payer-daemon unset)
+- `make smoke-daemon` — daemon-backed smoke with contract-level mock
+  resolver, payer-daemon, and broker services
 
 Component-local agent map. Root [`../AGENTS.md`](../AGENTS.md) is the
 cross-cutting map.
@@ -25,6 +27,17 @@ cross-cutting map.
 Anything more (actual transcode, RTMP push, payment minting) needs
 peer services we don't own — deferred to a future plan with mocks.
 
+The daemon-backed smoke does cover the real gateway-side resolver and
+payment-daemon code paths, but it still uses mocks rather than the
+upstream daemon binaries.
+
+Daemon-backed scope:
+
+- mock resolver exposes real `SelectMany` over gRPC unix socket
+- mock payer-daemon exposes real `PayerDaemon.CreatePayment` over gRPC unix socket
+- mock broker accepts paid HTTP probe/transcode calls
+- smoke waits for asset `ready` and fetches the stored HLS master manifest
+
 ## Operating principles
 
 - **Docker-first.** `make smoke` brings up + drives + asserts in one
@@ -38,6 +51,7 @@ peer services we don't own — deferred to a future plan with mocks.
 
 - `make up`     — bring the stack up
 - `make smoke`  — full smoke (idempotent; first call brings up)
+- `make smoke-daemon` — daemon-backed smoke with mock resolver / payer / broker
 - `make logs`   — tail gateway logs
 - `make down`   — tear down + drop volumes
 - `make reset`  — fresh state

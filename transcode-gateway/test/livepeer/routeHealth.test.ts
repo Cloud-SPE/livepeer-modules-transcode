@@ -14,6 +14,12 @@ function candidate(brokerUrl: string): VideoRouteCandidate {
     capability: "video:transcode.abr",
     offering: "default",
     pricePerWorkUnitWei: "0",
+    workUnit: "seconds",
+    quoteId: null,
+    quoteVersion: null,
+    constraintFingerprint: null,
+    routeFingerprint: null,
+    unitsPerPrice: null,
     extra: null,
     constraints: null,
   };

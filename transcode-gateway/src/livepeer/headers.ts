@@ -9,6 +9,7 @@ export const HEADER = {
   REQUEST_ID:   "Livepeer-Request-Id",
   BACKOFF:      "Livepeer-Backoff",
   WORK_UNITS:   "Livepeer-Work-Units",
+  SETTLEMENT:   "Livepeer-Settlement",
   ERROR:        "Livepeer-Error",
 } as const;
 

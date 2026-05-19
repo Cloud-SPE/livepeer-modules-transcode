@@ -19,7 +19,9 @@ import {
   mergeJsonObjects,
   mergeSelectorValue,
   parseBigIntHeader,
+  parseOpaqueBytes,
   parseJsonHeader,
+  parseOptionalInteger,
   parseOpaqueJson,
   safeBigInt,
 } from "./routeSelectorHelpers.js";
@@ -44,6 +46,12 @@ export interface VideoRouteCandidate {
   capability: string;
   offering: string;
   pricePerWorkUnitWei: string;
+  workUnit: string;
+  quoteId: string | null;
+  quoteVersion: number | null;
+  constraintFingerprint: Uint8Array | null;
+  routeFingerprint: Uint8Array | null;
+  unitsPerPrice: number | null;
   extra: JsonValue | null;
   constraints: JsonValue | null;
 }
@@ -77,6 +85,10 @@ export interface VideoRouteSelector {
 }
 
 interface ResolverClient extends grpc.Client {
+  selectMany(
+    req: SelectRequest,
+    cb: (err: grpc.ServiceError | null, resp: { routes: SelectedRoute[] }) => void,
+  ): void;
   listKnown(
     req: Record<string, never>,
     cb: (err: grpc.ServiceError | null, resp: { entries: KnownEntry[] }) => void,
@@ -104,6 +116,29 @@ interface ResolveByAddressRequest {
 
 interface ResolveResult {
   nodes: ResolverNode[];
+}
+
+interface SelectRequest {
+  capability: string;
+  offering: string;
+  tier: string;
+  minWeight: number;
+}
+
+interface SelectedRoute {
+  workerUrl: string;
+  ethAddress: string;
+  capability: string;
+  offering: string;
+  pricePerWorkUnitWei: string;
+  workUnit: string;
+  extraJson?: Buffer | Uint8Array | string;
+  constraintsJson?: Buffer | Uint8Array | string;
+  quoteId?: string;
+  quoteVersion?: number | string;
+  constraintFingerprint?: Buffer | Uint8Array | string;
+  routeFingerprint?: Buffer | Uint8Array | string;
+  unitsPerPrice?: number | string;
 }
 
 interface ResolverNode {
@@ -140,12 +175,12 @@ export function createRouteSelector(cfg: VideoRouteSelectorConfig): VideoRouteSe
   });
 
   const client = newResolverClient(cfg.resolverSocket, cfg.resolverProtoRoot);
-  let cache: CachedSnapshot | null = null;
+  const selectCache = new Map<string, CachedSnapshot>();
+  let inspectCache: CachedSnapshot | null = null;
 
   return {
     async select(input) {
-      const snapshot = await loadSnapshot(client, cfg, cache);
-      cache = snapshot;
+      const snapshot = await loadSelectSnapshot(client, cfg, selectCache, input.capability, input.offering);
 
       const preferredExtra = mergeSelectorValue(
         parseJsonHeader(input.headers?.[SELECTOR_HEADER.EXTRA]),
@@ -181,8 +216,8 @@ export function createRouteSelector(cfg: VideoRouteSelectorConfig): VideoRouteSe
     },
 
     async inspect() {
-      const snapshot = await loadSnapshot(client, cfg, cache);
-      cache = snapshot;
+      const snapshot = await loadSnapshot(client, cfg, inspectCache);
+      inspectCache = snapshot;
       return snapshot.candidates;
     },
 
@@ -259,6 +294,38 @@ async function loadSnapshot(
   };
 }
 
+async function loadSelectSnapshot(
+  client: ResolverClient,
+  cfg: VideoRouteSelectorConfig,
+  cached: Map<string, CachedSnapshot>,
+  capability: string,
+  offering: string,
+): Promise<CachedSnapshot> {
+  const key = `${capability}\n${offering}`;
+  const now = Date.now();
+  const existing = cached.get(key);
+  if (existing && existing.expiresAt > now) return existing;
+
+  const routes = await new Promise<SelectedRoute[]>((resolve, reject) => {
+    client.selectMany(
+      {
+        capability,
+        offering,
+        tier: "",
+        minWeight: 0,
+      },
+      (err, resp) => (err ? reject(err) : resolve(resp.routes ?? [])),
+    );
+  });
+
+  const snapshot = {
+    expiresAt: now + cfg.resolverSnapshotTtlMs,
+    candidates: routes.map(flattenSelectedRoute),
+  };
+  cached.set(key, snapshot);
+  return snapshot;
+}
+
 function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
   const out: VideoRouteCandidate[] = [];
   for (const node of resolved.nodes ?? []) {
@@ -273,6 +340,12 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
           capability: capability.name,
           offering: offering.id,
           pricePerWorkUnitWei: offering.pricePerWorkUnitWei ?? "0",
+          workUnit: capability.workUnit ?? "seconds",
+          quoteId: null,
+          quoteVersion: null,
+          constraintFingerprint: null,
+          routeFingerprint: null,
+          unitsPerPrice: null,
           extra: mergedExtra,
           constraints: parseOpaqueJson(offering.constraintsJson),
         });
@@ -282,3 +355,20 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
   return out;
 }
 
+function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate {
+  return {
+    brokerUrl: route.workerUrl,
+    ethAddress: route.ethAddress,
+    capability: route.capability,
+    offering: route.offering,
+    pricePerWorkUnitWei: route.pricePerWorkUnitWei ?? "0",
+    workUnit: route.workUnit ?? "seconds",
+    quoteId: route.quoteId ?? null,
+    quoteVersion: parseOptionalInteger(route.quoteVersion),
+    constraintFingerprint: parseOpaqueBytes(route.constraintFingerprint),
+    routeFingerprint: parseOpaqueBytes(route.routeFingerprint),
+    unitsPerPrice: parseOptionalInteger(route.unitsPerPrice),
+    extra: parseOpaqueJson(route.extraJson),
+    constraints: parseOpaqueJson(route.constraintsJson),
+  };
+}
