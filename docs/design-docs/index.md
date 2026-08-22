@@ -25,7 +25,7 @@ Stubs (to be written as the porting roadmap surfaces them):
 | `error-taxonomy.md` | stub | HTTP error shape + `Livepeer-Error` header values used by gateway |
 
 For the porting roadmap that sequences when each component lands, see
-[`../exec-plans/active/0001-initial-port-roadmap.md`](../exec-plans/active/0001-initial-port-roadmap.md).
+[`../exec-plans/completed/0001-initial-port-roadmap.md`](../exec-plans/completed/0001-initial-port-roadmap.md).
 
 For the agent-first pattern this repo follows, see
 [`../references/openai-harness-engineer.md`](../references/openai-harness-engineer.md).

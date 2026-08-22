@@ -214,5 +214,5 @@ Shape reference: `~/git-repos/blue-claw-network/web-platform/`
 - `site/`, `portal/`, `admin/` — Lit web-component layouts and CSS
 
 Each port commit lands under the auth exec-plan (queued; see
-[`../exec-plans/active/0001-initial-port-roadmap.md`](../exec-plans/active/0001-initial-port-roadmap.md)
+[`../exec-plans/completed/0001-initial-port-roadmap.md`](../exec-plans/completed/0001-initial-port-roadmap.md)
 phase 1).

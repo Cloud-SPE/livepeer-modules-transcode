@@ -11,7 +11,7 @@ related:
   - "docs/design-docs/core-beliefs.md §4 (read-only source repos)"
   - "docs/design-docs/core-beliefs.md §9 (Blueclaw, not customer-portal)"
   - "docs/design-docs/dependencies.md (peer services + workspace deps explicitly not used)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (sequencing)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (sequencing)"
 ---
 
 # Plan 0002 — auth port (Blueclaw shape → TypeScript / Fastify)

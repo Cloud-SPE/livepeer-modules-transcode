@@ -9,7 +9,7 @@ owner: harness
 related:
   - "docs/exec-plans/completed/0006-live-pipeline-port.md (closes the deferred half)"
   - "docs/design-docs/live-pipeline.md §2 (target end state vs v0 implementation reality)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2"
 ---
 
 # Plan 0007 — gateway RTMP listener

@@ -33,10 +33,11 @@ load-bearing decisions.
 | Which peer services does this module require? | [`docs/design-docs/dependencies.md`](./docs/design-docs/dependencies.md) |
 | What frontend DOM / CSS rules apply repo-wide? | [`docs/design-docs/frontend-dom-and-css-invariants.md`](./docs/design-docs/frontend-dom-and-css-invariants.md) |
 | What's the index of all design docs? | [`docs/design-docs/index.md`](./docs/design-docs/index.md) |
-| What is the porting roadmap from `livepeer-network-modules`? | [`docs/exec-plans/active/0001-initial-port-roadmap.md`](./docs/exec-plans/active/0001-initial-port-roadmap.md) |
+| What was the porting roadmap from `livepeer-network-modules`? | [`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md) |
 | What design work has shipped? | [`docs/exec-plans/completed/`](./docs/exec-plans/completed/) |
 | What known tech debt are we tracking? | [`docs/exec-plans/tech-debt-tracker.md`](./docs/exec-plans/tech-debt-tracker.md) |
 | Reference material (papers, transcripts, external posts) | [`docs/references/`](./docs/references/) |
+| What work is ready or blocked? | Beads (`bd`) — run `bd prime`, then `bd ready` / `bd blocked` |
 
 ## Repo shape — monorepo with a single root `docs/`
 
@@ -47,7 +48,7 @@ directories. This deviates from the `livepeer-network-modules` pattern
 because the narrower scope of this module makes a single doc tree both
 sufficient and easier to keep coherent.
 
-Planned components (added as the porting roadmap progresses):
+Repository components:
 
 - `transcode-gateway/` — TypeScript / Fastify. Customer-facing HTTP +
   RTMP listener. Dispatches transcode jobs to the capability-broker.
@@ -68,10 +69,27 @@ Planned components (added as the porting roadmap progresses):
 - `admin/` — Lit zero-build admin dashboard (waitlist approval + video
   ops: route-health, resolver candidates, asset / live-stream inspection).
 
-When a component subfolder exists, navigate from this `AGENTS.md` to that
-component's own `AGENTS.md` for component-specific guidance.
+Navigate from this `AGENTS.md` to each component's own `AGENTS.md` for
+component-specific guidance.
 
 ## Doing work in this repo
+
+### Task tracking (Beads)
+
+Beads is the sole source of truth for open, blocked, deferred, and in-progress
+work. Design docs and exec-plans retain rationale and implementation detail;
+they do not duplicate the live task list.
+
+- Run `bd prime` at session start and after context compaction.
+- Find work with `bd ready`; claim it atomically with `bd update <id> --claim`.
+- Create a bead before writing code, with a concrete description and acceptance
+  criteria. Search first to avoid duplicates.
+- Record discovered work with `discovered-from:<current-id>` and add real
+  blocking dependencies with `bd dep add <dependent> <blocker>`.
+- Close completed work with a reason. Never use `bd edit` or a Markdown
+  checklist as a parallel tracker.
+- This checkout currently has no git/Dolt remote. Do not invent one or run a
+  remote sync command without explicit authorization.
 
 - **All design docs, exec-plans, and references live in root `docs/`.**
   No per-component `docs/` directories. Component-local guidance lives in

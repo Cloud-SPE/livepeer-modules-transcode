@@ -12,7 +12,7 @@ related:
   - "docs/design-docs/live-pipeline.md (live tables shipped here, populated in 0006)"
   - "docs/design-docs/architecture-overview.md (layered model)"
   - "docs/design-docs/core-beliefs.md §5–§9 (scope cuts)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (sequencing)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (sequencing)"
 ---
 
 # Plan 0003 — engine port (TS rewrite-with-rename from `video-gateway/src/engine/`)

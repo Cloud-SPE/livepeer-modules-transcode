@@ -28,7 +28,7 @@ emailed API key + portal login) and — as later plans land — the
 
 VOD upload, live RTMP, playback, and the admin video-ops routes land
 under subsequent plans
-([`../docs/exec-plans/active/0001-initial-port-roadmap.md`](../docs/exec-plans/active/0001-initial-port-roadmap.md)).
+([`../docs/exec-plans/completed/0001-initial-port-roadmap.md`](../docs/exec-plans/completed/0001-initial-port-roadmap.md)).
 
 ## Build + run
 

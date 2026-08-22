@@ -211,6 +211,6 @@ playback-id → asset or live-stream mapping; see
 
 Ported (planned) from
 `livepeer-network-modules/video-gateway/src/engine/` per
-[`../exec-plans/active/0001-initial-port-roadmap.md`](../exec-plans/active/0001-initial-port-roadmap.md)
+[`../exec-plans/completed/0001-initial-port-roadmap.md`](../exec-plans/completed/0001-initial-port-roadmap.md)
 phase 4 (routes) and phase 2 (engine). Specific source files are cited
 in commit messages when each port lands.

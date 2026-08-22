@@ -1,9 +1,6 @@
-# Tech debt tracker
+# Historical tech debt tracker
 
-Known debt in this repo. When you encounter debt, append a row. When
-you pay it down, remove the row in the same PR.
-
-| Item | Opened | Notes |
-|---|---|---|
-
-(Empty at scaffold time. Add rows as debt accumulates.)
+This scaffold-era tracker is retained as historical context. It was empty
+when the project adopted Beads on 2026-08-22. Track all new and existing
+technical debt as Beads issues so dependencies, ownership, and status live
+in the same project graph.

@@ -1,9 +1,10 @@
 ---
 plan: 0001
 title: Initial port roadmap — sequencing component ports from livepeer-network-modules + Blueclaw shape
-status: active
-phase: scaffold complete; component ports queued
+status: completed
+phase: all component ports shipped
 opened: 2026-05-18
+closed: 2026-08-22
 owner: harness
 related:
   - "docs/design-docs/core-beliefs.md (invariants every port must uphold)"
@@ -15,6 +16,10 @@ related:
 ---
 
 # Plan 0001 — initial port roadmap
+
+> Completed 2026-08-22. The scaffold and every component port listed by
+> this roadmap shipped in plans 0002–0017. Ongoing work is tracked in
+> Beads; the breaking Livepeer Modules v2 migration is epic `lmt-65a`.
 
 ## 1. Problem
 
@@ -118,9 +123,9 @@ This scaffold plan is **complete** when:
 4. ✅ `docs/exec-plans/active/`, `completed/`, `tech-debt-tracker.md`,
    `docs/product-specs/`, `docs/generated/`, `docs/references/` all
    exist.
-5. ✅ This plan is in `active/` and is the only active plan.
-6. The first downstream plan (0002 — auth port) is opened immediately
-   after merge.
+5. ✅ This plan moved to `completed/` after every downstream component
+   port shipped.
+6. ✅ The first downstream plan (0002 — auth port) opened and shipped.
 
 ## 5. Out of scope for this scaffold plan
 

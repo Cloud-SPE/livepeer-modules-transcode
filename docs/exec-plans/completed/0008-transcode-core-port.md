@@ -7,7 +7,7 @@ opened: 2026-05-18
 closed: 2026-05-18
 owner: harness
 related:
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (renumbered queue)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (renumbered queue)"
   - "docs/design-docs/transcode-pipeline.md (consumers of this library)"
   - "docs/design-docs/dependencies.md (Go ≥ 1.25.7 via .tool-versions)"
 ---

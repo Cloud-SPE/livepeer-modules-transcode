@@ -46,11 +46,12 @@ for the peer-service inventory see
 
 ## Status
 
-**Scaffold.** This repo currently contains the docs-only scaffold (root
-markdown + `docs/` tree + workspace root files) defined in
-[`docs/exec-plans/active/0001-initial-port-roadmap.md`](./docs/exec-plans/active/0001-initial-port-roadmap.md).
-No component code has been ported yet. Each component lands as its own
-numbered exec-plan as the roadmap progresses.
+**Initial port complete; Livepeer Modules v2 migration planned.** All
+gateway, runner, frontend, and smoke-harness components in the original
+roadmap have shipped. The completed roadmap is
+[`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md).
+Current work is tracked in Beads; the breaking protocol migration is
+epic `lmt-65a`.
 
 ## Setup (fresh clone)
 

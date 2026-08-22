@@ -10,7 +10,7 @@ related:
   - "docs/exec-plans/completed/0003-engine-port.md (stub workerClient/Resolver to replace)"
   - "docs/design-docs/core-beliefs.md §2 (resolver-only, no static URL fallback)"
   - "docs/design-docs/dependencies.md (capability-broker, payment-daemon, service-registry-daemon)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (sequencing)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (sequencing)"
 ---
 
 # Plan 0004 — wire layer (resolver + payer-daemon + broker HTTP client)

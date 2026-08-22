@@ -26,31 +26,32 @@ The repo contains:
   `POST /v1/live/streams` (session-open via broker), `GET /v1/live/streams/:id`,
   `POST /v1/live/streams/:id/end`, `GET /_hls/*` (strict-proxy to broker),
   `GET /v1/playback/:id` extended to serve live too. `liveSessionDirectory`,
-  `rtmpAdapter`, live half of `selectionPolicy`. The route returns the
-  broker's RTMP URL as `rtmp_push_url` (kind `broker_direct`); plan 0007
-  will flip the URL to a gateway-hosted listener. 33 unit tests pass;
-  auth + VOD regressions clean. `live-pipeline.md` updated to describe
-  the two-plan transition.
+  `rtmpAdapter`, live half of `selectionPolicy`, plus the gateway RTMP
+  listener shipped by plan 0007.
 - The daemon alignment follow-up per plan 0017: current resolver
   `SelectMany`, current payer-daemon gRPC `CreatePayment`, vendored
   payment protos, route quote metadata threaded through the gateway,
   payment + wire integration tests, and a daemon-backed `e2e` smoke
   variant with contract-level mock resolver / payer / broker services.
 
-Frontends (plans 0013–0015) and the e2e smoke (plan 0016) plus the
-integration smoke harness (plan 0012) have not been ported yet.
-Each lands under its own numbered exec-plan, sequenced by the roadmap.
+The initial component port is complete, including the three frontends,
+runner integration harness, and compose-stack end-to-end smoke. The next
+major change is the intentionally breaking migration from the v0 broker
+mode taxonomy to `paid-job/v1` for VOD and `paid-session/v1` for live.
+That work and its external release gates are tracked in Beads epic
+`lmt-65a`.
 
 ## Active plans
 
-| Plan | Title | Status |
-|---|---|---|
-| [0001](./docs/exec-plans/active/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | active (every queued plan shipped; this roadmap can move to completed at the next user signal) |
+There are no active Markdown exec-plans. Open work is tracked in Beads.
+The v2 contract/design bead (`lmt-65a.1.2`) will add an exec-plan if the
+implementation needs one after the cross-repo decisions are pinned.
 
 ## Completed plans
 
 | Plan | Title | Closed |
 |---|---|---|
+| [0001](./docs/exec-plans/completed/0001-initial-port-roadmap.md) | Initial port roadmap — sequencing component ports from `livepeer-network-modules` | 2026-08-22 |
 | [0002](./docs/exec-plans/completed/0002-auth-blueclaw-port.md) | Auth — waitlist + admin approval + emailed API key + portal login | 2026-05-18 |
 | [0003](./docs/exec-plans/completed/0003-engine-port.md) | Engine — types, interfaces, repo, service, dispatch + media.* migration | 2026-05-18 |
 | [0004](./docs/exec-plans/completed/0004-wire-layer-port.md) | Wire layer — real WorkerClient + WorkerResolver (resolver-aware, payment-aware) | 2026-05-18 |
@@ -68,10 +69,10 @@ Each lands under its own numbered exec-plan, sequenced by the roadmap.
 | [0016](./docs/exec-plans/completed/0016-e2e-smoke.md) | e2e/ — compose-stack smoke (gateway + postgres + MinIO + fixture flows) | 2026-05-18 |
 | [0017](./docs/exec-plans/completed/0017-daemon-alignment-v1-3-0.md) | Align transcode-gateway with current service-registry-daemon and payment-daemon contracts | 2026-05-19 |
 
-## Roadmap (rough; subject to change)
+## Initial port roadmap (completed)
 
-Sequencing is driven by [`docs/exec-plans/active/0001-initial-port-roadmap.md`](./docs/exec-plans/active/0001-initial-port-roadmap.md).
-Each row below becomes its own numbered exec-plan when picked up.
+The historical sequence is recorded in
+[`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md).
 
 | Phase | Outcome | Component subfolder | Status |
 |---|---|---|---|
@@ -92,11 +93,11 @@ Each row below becomes its own numbered exec-plan when picked up.
 | 13 | `admin/` admin dashboard (Vite + Lit) | `admin/` | ✅ shipped (plan 0015) |
 | 14 | End-to-end smoke (compose stack + fixture VOD + fixture live) | `e2e/` | ✅ shipped (plan 0016) |
 
-## What does not exist yet
+## Current delivery frontier
 
-Everything outside the scaffold. See the roadmap above; each row is a
-queued port from `livepeer-network-modules` (for video pipeline code) or
-from the Blueclaw shape (for auth + frontend layouts).
+Use `bd ready` for work that can start now and `bd blocked` for work
+waiting on local dependencies or the Livepeer Modules / LOC release
+gates. The v2 graph deliberately does not preserve the v0 protocol path.
 
 ## Versioning
 
@@ -106,9 +107,12 @@ extracted to a standalone repo, its versioning becomes its own concern.
 
 This module's release line is **independent of `livepeer-network-modules`**.
 The source repo continues to ship on its own cadence; copies into this
-repo are deliberate, commit-recorded decisions, not synced bumps.
+repo are deliberate, commit-recorded decisions, not synced bumps. The
+v2 retrofit is coordinated against pinned upstream commits recorded by
+Bead `lmt-65a.1.1`.
 
 ## Tracking debt
 
-[`docs/exec-plans/tech-debt-tracker.md`](./docs/exec-plans/tech-debt-tracker.md).
-Append as debt accumulates.
+Beads is the sole tracker for open work and technical debt. The former
+Markdown tracker is retained as a
+[`historical record`](./docs/exec-plans/tech-debt-tracker.md).

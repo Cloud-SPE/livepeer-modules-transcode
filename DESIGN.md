@@ -40,9 +40,10 @@ For the deep-dive sketch see
 
 - **No payment chokepoint changes.** Livepeer payment minting is delegated
   to an external `payment-daemon` over its existing gRPC-on-UDS interface.
-- **No broker forking.** The gateway speaks the existing
-  `http-reqresp@v0` / `http-stream@v0` modes; the capability-broker is an
-  external peer service.
+- **No broker forking.** The capability-broker remains an external peer
+  service. The current v0 mode adapters will be replaced, without a
+  compatibility layer, by `paid-job/v1` for VOD and `paid-session/v1`
+  for live under Beads epic `lmt-65a`.
 - **Resolver-only broker discovery.** Service-registry-daemon resolver
   socket is the **only** broker resolution path — no static
   `LIVEPEER_BROKER_URL` fallback.
@@ -72,5 +73,5 @@ The following are deferred to phase 2 (post-v0 ship) or dropped:
 
 See [`docs/design-docs/core-beliefs.md`](./docs/design-docs/core-beliefs.md)
 for the full invariant set and
-[`docs/exec-plans/active/0001-initial-port-roadmap.md`](./docs/exec-plans/active/0001-initial-port-roadmap.md)
-for the porting sequence.
+[`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md)
+for the completed porting sequence. Current work is tracked in Beads.

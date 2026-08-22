@@ -117,5 +117,5 @@ that runs in CI:
 
 A `scripts/check-frontend-invariants.mjs` lint will be added under the
 frontend port exec-plan (queued; see
-[`../exec-plans/active/0001-initial-port-roadmap.md`](../exec-plans/active/0001-initial-port-roadmap.md)
+[`../exec-plans/completed/0001-initial-port-roadmap.md`](../exec-plans/completed/0001-initial-port-roadmap.md)
 phases 11–13).

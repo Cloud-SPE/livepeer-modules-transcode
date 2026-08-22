@@ -11,7 +11,7 @@ related:
   - "docs/exec-plans/completed/0004-wire-layer-port.md (real workerClient + workerResolver behind env)"
   - "docs/design-docs/transcode-pipeline.md (VOD design)"
   - "docs/design-docs/auth-model.md (API key bearer)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (sequencing)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (sequencing)"
 ---
 
 # Plan 0005 — VOD routes port

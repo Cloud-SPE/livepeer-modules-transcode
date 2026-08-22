@@ -11,7 +11,7 @@ related:
   - "docs/exec-plans/completed/0004-wire-layer-port.md (routeSelector + workerResolver already in)"
   - "docs/design-docs/live-pipeline.md (live design — needs an update; see §6)"
   - "docs/design-docs/core-beliefs.md §8 (no live→VOD recording handoff in v0)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2 (sequencing)"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2 (sequencing)"
 ---
 
 # Plan 0006 — live pipeline port

@@ -9,7 +9,7 @@ owner: harness
 related:
   - "docs/exec-plans/completed/0008-transcode-core-port.md (depends on)"
   - "docs/exec-plans/active/0011-codecs-builder-port.md (Dockerfile FROMs codecs-builder)"
-  - "docs/exec-plans/active/0001-initial-port-roadmap.md §3.2"
+  - "docs/exec-plans/completed/0001-initial-port-roadmap.md §3.2"
 ---
 
 # Plan 0009 — transcode-runner port
