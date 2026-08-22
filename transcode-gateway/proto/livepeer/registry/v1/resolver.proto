@@ -65,6 +65,26 @@ message SelectedRoute {
   bytes  constraint_fingerprint   = 11;
   bytes  route_fingerprint        = 12;
   uint64 units_per_price          = 13;
+
+  // Signed manifest protocol tag. Consumers select their open path from
+  // this typed field; declared axes remain in extra_json for lossless
+  // forward-compatible pass-through.
+  string protocol                 = 14;
+
+  // Every currently valid delegated settlement key, newest first. The
+  // overlap is required so records signed immediately before rotation
+  // remain verifiable.
+  repeated SettlementKey settlement_keys = 15;
+
+  // Client-side funding-ceiling estimator, when the route declares one.
+  Estimator work_unit_estimator = 16;
+}
+
+message SettlementKey {
+  string public_key = 1;
+  string not_before = 2;
+  string expires_at = 3;
+  uint64 introduced_in_publication_seq = 4;
 }
 
 message ListKnownRequest {}

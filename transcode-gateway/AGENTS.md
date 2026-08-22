@@ -66,8 +66,12 @@ src/
 
 Plus vendored proto contracts under `proto/livepeer/`:
 
-- `registry/v1/{types,resolver}.proto` — resolver contract from
-  `livepeer-network-modules/proto-contracts/`
+- `registry/v1/{types,resolver}.proto` — resolver contract pinned from
+  `livepeer-network-modules/proto-contracts/`. The v2 `SelectedRoute`
+  carries the protocol tag, estimator, price denominator, quote
+  fingerprints, and overlapping delegated settlement keys; job/session
+  axes remain losslessly mirrored in `extra_json` and are parsed strictly
+  before dispatch.
 - `payments/v1/{types,payer_daemon}.proto` — payer-daemon contract from
   `livepeer-network-protocol/proto/`
 

@@ -56,19 +56,57 @@ test("wire path resolves a route, mints payment over payer-daemon gRPC, and disp
         callback(null, {
           routes: [
             {
+              worker_url: "https://legacy-broker.invalid",
+              eth_address: "0x9999999999999999999999999999999999999999",
+              capability: "video:transcode.abr",
+              offering: "default",
+              price_per_work_unit_wei: "1",
+              work_unit: "seconds",
+              protocol: "http-stream@v0",
+              extra_json: Buffer.from(JSON.stringify({ mode: "http-stream@v0" })),
+            },
+            {
               worker_url: brokerUrl,
               eth_address: "0x1234567890abcdef1234567890abcdef12345678",
               capability: "video:transcode.abr",
               offering: "default",
               price_per_work_unit_wei: "2500",
               work_unit: "seconds",
-              extra_json: Buffer.from(JSON.stringify({ zone: "test" })),
+              protocol: "paid-job/v1",
+              extra_json: Buffer.from(
+                JSON.stringify({
+                  protocol: "paid-job/v1",
+                  job: { transports: ["stream", "unary"] },
+                  zone: "test",
+                }),
+              ),
               constraints_json: Buffer.from(JSON.stringify({ region: "us" })),
               quote_id: "quote-123",
               quote_version: 7,
               constraint_fingerprint: Buffer.from([1, 2, 3]),
               route_fingerprint: Buffer.from([4, 5, 6]),
               units_per_price: 1,
+              settlement_keys: [
+                {
+                  public_key: `0x04${"11".repeat(64)}`,
+                  not_before: "2026-08-22T00:00:00Z",
+                  expires_at: "2026-08-24T00:00:00Z",
+                  introduced_in_publication_seq: 7,
+                },
+                {
+                  public_key: `0x04${"22".repeat(64)}`,
+                  not_before: "2026-08-21T00:00:00Z",
+                  expires_at: "2026-08-23T00:00:00Z",
+                  introduced_in_publication_seq: 6,
+                },
+              ],
+              work_unit_estimator: {
+                id: "abr-output-frame-megapixels/v1",
+                rounding: "ceiling",
+                exactness: "exact-or-reject",
+                package: "@livepeer/abr-work-units",
+                fixtures: "fixtures/abr-work-units/v1",
+              },
             },
           ],
         });
@@ -122,6 +160,14 @@ test("wire path resolves a route, mints payment over payer-daemon gRPC, and disp
       tier: "standard",
     });
     assert.ok(route, "expected resolver to return a route");
+    assert.equal(route.workerUrl, brokerUrl, "unsupported protocol must be rejected before minting");
+    assert.equal(route.protocol, "paid-job/v1");
+    assert.deepEqual(route.job?.transports, ["stream", "unary"]);
+    assert.equal(route.session, null);
+    assert.equal(route.workUnitEstimator?.id, "abr-output-frame-megapixels/v1");
+    assert.equal(route.settlementKeys.length, 2, "rotation overlap must survive projection");
+    assert.equal(route.settlementKeys[0]?.introducedInPublicationSeq, 7);
+    assert.equal(route.settlementKeys[1]?.introducedInPublicationSeq, 6);
 
     const resp = await workerClient.callWorker<{ job_id: string }, { ok: boolean }>({
       route,

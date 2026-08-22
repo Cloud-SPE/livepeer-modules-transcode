@@ -8,6 +8,7 @@ import {
   type VideoRouteSelector,
   type VideoRouteSelectorConfig,
 } from "./routeSelector.js";
+import { routeRequirementForCapability } from "./capabilityMap.js";
 
 export interface ResolverWorkerResolverConfig extends VideoRouteSelectorConfig {
   defaultWorkUnit?: string;
@@ -30,6 +31,7 @@ export function createResolverWorkerResolver(
       const candidates = await selector.select({
         capability: input.capability,
         offering: input.offering,
+        protocolRequirement: routeRequirementForCapability(input.capability),
       });
       const first = candidates[0];
       if (!first) return null;
@@ -41,6 +43,11 @@ export function createResolverWorkerResolver(
         offering: first.offering,
         pricePerWorkUnitWei: first.pricePerWorkUnitWei,
         workUnit: first.workUnit || defaultWorkUnit,
+        protocol: first.protocol,
+        job: first.job,
+        session: first.session,
+        workUnitEstimator: first.workUnitEstimator,
+        settlementKeys: first.settlementKeys,
         ...(first.unitsPerPrice !== null ? { unitsPerPrice: first.unitsPerPrice } : {}),
         ...(first.quoteId !== null ? { quoteId: first.quoteId } : {}),
         ...(first.quoteVersion !== null ? { quoteVersion: first.quoteVersion } : {}),

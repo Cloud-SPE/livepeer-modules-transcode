@@ -7,6 +7,13 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
 import type { IncomingHttpHeaders } from "node:http";
+import type {
+  LivepeerProtocol,
+  PaidJobAxes,
+  PaidSessionAxes,
+  SettlementKey,
+  WorkUnitEstimator,
+} from "../engine/types/index.js";
 import {
   RouteHealthTracker,
   type RouteHealthMetrics,
@@ -25,6 +32,13 @@ import {
   parseOpaqueJson,
   safeBigInt,
 } from "./routeSelectorHelpers.js";
+import {
+  parseRouteProtocolDeclaration,
+  parseSettlementKeys,
+  parseWorkUnitEstimator,
+  routeSatisfiesRequirement,
+  type RouteProtocolRequirement,
+} from "./routeProtocol.js";
 
 const RESOLVER_PROTO_FILES = [
   "livepeer/registry/v1/types.proto",
@@ -47,6 +61,11 @@ export interface VideoRouteCandidate {
   offering: string;
   pricePerWorkUnitWei: string;
   workUnit: string;
+  protocol: LivepeerProtocol;
+  job: PaidJobAxes | null;
+  session: PaidSessionAxes | null;
+  workUnitEstimator: WorkUnitEstimator | null;
+  settlementKeys: SettlementKey[];
   quoteId: string | null;
   quoteVersion: number | null;
   constraintFingerprint: Uint8Array | null;
@@ -72,6 +91,7 @@ export interface VideoRouteSelector {
     preferredExtra?: JsonValue | null;
     requiredConstraints?: JsonValue | null;
     maxPricePerUnitWei?: bigint | null;
+    protocolRequirement?: RouteProtocolRequirement;
     supportFilter?: (candidate: VideoRouteCandidate) => boolean;
   }): Promise<VideoRouteCandidate[]>;
   inspect(): Promise<VideoRouteCandidate[]>;
@@ -139,6 +159,9 @@ interface SelectedRoute {
   constraintFingerprint?: Buffer | Uint8Array | string;
   routeFingerprint?: Buffer | Uint8Array | string;
   unitsPerPrice?: number | string;
+  protocol?: string;
+  settlementKeys?: unknown[];
+  workUnitEstimator?: unknown;
 }
 
 interface ResolverNode {
@@ -152,6 +175,7 @@ interface ResolverNode {
 interface ResolverCapability {
   name: string;
   workUnit: string;
+  workUnitEstimator?: unknown;
   extraJson?: Buffer | Uint8Array | string;
   offerings: ResolverOffering[];
 }
@@ -198,6 +222,12 @@ export function createRouteSelector(cfg: VideoRouteSelectorConfig): VideoRouteSe
         if (suppressed.has(candidate.brokerUrl)) return false;
         if (candidate.capability !== input.capability) return false;
         if (candidate.offering !== input.offering) return false;
+        if (
+          input.protocolRequirement &&
+          !routeSatisfiesRequirement(candidate, input.protocolRequirement)
+        ) {
+          return false;
+        }
         if (
           maxPricePerUnitWei !== null &&
           safeBigInt(candidate.pricePerWorkUnitWei) > maxPricePerUnitWei
@@ -320,7 +350,10 @@ async function loadSelectSnapshot(
 
   const snapshot = {
     expiresAt: now + cfg.resolverSnapshotTtlMs,
-    candidates: routes.map(flattenSelectedRoute),
+    candidates: routes.flatMap((route) => {
+      const candidate = flattenSelectedRoute(route);
+      return candidate ? [candidate] : [];
+    }),
   };
   cached.set(key, snapshot);
   return snapshot;
@@ -333,6 +366,11 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
     const nodeExtra = parseOpaqueJson(node.extraJson);
     for (const capability of node.capabilities ?? []) {
       const mergedExtra = mergeJsonObjects(nodeExtra, parseOpaqueJson(capability.extraJson));
+      const protocol = protocolFromExtra(mergedExtra);
+      const declaration = parseRouteProtocolDeclaration(protocol, mergedExtra);
+      if (!declaration) continue;
+      const estimator = parseOptionalEstimator(capability.workUnitEstimator);
+      if (estimator === false) continue;
       for (const offering of capability.offerings ?? []) {
         out.push({
           brokerUrl: node.url,
@@ -341,6 +379,13 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
           offering: offering.id,
           pricePerWorkUnitWei: offering.pricePerWorkUnitWei ?? "0",
           workUnit: capability.workUnit ?? "seconds",
+          protocol: declaration.protocol,
+          job: declaration.job,
+          session: declaration.session,
+          workUnitEstimator: estimator,
+          // ResolveByAddress is an inspection surface; delegated keys are
+          // available on the dispatch-safe Select/SelectMany result.
+          settlementKeys: [],
           quoteId: null,
           quoteVersion: null,
           constraintFingerprint: null,
@@ -355,7 +400,14 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
   return out;
 }
 
-function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate {
+function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate | null {
+  const extra = parseOpaqueJson(route.extraJson);
+  const declaration = parseRouteProtocolDeclaration(route.protocol ?? "", extra);
+  if (!declaration) return null;
+  const estimator = parseOptionalEstimator(route.workUnitEstimator);
+  if (estimator === false) return null;
+  const settlementKeys = parseSettlementKeys(route.settlementKeys ?? []);
+  if (!settlementKeys || settlementKeys.length === 0) return null;
   return {
     brokerUrl: route.workerUrl,
     ethAddress: route.ethAddress,
@@ -363,12 +415,28 @@ function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate {
     offering: route.offering,
     pricePerWorkUnitWei: route.pricePerWorkUnitWei ?? "0",
     workUnit: route.workUnit ?? "seconds",
+    protocol: declaration.protocol,
+    job: declaration.job,
+    session: declaration.session,
+    workUnitEstimator: estimator,
+    settlementKeys,
     quoteId: route.quoteId ?? null,
     quoteVersion: parseOptionalInteger(route.quoteVersion),
     constraintFingerprint: parseOpaqueBytes(route.constraintFingerprint),
     routeFingerprint: parseOpaqueBytes(route.routeFingerprint),
     unitsPerPrice: parseOptionalInteger(route.unitsPerPrice),
-    extra: parseOpaqueJson(route.extraJson),
+    extra,
     constraints: parseOpaqueJson(route.constraintsJson),
   };
+}
+
+function protocolFromExtra(extra: JsonValue | null): string {
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return "";
+  return typeof extra.protocol === "string" ? extra.protocol : "";
+}
+
+function parseOptionalEstimator(value: unknown): WorkUnitEstimator | null | false {
+  if (value === null || value === undefined) return null;
+  const parsed = parseWorkUnitEstimator(value);
+  return parsed ?? false;
 }

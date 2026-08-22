@@ -9,7 +9,9 @@ emailed API key + portal login) and — as later plans land — the
 
 ## Status
 
-**Plan 0002 — auth port.** The component currently ships:
+**Initial port complete; Modules v2 migration in progress.** The component
+ships the auth, VOD, live, playback, resolver, payment, and operator surfaces
+from completed plans 0002–0017. Representative customer/auth routes include:
 
 - `POST   /api/v1/health`
 - `POST   /api/v1/waitlist` — public waitlist signup
@@ -26,9 +28,16 @@ emailed API key + portal login) and — as later plans land — the
 - `DELETE /api/v1/admin/waitlist/:id` — delete
 - `GET    /api/v1/admin/stats` — dashboard stats
 
-VOD upload, live RTMP, playback, and the admin video-ops routes land
-under subsequent plans
-([`../docs/exec-plans/completed/0001-initial-port-roadmap.md`](../docs/exec-plans/completed/0001-initial-port-roadmap.md)).
+The full historical component sequence is in the
+[`completed initial-port roadmap`](../docs/exec-plans/completed/0001-initial-port-roadmap.md).
+
+The resolver boundary is pinned to the breaking Modules v2 contract described
+in [`../docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md`](../docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md).
+Selected routes preserve `paid-job/v1` / `paid-session/v1` axes, work-unit
+estimators, quote fingerprints, price denominators, and overlapping delegated
+settlement keys. Unsupported protocols, ABR transports, and live descriptor
+schemas are rejected during route selection, before payment minting or session
+open.
 
 ## Build + run
 

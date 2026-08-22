@@ -3,7 +3,7 @@
 // livepeer/* files.
 
 import { HEADER, SPEC_VERSION } from "./headers.js";
-import { MODE } from "./capabilityMap.js";
+import { MODE, routeRequirementForCapability } from "./capabilityMap.js";
 import type { VideoRouteSelector } from "./routeSelector.js";
 import { newRequestId } from "./requestId.js";
 import type { DerivedSelectionHints } from "./selectionPolicy.js";
@@ -31,6 +31,7 @@ export async function openRtmpSession(input: OpenRtmpSessionInput): Promise<Open
   const routes = await input.routeSelector.select({
     capability: "video:live.rtmp",
     offering: input.offering,
+    protocolRequirement: routeRequirementForCapability("video:live.rtmp"),
     ...(input.requestHeaders !== undefined ? { headers: input.requestHeaders } : {}),
     ...(input.selectionHints !== undefined
       ? {
