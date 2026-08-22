@@ -108,8 +108,9 @@ extracted to a standalone repo, its versioning becomes its own concern.
 This module's release line is **independent of `livepeer-network-modules`**.
 The source repo continues to ship on its own cadence; copies into this
 repo are deliberate, commit-recorded decisions, not synced bumps. The
-v2 retrofit is coordinated against pinned upstream commits recorded by
-Bead `lmt-65a.1.1`.
+v2 retrofit is coordinated against the
+[`2026-08-22 contract baseline`](./docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md)
+recorded by Bead `lmt-65a.1.1`.
 
 ## Tracking debt
 
