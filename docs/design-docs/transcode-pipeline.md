@@ -56,6 +56,12 @@ Rendition rows remain product outputs; they are not independent paid jobs.
 The gateway rejects any route that does not advertise all required axes
 before LOC is asked to fund it.
 
+The runner-owned validation types and canonical cross-repo fixtures live in
+[`abr-runner/contract_v2.go`](../../abr-runner/contract_v2.go) and
+[`abr-runner/testdata/contracts/v2/`](../../abr-runner/testdata/contracts/v2/).
+They define strict request parsing, progress/keepalive SSE, success/failure
+terminal results, and workload replay independently of broker behavior.
+
 ## Processing flow
 
 1. The upload completes in object storage and the gateway probes source
