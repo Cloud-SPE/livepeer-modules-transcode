@@ -280,6 +280,10 @@ func ValidateABRTerminalErrorV2(result ABRTerminalErrorV2) error {
 	if result.Error.Code == "" || result.Error.Message == "" {
 		return errors.New("terminal error code and redacted message are required")
 	}
+	message := strings.ToLower(result.Error.Message)
+	if len(result.Error.Message) > 512 || strings.Contains(message, "http://") || strings.Contains(message, "https://") || strings.Contains(message, "sig=") {
+		return errors.New("terminal error message is not safely redacted")
+	}
 	if result.Usage.Unit != ABRWorkUnitV2 || result.Usage.Units != 0 {
 		return errors.New("failed terminal work units must be zero")
 	}

@@ -64,6 +64,13 @@ zero work units. No terminal `202` may hide continuing background work: the
 SSE HTTP response starts promptly with status 200 and remains open through one
 `result` or `error` event.
 
+The file-backed journal implementation is `workload_store_v2.go`. It uses
+atomic rename plus file and directory fsync, stores bounded safe SSE history,
+and keeps prepared/delivered checkpoints separate. It deliberately persists
+only request hashes and non-secret artifact metadata—the identical replayed
+request supplies fresh in-memory access to its credential URLs. Runtime images
+provide `/var/lib/abr-runner` as the persistent volume boundary.
+
 ### Usage
 
 Successful delivery reports exactly:

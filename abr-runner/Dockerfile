@@ -222,9 +222,10 @@ RUN ldconfig
 COPY --from=go-builder /bin/abr-runner /usr/local/bin/abr-runner
 
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode
-RUN mkdir -p /tmp/abr && chown transcode:transcode /tmp/abr
+RUN mkdir -p /tmp/abr /var/lib/abr-runner && chown transcode:transcode /tmp/abr /var/lib/abr-runner
 
 USER transcode
+VOLUME ["/var/lib/abr-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/abr-runner", "-healthcheck"] || exit 1
@@ -269,9 +270,10 @@ COPY --from=go-builder /bin/abr-runner /usr/local/bin/abr-runner
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode && \
     groupadd -r render 2>/dev/null || true && \
     usermod -aG video,render transcode
-RUN mkdir -p /tmp/abr && chown transcode:transcode /tmp/abr
+RUN mkdir -p /tmp/abr /var/lib/abr-runner && chown transcode:transcode /tmp/abr /var/lib/abr-runner
 
 USER transcode
+VOLUME ["/var/lib/abr-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/abr-runner", "-healthcheck"] || exit 1
@@ -304,9 +306,10 @@ COPY --from=go-builder /bin/abr-runner /usr/local/bin/abr-runner
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode && \
     groupadd -r render 2>/dev/null || true && \
     usermod -aG video,render transcode
-RUN mkdir -p /tmp/abr && chown transcode:transcode /tmp/abr
+RUN mkdir -p /tmp/abr /var/lib/abr-runner && chown transcode:transcode /tmp/abr /var/lib/abr-runner
 
 USER transcode
+VOLUME ["/var/lib/abr-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/abr-runner", "-healthcheck"] || exit 1
