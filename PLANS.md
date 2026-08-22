@@ -43,9 +43,12 @@ That work and its external release gates are tracked in Beads epic
 
 ## Active plans
 
-There are no active Markdown exec-plans. Open work is tracked in Beads.
-The v2 contract/design bead (`lmt-65a.1.2`) will add an exec-plan if the
-implementation needs one after the cross-repo decisions are pinned.
+| Plan | Title | Tracker |
+|---|---|---|
+| [0018](./docs/exec-plans/active/0018-livepeer-modules-v2-migration.md) | Breaking migration to `paid-job/v1`, `paid-session/v1`, and LOC | Beads epic `lmt-65a` |
+
+The exec-plan records architecture and release criteria. Beads remains the
+sole live status/dependency tracker.
 
 ## Completed plans
 

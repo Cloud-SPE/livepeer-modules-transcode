@@ -14,7 +14,7 @@ A single deployable product:
 
 - A TypeScript / Fastify gateway (`transcode-gateway/`) that exposes a
   customer-facing HTTP + RTMP surface. Customers can submit VOD
-  encoding jobs (tus upload → ABR rendition plan → HLS manifest +
+  encoding jobs (presigned upload → one paid ABR exchange → HLS manifest +
   playback URL) and start live streams (RTMP ingest → broker live
   session → LL-HLS strict-proxy).
 - Two Go workload runners (`transcode-runner/` for single-rendition,
@@ -32,8 +32,8 @@ A single deployable product:
 
 - A capability broker. Transcode jobs are dispatched to an external
   `capability-broker` service that runs the actual encodes.
-- A payment system. Livepeer payment minting is delegated to an external
-  `payment-daemon`.
+- A payment system. Network funding and settlement are delegated to the
+  Livepeer Open Clearinghouse (LOC); the gateway never acts as a payer.
 - A discovery layer. Broker resolution goes through an external
   `service-registry-daemon` resolver socket.
 - A CDN. Operators front the gateway with their CDN of choice for
@@ -46,12 +46,13 @@ for the peer-service inventory see
 
 ## Status
 
-**Initial port complete; Livepeer Modules v2 migration planned.** All
+**Initial port complete; breaking Livepeer Modules v2 migration active.** All
 gateway, runner, frontend, and smoke-harness components in the original
 roadmap have shipped. The completed roadmap is
 [`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md).
-Current work is tracked in Beads; the breaking protocol migration is
-epic `lmt-65a`.
+Current work is tracked in Beads epic `lmt-65a` and explained by
+[`plan 0018`](./docs/exec-plans/active/0018-livepeer-modules-v2-migration.md).
+The present branch is not a v2-compatible release until that plan completes.
 
 ## Setup (fresh clone)
 

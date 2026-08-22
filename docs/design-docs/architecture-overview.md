@@ -1,149 +1,87 @@
 # Architecture overview
 
-The at-a-glance sketch. Deep dives live in their own design-docs
-(`transcode-pipeline.md`, `live-pipeline.md`, `auth-model.md`,
-`dependencies.md`).
+This is the target architecture for the breaking Livepeer Modules v2
+cutover. The current gateway still contains v0 mode adapters and a direct
+payer-daemon client while plan 0018 is active; those are migration inputs,
+not supported compatibility paths.
 
 ## Shape in one sentence
 
-A TypeScript Fastify gateway that owns customer auth + the `media.*`
-schema, dispatches transcode work to an external capability-broker over
-HTTP request-response and HTTP streaming modes, terminates RTMP locally
-for live ingest, and strict-proxies LL-HLS playback back from the broker
-— with Go workload runners performing FFmpeg work behind the broker.
+A TypeScript Fastify gateway owns customer auth, media state, uploads, RTMP
+relay, and playback; it resolves protocol-compatible broker routes and asks
+LOC to execute one `paid-job/v1` exchange for each VOD ladder or one
+`paid-session/v1` session for each live stream; Go runners perform FFmpeg
+work behind the broker.
 
-## Top-level component diagram
-
-Three component groups in this repo, three external peer services.
+## Component boundary
 
 ```mermaid
-flowchart TD
-    subgraph customer["Customer-facing surfaces"]
-        SITE["site/<br/>(Lit, waitlist signup)"]
-        PORTAL["portal/<br/>(Lit, API key + video UIs)"]
-        ADMIN["admin/<br/>(Lit, waitlist approval + video ops)"]
-        APIK["API key holder<br/>(curl / SDK / RTMP push)"]
-    end
-
-    subgraph repo["This repo: livepeer-modules-transcode"]
-        direction TB
-        GW["transcode-gateway/<br/>Fastify + Postgres + RTMP listener<br/>+ auth + media.* schema"]
-        RUN1["transcode-runner/<br/>(Go binary, behind broker)"]
-        RUN2["abr-runner/<br/>(Go binary, behind broker)"]
-        CORE["transcode-core/<br/>(Go shared library)"]
-        TESTER["transcode-tester/<br/>(Node smoke harness)"]
-    end
-
-    subgraph external["External peer services (assumed running)"]
-        direction TB
-        BROKER["capability-broker"]
-        RESOLVER["service-registry-daemon<br/>(resolver socket)"]
-        PAYDAEMON["payment-daemon<br/>(sender, gRPC over UDS)"]
-        RESEND["Resend<br/>(transactional email,<br/>env-gated)"]
-    end
-
-    SITE -->|"POST /api/v1/waitlist"| GW
-    PORTAL -->|"POST /api/v1/user/login<br/>(API key → session)"| GW
-    ADMIN -->|"admin actions<br/>(ADMIN_TOKEN bearer)"| GW
-    APIK -->|"/v1/uploads<br/>/v1/vod/*<br/>/v1/live/streams<br/>/_hls/*<br/>RTMP push"| GW
-
-    GW -->|"resolve brokers"| RESOLVER
-    GW -->|"mint payment header"| PAYDAEMON
-    GW -->|"paid HTTP req/resp<br/>+ paid HTTP stream<br/>(VOD transcode + live session-open)"| BROKER
-    GW -->|"verify email +<br/>send API key"| RESEND
-    BROKER -->|"dispatch transcode<br/>(HTTP req/resp)"| RUN1
-    BROKER -->|"dispatch ABR transcode<br/>(HTTP stream)"| RUN2
-    RUN1 -.uses.-> CORE
-    RUN2 -.uses.-> CORE
-    TESTER -.smoke.-> GW
+flowchart LR
+    C[Customer / portal / admin] --> G[transcode-gateway]
+    G -->|resolve SelectedRoute| R[service-registry-daemon]
+    G -->|open, recover, refill, close| L[LOC SDK/API]
+    L -->|funded protocol requests| B[capability-broker]
+    B -->|ABR request + SSE result| A[abr-runner]
+    B -->|live session + credentials| V[live runner]
+    C -->|RTMP public key| G
+    G -->|RTMP relay with private runner key| B
+    G -->|email| E[Resend]
 ```
 
-## Layered model inside the gateway
+LOC is the only payer and settlement boundary visible to the gateway. Any
+payment daemon is an LOC deployment concern, not a direct gateway peer.
+The gateway remains responsible for business state and for correlating it
+durably with LOC and broker identifiers.
 
-The TS gateway follows a layered model. Cross-cutting concerns (auth,
-broker, telemetry) enter through a single explicit interface — the
-`engine/interfaces/` directory.
+## Gateway layers
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  routes/      Fastify HTTP handlers + tus + RTMP listener wiring │
-├─────────────────────────────────────────────────────────────────┤
-│  service/     ABR execution + ABR selector (no live-recording)   │
-│  engine/      service/, repo/, dispatch/, interfaces/, config/   │
-│               types/                                              │
-├─────────────────────────────────────────────────────────────────┤
-│  runtime/     pure-TS RTMP listener (customer-facing termination) │
-│  livepeer/    wire layer: capabilityMap, headers, payment,        │
-│               resolver-aware route selection, route health        │
-├─────────────────────────────────────────────────────────────────┤
-│  auth/        waitlist + sessions + API keys + admin (Blueclaw)   │
-├─────────────────────────────────────────────────────────────────┤
-│  repo/        drizzle-backed media.* + auth.* repos               │
-│  db/          pg pool + schema definitions                        │
-└─────────────────────────────────────────────────────────────────┘
-            ↑ engine/interfaces/ — pluggable seam ↑
-   (storage / worker / logger / workerResolver / streamKeyHasher)
-```
+| Layer | Responsibility |
+|---|---|
+| Routes/runtime | Customer HTTP API, RTMP listener/relay, LL-HLS proxy |
+| Services/engine | ABR planning, media lifecycle, manifest and playback |
+| Livepeer wire | v2 route validation, request construction, LOC adapter |
+| Auth | Waitlist, API keys, portal sessions, admin access |
+| Repositories | `media.*`, `auth.*`, and durable v2 correlations/secrets |
 
-## Request flows
+Cross-cutting services enter through explicit interfaces so LOC, resolver,
+storage, logging, and tests remain replaceable at their boundaries.
 
-### VOD batch (happy path)
+## VOD flow
 
-1. Customer: `POST /v1/uploads` → gateway creates `media.uploads` row,
-   returns tus URL.
-2. Customer: tus PATCHes the source bytes; gateway writes to S3-compat
-   storage via `engine/interfaces/storageProvider`.
-3. Customer: `POST /v1/vod/submit` → gateway creates `media.assets`,
-   plans ABR ladder, creates one `media.encoding_jobs` row per
-   rendition.
-4. Gateway: for each job, resolves a broker via
-   `service-registry-daemon`, mints a payment header via
-   `payment-daemon`, and dispatches the rendition via the
-   `http-reqresp@v0` or `http-stream@v0` mode adapter.
-5. Broker forwards to a runner (`transcode-runner` or `abr-runner`).
-6. Runner returns rendition output (or progress stream).
-7. Gateway records `media.renditions` completion; when all done, builds
-   HLS manifest and flips asset to `ready`.
-8. Customer polls `GET /v1/vod/:asset_id`, then resolves
-   `GET /v1/playback/:id` for the HLS URL.
+1. The customer uploads a source and submits an asset.
+2. The gateway probes it, selects an ABR ladder, and resolves a route whose
+   protocol is `paid-job/v1`, transport includes `stream`, descriptor is
+   `video-transcode-abr/v2`, and work unit is `video-frame-megapixel`.
+3. The gateway persists the selected route/quote, request ID, request hash,
+   and conservative funded ceiling before calling LOC.
+4. LOC opens one idempotent job. The broker dispatches one ABR runner and
+   returns progress/keepalive SSE followed by one terminal result.
+5. The terminal response reports signed work units and all rendition
+   outputs. LOC settles once; the gateway records the result and publishes
+   playback state.
+6. After an ambiguous timeout, the gateway retries/reconciles the same
+   operation and never creates a replacement job.
 
-### Live RTMP (happy path)
+## Live flow
 
-1. Customer: `POST /v1/live/streams` → gateway creates
-   `media.live_streams` (stream-key hash), returns RTMP push URL +
-   LL-HLS playback URL.
-2. Customer pushes RTMP to the gateway's pure-TS listener.
-3. Listener parses the stream key, resolves a broker, mints a payment
-   header, and opens a session-open against the broker.
-4. Broker runs the live transcode pipeline (its mode driver — not this
-   repo) and produces LL-HLS at a broker-side URL.
-5. Customer playback: `GET /_hls/*` → gateway strict-proxies (no
-   rewrites, no cache headers) to the broker-side URL.
-6. Stream ends: customer disconnects RTMP OR explicitly
-   `POST /v1/live/streams/:id/end`. Gateway calls broker close-session.
+1. The gateway persists a pending stream and public customer stream key.
+2. It resolves a `paid-session/v1` route for `rtmp-hls/v1` and asks LOC to
+   open a finite, funded session with external attachment.
+3. Through the `stream-key-issue` grant, the gateway obtains a distinct
+   private runner key and stores the session credentials envelope-encrypted.
+4. The customer publishes to the gateway. The gateway relays RTMP to the
+   runner-owned ingest URL using only the private key.
+5. LOC handles bounded refills and close/settlement. Control-WebSocket usage,
+   balance, and ended frames may accelerate reaction; HTTP is authoritative.
+6. Runner-reported signed `output_seconds` is billable. Wall clock and HLS
+   observations are anomaly checks, not settlement inputs.
 
-### Auth (happy path)
+## Release boundary
 
-1. Visitor: `POST /api/v1/waitlist` from `site/` → gateway stores row +
-   sends verification email via Resend.
-2. Visitor clicks email link → `GET /api/v1/waitlist/verify?token=…` →
-   marks row email-verified.
-3. Operator: in `admin/`, lists pending waitlist, clicks approve →
-   `POST /api/v1/admin/waitlist/approve` (with optional email-API-key
-   toggle).
-4. User receives API key email → opens `portal/`, enters API key →
-   `POST /api/v1/user/login` returns session token.
-5. Session bearer gates `/api/v1/user/*`; API key gates the
-   `/v1/...` product API.
+The v2 gateway, LOC, broker, registry manifests, and runners are deployed as
+one coordinated compatibility set. Unsupported route axes fail before LOC
+opens work. The old and new protocols do not coexist in one release.
 
-## What's deliberately not in this diagram
-
-- A pricing / quote service (deferred to phase 2)
-- A webhook delivery worker (deferred)
-- A `projects` table or `/v1/projects` route group (dropped — scoping
-  is by `api_key_id`)
-- A live → VOD recording bridge (deferred)
-- A static `LIVEPEER_BROKER_URL` env (rejected — resolver only)
-
-See [core-beliefs.md](./core-beliefs.md) §5–§9 and §2 for the
-rationales.
+See [plan 0018](../exec-plans/active/0018-livepeer-modules-v2-migration.md),
+[the VOD design](./transcode-pipeline.md), and
+[the live design](./live-pipeline.md).

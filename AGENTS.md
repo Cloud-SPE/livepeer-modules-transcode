@@ -34,6 +34,7 @@ load-bearing decisions.
 | What frontend DOM / CSS rules apply repo-wide? | [`docs/design-docs/frontend-dom-and-css-invariants.md`](./docs/design-docs/frontend-dom-and-css-invariants.md) |
 | What's the index of all design docs? | [`docs/design-docs/index.md`](./docs/design-docs/index.md) |
 | What was the porting roadmap from `livepeer-network-modules`? | [`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md) |
+| What is the breaking Modules v2 migration plan? | [`docs/exec-plans/active/0018-livepeer-modules-v2-migration.md`](./docs/exec-plans/active/0018-livepeer-modules-v2-migration.md) |
 | Which Modules v2 and LOC revisions are approved for this migration? | [`docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md`](./docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md) |
 | What design work has shipped? | [`docs/exec-plans/completed/`](./docs/exec-plans/completed/) |
 | What known tech debt are we tracking? | [`docs/exec-plans/tech-debt-tracker.md`](./docs/exec-plans/tech-debt-tracker.md) |

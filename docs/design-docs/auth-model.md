@@ -4,7 +4,7 @@ How `livepeer-modules-transcode` authenticates waitlist signups, admin
 operators, portal users, and product-API callers. The shape is modeled
 directly on [Blue Claw
 Network](https://github.com/blue-claw-network/web-platform)'s
-onboarding flow — see [core-beliefs.md](./core-beliefs.md) §4 and §9 for
+onboarding flow — see [core-beliefs.md](./core-beliefs.md) §4 and §12 for
 the rationale.
 
 > **Blueclaw is a shape reference, not a code source.** Blueclaw's
@@ -26,7 +26,7 @@ Three actor types and three credential types:
 
 Sessions and API keys are owned by the same `users` row. A user with
 one API key is one logical customer. Multi-tenant projects do not exist
-in v0 (see [core-beliefs.md](./core-beliefs.md) §6).
+(see [core-beliefs.md](./core-beliefs.md) §9).
 
 The API-key prefix `tc_` distinguishes this module's keys from Blueclaw's
 `bc_` keys at a glance. The prefix is not load-bearing; it's a debugging
@@ -64,7 +64,7 @@ convenience.
 | `GET`    | `/api/v1/admin/stats`                 | Dashboard statistics |
 
 The admin surface **also** carries video ops endpoints — see
-[architecture-overview.md](./architecture-overview.md) and the F7
+[architecture-overview.md](./architecture-overview.md) and the F8
 requirement in [requirements.md](./requirements.md).
 
 ### Product API (API key bearer)
@@ -158,9 +158,10 @@ rotate), playground, usage. This module's portal **adds**:
 
 - Asset library: list / inspect / soft-delete VOD assets
 - Live streams: list / inspect / end live sessions, copy RTMP push URL
-- Upload widget: tus-driven VOD upload
+- Upload widget: presigned object-store VOD upload
 
-It **omits**: playground (no inference here), usage (no billing in v0).
+It **omits** a product pricing/invoice UI. LOC network settlement state is
+operational data, not a customer balance.
 
 ### Admin video ops (extends Blueclaw's admin)
 
@@ -173,7 +174,22 @@ module's admin **adds**:
 - Asset and live-stream inspection (operator-side view of any user's
   content)
 
-It **omits**: customer / topup management (no billing in v0).
+It **omits** customer wallet/top-up management. Admin views may show redacted
+LOC operation and broker correlation IDs for diagnosis.
+
+## LOC identity boundary
+
+The gateway API key authorizes product actions; it is not a Livepeer payment
+credential. For a paid operation, the gateway records the owning
+`api_key_id` beside a non-secret LOC operation/session identifier. LOC owns
+payer keys, funding accounts, signing, claims, and settlement. Neither LOC
+credentials nor runner `session_params` appear in `auth.*`, API-key responses,
+portal sessions, logs, or customer status payloads.
+
+This separation lets product access be revoked independently of payment
+reconciliation. Revoking a customer API key prevents new work but does not
+discard an in-flight LOC operation; the background reconciler still drives it
+to a terminal state.
 
 ## Email integration
 
@@ -189,11 +205,10 @@ templates:
 If `RESEND_API_KEY` is unset, the gateway logs the email body instead
 of sending. This matches Blueclaw's local-dev fallback.
 
-## What's NOT in v0
+## Deliberate auth exclusions
 
 - Self-service signup → instant approval (operator always approves)
-- Stripe / paid plans / quotas (no billing — see
-  [core-beliefs.md](./core-beliefs.md) §5)
+- Stripe / paid plans / customer quotas (LOC network settlement is separate)
 - OAuth (Google / GitHub / etc.)
 - Multi-key per user (one active key at a time)
 - Per-key scopes or per-route ACLs

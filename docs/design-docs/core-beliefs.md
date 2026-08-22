@@ -4,131 +4,122 @@ Invariants any change in this repo must uphold. These exist because past
 decisions (or strong stakeholder preference) made them load-bearing. To
 change one, open a numbered plan under `../exec-plans/active/` first.
 
-## 1. This module ships the **transcode** product end-to-end
+## 1. This module ships the transcode product end-to-end
 
-The pin: *a customer can sign up, get an API key, and either submit a
-VOD job or push an RTMP live stream — without standing up the broader
-`livepeer-network-modules` suite.* Every architectural choice in this
-repo serves that pin. Surfaces that don't are out of scope for v0.
+The pin: *a customer can sign up, get an API key, and either submit a VOD
+job or push an RTMP live stream without standing up the broader
+`livepeer-network-modules` suite.* Surfaces that do not serve that pin are
+out of scope.
 
 ## 2. Resolver-only broker discovery
 
-The gateway resolves brokers **only** through the
-`service-registry-daemon` resolver socket. There is no static
-`LIVEPEER_BROKER_URL` fallback. Single-broker dev setups run a one-orch
-resolver, not a hard-coded URL env.
-
-**Why:** This module is built for production-shaped operation from day
-one. Static-URL fallbacks accumulate divergence between dev and prod
-behavior, and they invite operators to deploy without on-chain identity.
-We want the on-chain manifest + signed-broker selection path validated
-on every boot.
+The gateway resolves brokers only through `service-registry-daemon`. There
+is no static broker URL fallback. Selection consumes the resolver's
+protocol-aware `SelectedRoute` contract and rejects an incompatible
+protocol, transport, descriptor, work unit, or quote before funding.
 
 ## 3. Mainnet-only — no Livepeer testnets
 
-Inherited from `livepeer-network-modules`. Deploy and smoke against
-Arbitrum One from day one. Mitigate risk with dust amounts, not
-testnets. Testnets diverge from mainnet in ways that mask real failures.
+Deploy and smoke against Arbitrum One. Mitigate risk with dust amounts,
+not testnets whose behavior can diverge from production.
 
 ## 4. Read-only source repos
 
-Two source repos provide patterns and code; **never modify a file in
-either** from this working tree.
+`livepeer-network-modules` is the source of truth for the video pipeline;
+`blue-claw-network/web-platform` is the shape reference for auth UX. Never
+modify either source repo from this working tree. Copies are deliberate and
+their source paths are recorded in the introducing commit.
 
-- `livepeer-network-modules` — source of truth for the video pipeline
-  (`video-gateway/` + `video-runners/`). All TS engine and Go runner
-  code is ported verbatim from there. Commit messages that introduce a
-  copy cite the source path verbatim.
-- `blue-claw-network/web-platform` — shape reference for auth UX
-  (waitlist + admin approval + emailed API key + portal login). Borrow
-  the route layout, DB-table shape, and frontend UX; do **not** copy
-  the Rust/Axum code — this module's backend is TypeScript / Fastify.
+## 5. LOC owns the network payment boundary
 
-## 5. No pricing or billing in v0
+The Livepeer Open Clearinghouse (LOC) SDK/API owns funding, signing,
+opening, claiming, settlement, recovery, and payer-daemon interaction. The
+gateway supplies a selected route, a conservative funded ceiling, and a
+stable request ID; it does not mint payment headers or settle brokers
+directly. Customer pricing, Stripe, and a product usage ledger remain
+separate product concerns.
 
-No cost quoter, no `/v1/vod/quote` route, no usage ledger, no
-`media.pricing` or `media.live_session_debits` tables, no Stripe, no
-prepaid wallet. The module is functionally free at the module's layer in
-v0. Commercial wrappers are a separate, post-v0 layer.
+**Why:** Payment state must converge in one durable system. Splitting it
+between the gateway, broker, payer daemon, and compensating queues recreates
+the ambiguity that the v2 protocols remove.
 
-**Why:** Pricing is what made the source `video-gateway` depend on the
-`customer-portal` shell. Deferring it lets us ship a useful transcode
-endpoint without dragging in identity, ledger, Stripe, and rate-card
-machinery.
+## 6. The v2 cutover is intentionally breaking
 
-## 6. No multi-tenant projects in v0
+VOD uses `paid-job/v1`; live uses `paid-session/v1`. The legacy mode
+taxonomy, `/v1/cap`, `Livepeer-Mode`, `Livepeer-Spec-Version`, and direct
+payer path are removed at cutover. There is no dual stack, mode retry, or
+mixed-version deployment. Rollback means restoring the entire prior release.
 
-No `media.projects` table, no `/v1/projects` routes. Assets, encoding
-jobs, and live streams scope by `api_key_id` (the column replaces
-`project_id` from the source schema). One API key = one customer
-surface.
+## 7. Durable identity precedes side effects
 
-## 7. No webhooks in v0
+Every paid job has a stable `Livepeer-Request-Id`; every live stream durably
+records its LOC operation/session, broker job/session, selected route and
+quote, and lifecycle state before an ambiguous network boundary. A retry
+reuses the identical request content and ID. It never opens replacement work
+to escape an unknown result.
 
-No customer-facing webhook endpoint management, no HMAC signer, no
-delivery worker, no retry/replay infrastructure, no `webhook_endpoints`
-or `webhook_failures` tables. Asset and stream state are poll-only in
-v0.
+## 8. One customer stream key is never a runner credential
 
-## 8. No live → VOD recording handoff in v0
+The gateway gives the customer a public key and obtains a separate private
+runner ingest key through the session's `stream-key-issue` grant. Runner
+credentials and session parameters are envelope-encrypted at rest, never
+logged or returned by status APIs, and cleared when the session becomes
+terminal.
 
-`record_to_vod: true` is not a supported live-session parameter. The
-`service/recordingHandoff.ts` module and `media.recordings` table are
-not ported. Live sessions are ephemeral.
+## 9. No multi-tenant projects
 
-## 9. Auth is Blueclaw-shaped, not customer-portal-shaped
+No `media.projects` table or `/v1/projects` routes. Assets, encoding jobs,
+and live streams scope by `api_key_id`. One API key is one customer surface.
 
-The waitlist + admin approval + emailed API key + portal login flow is
-modeled directly on Blue Claw Network's UX. The `customer-portal`
-workspace dep from `livepeer-network-modules` is **never** imported by
-this module.
+## 10. No customer-facing webhooks
 
-## 10. Docker-first build and run
+No webhook endpoint management, signer, delivery worker, or replay
+infrastructure. Asset and stream state are polled through product APIs.
+The optional paid-session control WebSocket is an internal protocol signal,
+not a customer webhook; authoritative HTTP reconciliation remains required.
 
-Every component in this monorepo ships with a Docker-first build and run
-story: a `Dockerfile`, a `Makefile` wrapping common gestures (`build`,
-`test`, `shell`, `smoke`), and a `compose.yaml` where multi-service
-orchestration is needed. Implementers and operators do not install
-language runtimes (Go, Node, Python, ffmpeg) on their hosts to use a
-component.
+## 11. No live-to-VOD recording handoff
 
-## 11. Image tags are not bumped silently
+`record_to_vod: true` is not supported. Live sessions are ephemeral.
 
-Inherited. Republishing an image overwrites the existing named tag.
-Version bumps require explicit approval.
+## 12. Auth is Blueclaw-shaped, not customer-portal-shaped
 
-## 12. Documentation is enforced, not aspirational
+Waitlist, approval, emailed API key, and portal login follow the Blue Claw
+UX. The source suite's `customer-portal` dependency is never imported.
 
-Stale docs are worse than missing docs. Update docs in the same PR that
-changes the behavior they describe. References (`../references/`) are
-point-in-time provenance and do **not** get edited after the fact —
-supersede with a new dated reference if the picture changes.
+## 13. Docker-first build and run
 
-## 13. Throughput-friendly merge gates
+Every component ships with a Dockerfile, a Makefile for common gestures,
+and a compose file where multi-service orchestration is needed.
 
-Short-lived PRs. Minimal blocking checks. Test flakes get follow-up
-runs, not indefinite blocks. Corrections are cheap; waiting is
-expensive.
+## 14. Image tags are not bumped silently
 
-## 14. Single root `docs/` — no per-component doc directories
+Republishing an image overwrites the existing tag. Version bumps require
+explicit approval.
 
-This module is narrow enough that one doc tree is sufficient. Component
-subfolders carry only an `AGENTS.md` + `README.md`. Promoting a
-component-local concern to a design doc is the right move; the wrong
-move is creating `<component>/docs/`.
+## 15. Documentation is enforced, not aspirational
 
-## 15. Dependencies stay current
+Update active docs in the same change as behavior. References are immutable
+point-in-time provenance; supersede them with a new dated reference.
 
-Any external dependency — Go module, npm package, Docker base image,
-GitHub Action, system package — defaults to its **latest stable
-release**. Pinning to an older version is a deliberate decision recorded
-in the commit message that creates the pin and added to
-[`../exec-plans/tech-debt-tracker.md`](../exec-plans/tech-debt-tracker.md)
-until resolved.
+## 16. Beads is the work system of record
 
-## 16. Every code copy is commit-recorded
+Exec-plans preserve architecture, sequencing rationale, and release gates.
+Beads owns live status, dependencies, blockers, and discovered work; do not
+duplicate that state in Markdown checklists.
 
-Code that lands in this repo and originated elsewhere
-(`livepeer-network-modules`, the Blueclaw shape reference) is **copied
-in on a deliberate exec-plan**, with the source path or shape reference
-named in the commit message that introduces it. There is no auto-sync.
+## 17. Single root `docs/`
+
+All design docs, exec-plans, and references live at the repository root.
+Component folders carry only local `AGENTS.md` and `README.md` guidance.
+
+## 18. Dependencies stay current
+
+External dependencies default to their latest stable release. Any deliberate
+older pin must be recorded with an explicit reason and tracked in Beads.
+
+## 19. Every code copy is commit-recorded
+
+Code originating elsewhere lands under a deliberate exec-plan with its
+source path or shape reference in the introducing commit. There is no
+automatic source-repo sync.

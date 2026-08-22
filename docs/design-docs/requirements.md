@@ -1,154 +1,118 @@
 # Requirements
 
-What `livepeer-modules-transcode` must do to ship v0. Each requirement
-has a rationale; if a requirement turns out to conflict with another,
-the design doc that resolves the conflict supersedes this list.
+The required end state for the Modules v2 release. Requirements marked as
+v2 replace their legacy counterparts; backward compatibility is explicitly
+not a requirement. Until plan 0018 completes, the repository is a migration
+worktree and is not release-compatible with the v2 stack.
 
-## Functional requirements
+## Product surface
 
-### F1. Waitlist signup
+### F1. Customer onboarding and access
 
-The module exposes a public unauthenticated endpoint to capture a
-waitlist signup (`name`, `email`, optional metadata) and store it
-pending admin action. A verification token is emailed to the address;
-visiting the link marks the row email-verified.
+The module provides waitlist signup, email verification, operator approval,
+API-key issuance/rotation, portal sessions, and an admin surface. Product API
+resources remain scoped by `api_key_id`.
 
-**Why:** Self-service onboarding gate. Mirrors Blueclaw's flow.
+### F2. VOD upload and inspection
 
-### F2. Admin approval
+An authenticated customer can create and complete a presigned object-store
+upload, submit it for transcode, poll asset state, list/inspect assets,
+resolve playback, and soft-delete an asset.
 
-The admin dashboard, gated by a static `ADMIN_TOKEN` bearer, lists
-waitlist rows (paginated, searchable, filterable by status), and
-exposes approve / reject / delete actions. Approval optionally emails
-the API key to the user.
+### F3. One paid ABR exchange per asset
 
-**Why:** Operator-curated onboarding for v0; replaces customer-portal's
-self-serve checkout.
+The gateway plans the whole ladder and submits it as one terminal SSE
+`paid-job/v1` exchange using `video-transcode-abr/v2`. It does not open one
+paid job per rendition and does not use a 202/poll runner contract. Progress
+events may precede exactly one terminal `video-transcode-abr-result/v2`
+result containing the ladder outputs.
 
-### F3. User portal login
+### F4. Deterministic VOD metering
 
-The user portal accepts a long-lived API key, exchanges it for a
-session token, and gates `/api/v1/user/*` routes (profile, rotate key,
-logout) by that session token.
+VOD bills `video-frame-megapixel` as:
 
-**Why:** Lets the user see and rotate their own API key without giving
-them an admin surface.
+```
+ceil(sum(actual_frames_i * width_i * height_i) / 1_000_000)
+```
 
-### F4. VOD batch transcode
+The sum covers every delivered video rendition; audio-only output contributes
+zero. The single ceiling is applied after summation. The gateway funds a
+conservative upper bound, while the signed terminal claim is authoritative.
 
-A customer with a valid API key can:
+### F5. Paid live session with gateway relay
 
-1. `POST /v1/uploads` (tus) — request a tus upload URL.
-2. `PATCH /v1/uploads/:id` (tus body) — upload the source bytes.
-3. `POST /v1/vod/submit` — request the gateway begin transcode of an
-   uploaded asset, returning a job-tracking handle.
-4. `GET /v1/vod/:asset_id` and `GET /v1/videos/assets/:id` — poll for
-   asset and rendition state until `ready`.
-5. `GET /v1/playback/:id` — get a playback URL for the HLS manifest.
-6. `DELETE /v1/videos/assets/:id` — soft-delete (sets `deleted_at`,
-   does not purge storage in v0).
+An authenticated customer can allocate a stream, receive a gateway RTMP URL
+and LL-HLS playback URL, push using a public key, inspect status, and end the
+stream. The gateway opens one `paid-session/v1` `rtmp-hls/v1` external-
+attachment session, obtains a separate private runner ingest key, relays RTMP,
+and reconciles the session until terminal.
 
-The gateway plans an ABR rendition ladder, dispatches per-rendition
-encoding jobs to the capability-broker via `http-reqresp@v0` /
-`http-stream@v0`, and builds the HLS manifest when all renditions
-complete.
+### F6. Bounded live funding and usage
 
-**Why:** This is the core product surface.
+Live sessions bill signed runner-reported `output_seconds`. LOC may perform
+finite policy-bounded refills that extend the lease. The gateway observes
+normative balance state including `will_refuse_next_refill`; an optional
+control WebSocket accelerates updates, but HTTP remains authoritative.
 
-### F5. Live RTMP ingest + LL-HLS playback
+### F7. Workload runners
 
-A customer with a valid API key can:
+Go runners behind the capability broker perform FFmpeg work and remain blind
+to customer identity. The ABR runner implements the streaming v2 schema and
+terminal usage claim. Live runner credentials arrive only in
+`session_params` and must not be interpreted, logged, or relayed by protocol
+infrastructure.
 
-1. `POST /v1/live/streams` — allocate a stream key and receive an RTMP
-   push URL (gateway-hosted listener) plus an LL-HLS playback URL.
-2. Push RTMP to the URL; the gateway terminates RTMP in a pure-TS
-   listener and opens a session against the resolved capability-broker.
-3. `GET /_hls/*` — strict-proxy LL-HLS playlist + segment requests to
-   the broker.
-4. `POST /v1/live/streams/:id/end` — end the session (also driven by
-   the gateway's stuck-session sweep when RTMP disconnects).
+### F8. Operator observability
 
-**Why:** Live is the second core product surface.
+The admin surface exposes resolver candidates, route health, assets, and live
+streams. Operational views may show LOC/broker correlation IDs and redacted
+lifecycle state, never payment secrets or runner credentials.
 
-### F6. Workload runners (Go) perform the actual transcode
+## Protocol and operational requirements
 
-`transcode-runner` exposes `POST /v1/video/transcode` for VOD
-single-rendition jobs. `abr-runner` exposes
-`POST /v1/video/transcode/abr` for multi-rendition ABR jobs. Both share
-`transcode-core` (FFmpeg, GPU detection, presets, HLS, progress,
-thumbnails, filters). Both run behind the capability-broker, which
-forwards paid HTTP from the gateway.
+### NF1. Resolver-only, protocol-aware selection
 
-**Why:** Splits the customer-facing surface from the workload binary.
-Runners are blind to customer identity (per source-repo invariant).
+Broker discovery uses `service-registry-daemon` only. A route must satisfy
+protocol, transport, descriptor, work unit, quote, and settlement-key
+requirements before any paid operation begins.
 
-### F7. Operator admin surface for ops
+### NF2. LOC-only payment integration
 
-The admin dashboard surfaces:
+The gateway uses the LOC TypeScript SDK/API for paid job and session
+lifecycle. It does not call payer-daemon directly, create payment headers,
+claim, or settle.
 
-- Resolver candidate set (what brokers the resolver returned)
-- Per-broker route-health summary (cooldowns, recent outcomes, suppress
-  / unsuppress controls)
-- Asset and live-stream lists with inspection
-- Waitlist management (from F2)
+### NF3. Idempotent and durable recovery
 
-No customer or billing inspection in v0 (out of scope per
-[core-beliefs §5 / §6](./core-beliefs.md)).
+Every open has a durable stable request ID and content hash. Gateway state
+records LOC operation, broker job/session, route, quote, funded ceiling, and
+terminal outcome. Unknown results converge by retrying/reconciling the same
+operation. `request_id_reuse` is terminal corruption, not a retry signal.
 
-## Non-functional requirements
+### NF4. Secret handling
 
-### NF1. Resolver-only broker discovery
+Session parameters and private ingest credentials are envelope-encrypted at
+rest with the wrapping key outside the database, excluded from logs and API
+responses, and deleted at terminal state.
 
-The gateway must boot without `LIVEPEER_BROKER_URL`. The only
-configured broker socket is `LIVEPEER_RESOLVER_SOCKET` pointing at a
-`service-registry-daemon` instance. See
-[dependencies.md](./dependencies.md).
+### NF5. No compatibility layer
 
-### NF2. Real Livepeer payment minting
+The release contains no `/v1/cap`, old mode headers/adapters, mode fallback,
+direct payer client, or compensating settle queue. Deployment and rollback
+move the gateway and its compatible external stack together.
 
-The gateway calls a `payment-daemon` over its existing gRPC-on-UDS
-interface to mint payment headers for paid broker requests. No dev-mode
-no-op fallback.
+### NF6. Docker-first and strict builds
 
-### NF3. Docker-first build / run
+Every component has a Docker-first build/run path. TypeScript remains strict;
+Go and TypeScript test/lint gates pass for changed components.
 
-Every component ships with a `Dockerfile` + `Makefile` + `compose.yaml`
-(where multi-service). No host `node` / `go` / `ffmpeg` install
-required.
+### NF7. Mainnet-only and read-only sources
 
-### NF4. Strict TypeScript
+Production-shaped smoke uses Arbitrum One with bounded funds. Upstream source
+repositories are read-only; copied code and contracts cite provenance.
 
-The gateway and frontends pass `tsc --noEmit` (or equivalent) as the
-lint gate. No `any` slipped past parse-don't-validate boundaries (see
-the OpenAI harness pattern's "parse-don't-validate" guidance).
+## Deliberate exclusions
 
-### NF5. Frontend invariants
-
-All three frontends (site / portal / admin) are zero-build Lit web
-components, light DOM only, semantic HTML, no inline CSS, styling only
-from checked-in CSS files. See
-[frontend-dom-and-css-invariants.md](./frontend-dom-and-css-invariants.md).
-
-### NF6. Mainnet only
-
-No Livepeer testnets. Smoke runs against Arbitrum One. Dust amounts on
-mainnet are preferred over testnet mocks.
-
-### NF7. No upstream-source modifications
-
-The two source repos (`livepeer-network-modules`, `blue-claw-network`)
-are read-only from this working tree. Code copies are deliberate,
-commit-recorded decisions under a numbered exec-plan.
-
-## Out of v0 scope (filed for phase 2)
-
-- Pricing, cost quote, `/v1/vod/quote`, usage ledger, Stripe integration
-- Multi-tenant `projects` model and `/v1/projects` routes
-- Customer-facing webhooks (mgmt routes, signer, dispatcher, replay)
-- Live → VOD recording handoff (`record_to_vod`, `media.recordings`)
-- VOD hard-delete + S3 cleanup janitor
-- Hardware-wallet keystore support (deferred per
-  `livepeer-network-modules` plan 0019 Q1)
-
-See [core-beliefs.md](./core-beliefs.md) for the full deferment
-rationale.
+Customer pricing/Stripe, multi-tenant projects, customer webhooks, live-to-
+VOD recording, and hard-delete storage cleanup remain outside this migration.
+LOC network payment accounting does not imply those product features.

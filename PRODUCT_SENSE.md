@@ -35,19 +35,19 @@ A **standalone deployable transcode product**:
   Network's onboarding flow.
 
 The auth model is intentionally tiny: email waitlist → admin approval →
-emailed API key → portal login with that API key. No Stripe, no
-prepaid wallet, no per-customer tier negotiation in v0.
+emailed API key → portal login with that API key. LOC funds and settles the
+network work; this product still has no Stripe, prepaid customer wallet, or
+per-customer tier negotiation.
 
 ## What it is not
 
 - **Not a `livepeer-network-modules` replacement.** This module is *extracted
   from* that monorepo for the transcode slice only. It does not own the
-  capability-broker, payment-daemon, service-registry-daemon, or
-  orch-coordinator — those are external peer services.
+  capability-broker, service-registry-daemon, LOC, or orch-coordinator —
+  those are external peer services.
 - **Not a billing platform.** Pricing, cost quotes, usage ledgers,
   Stripe, prepaid wallets, and rate cards are all deferred to phase 2.
-  The v0 module is free at the module's layer; commercial wrappers are a
-  separate concern.
+  Network settlement through LOC is distinct from those commercial wrappers.
 - **Not a multi-tenant SaaS shell.** No `projects`, no per-customer
   resource isolation beyond the `api_key_id` scoping baked into the
   schema. One API key = one customer surface.
@@ -74,7 +74,7 @@ prepaid wallet, no per-customer tier negotiation in v0.
 - **No static broker URL fallback.** The module must always go through a
   service-registry-daemon resolver socket. Single-broker dev setups run
   a one-orch resolver, not a hard-coded URL env.
-- **No pricing creep in v0.** Any PR that adds a cost field, a usage
+- **No product-pricing creep.** Any PR that adds a customer price, a usage
   counter, a rate card, or a Stripe call is out of scope — file a phase-2
   exec-plan instead.
 - **No `projects` table.** Assets and streams scope by `api_key_id`,

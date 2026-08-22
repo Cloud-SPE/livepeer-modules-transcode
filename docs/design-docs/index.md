@@ -9,11 +9,11 @@ each component's `AGENTS.md` and `README.md` only.
 |---|---|---|
 | [core-beliefs.md](./core-beliefs.md) | active | Invariants every change must uphold |
 | [requirements.md](./requirements.md) | active | What the module must do (functional + non-functional) |
-| [architecture-overview.md](./architecture-overview.md) | active | Component layers, request flow, and the broker / payment-daemon / resolver boundary |
-| [transcode-pipeline.md](./transcode-pipeline.md) | active | VOD batch design: tus upload → encoding job → ABR plan → manifest → playback URL |
-| [live-pipeline.md](./live-pipeline.md) | active | Live RTMP design: customer RTMP push → broker session-open → LL-HLS strict-proxy |
+| [architecture-overview.md](./architecture-overview.md) | active | Modules v2 target: resolver, LOC, broker, gateway, and runner boundaries |
+| [transcode-pipeline.md](./transcode-pipeline.md) | active | One `paid-job/v1` streaming ABR exchange, usage, recovery, and playback |
+| [live-pipeline.md](./live-pipeline.md) | active | `paid-session/v1` RTMP relay, private runner keys, bounded refills, and LL-HLS |
 | [auth-model.md](./auth-model.md) | active | Blueclaw-modeled auth: waitlist → email verify → admin approval → emailed API key → portal login |
-| [dependencies.md](./dependencies.md) | active | Peer services this module requires (broker, payment-daemon, resolver, Resend) and what's deliberately excluded |
+| [dependencies.md](./dependencies.md) | active | Required LOC, broker, resolver, storage, database, and email boundaries |
 | [frontend-dom-and-css-invariants.md](./frontend-dom-and-css-invariants.md) | active | Lit, light DOM, semantic HTML, no inline CSS, styling only from checked-in CSS files |
 
 Stubs (to be written as the porting roadmap surfaces them):
@@ -26,6 +26,9 @@ Stubs (to be written as the porting roadmap surfaces them):
 
 For the porting roadmap that sequences when each component lands, see
 [`../exec-plans/completed/0001-initial-port-roadmap.md`](../exec-plans/completed/0001-initial-port-roadmap.md).
+
+For the active breaking migration, see
+[`../exec-plans/active/0018-livepeer-modules-v2-migration.md`](../exec-plans/active/0018-livepeer-modules-v2-migration.md).
 
 For the agent-first pattern this repo follows, see
 [`../references/openai-harness-engineer.md`](../references/openai-harness-engineer.md).
