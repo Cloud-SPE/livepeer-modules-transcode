@@ -39,6 +39,14 @@ settlement keys. Unsupported protocols, ABR transports, and live descriptor
 schemas are rejected during route selection, before payment minting or session
 open.
 
+Migration `0003_paid_operations_v2.sql` adds the durable v2 recovery boundary:
+stable request/content identity, selected route and quote evidence, LOC and
+broker correlations, funding/lease/settlement state, retries, and terminal
+evidence. Runner credentials and session parameters live only in a separate
+envelope-encrypted table and are deleted atomically when an operation becomes
+terminal. The v2 clients are not wired yet; Beads epic `lmt-65a` tracks that
+remaining cutover work.
+
 ## Build + run
 
 Per core-beliefs §10, every gesture is Docker-first.
@@ -68,3 +76,8 @@ Then point `DATABASE_URL` at a local Postgres and `node dist/index.js`.
 See [`AGENTS.md`](./AGENTS.md) and `src/config.ts`. The compose stack
 in [`compose.yaml`](./compose.yaml) shows the local-dev defaults
 (except secrets, which must be overridden).
+
+The v2 live path requires `LIVEPEER_OPERATION_SECRETS_KEK` (canonical base64
+for 32 random bytes held outside Postgres) and an operator-visible
+`LIVEPEER_OPERATION_SECRETS_KEY_ID`. They remain optional until that path is
+enabled so the pre-cutover gateway can still boot.

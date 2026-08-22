@@ -27,6 +27,10 @@ const envSchema = z.object({
   LIVEPEER_FUNDED_VALUE_WEI: z.string().optional(),
   LIVEPEER_FACE_VALUE_WEI: z.string().optional(),
   LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("default"),
+  // Required by v2 live paths before they may persist session credentials.
+  // Canonical base64 for a 32-byte wrapping key held outside Postgres.
+  LIVEPEER_OPERATION_SECRETS_KEK: z.string().optional(),
+  LIVEPEER_OPERATION_SECRETS_KEY_ID: z.string().min(1).default("local-v1"),
 
   // VOD storage (plan 0005). All optional; routes return 503 s3_not_configured
   // when unset.

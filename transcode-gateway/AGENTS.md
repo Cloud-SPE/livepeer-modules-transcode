@@ -17,10 +17,11 @@ Plus:
 - **Auth is Blueclaw-shaped.** Waitlist → email verify → admin
   approval → emailed API key → portal login. No customer-portal dep.
   See [`../docs/design-docs/auth-model.md`](../docs/design-docs/auth-model.md).
-- **Schema namespace strict-split.** This component currently owns
-  `auth.*`. `media.*` lands in plan 0005 (VOD routes + tus). Both
-  schemas live in the same Postgres database; migrations run in
-  filename order.
+- **Schema namespace strict-split.** This component owns `auth.*` and
+  `media.*` in one Postgres database; migrations run in filename order.
+  `media.paid_operations` is the durable v2 recovery record. Encrypted
+  protocol secrets are separated in `media.paid_operation_secrets` and
+  cleared when the operation becomes terminal.
 - **Resolver-only broker resolution.** No `LIVEPEER_BROKER_URL`
   static fallback (see core-beliefs §2). The resolver wiring lands in
   plan 0004 (livepeer wire layer).
@@ -46,6 +47,11 @@ Plus:
 ## Source layout
 
 ```
+
+The v2 persistence seam is `engine/repo/paidOperationRepo.ts`, implemented
+by `repo/paidOperations.ts`. `livepeer/operationSecrets.ts` envelope-encrypts
+runner credentials using `LIVEPEER_OPERATION_SECRETS_KEK`; the wrapping key
+must remain outside Postgres.
 src/
 ├── index.ts              # entry point
 ├── server.ts             # Fastify factory
@@ -75,10 +81,10 @@ Plus vendored proto contracts under `proto/livepeer/`:
 - `payments/v1/{types,payer_daemon}.proto` — payer-daemon contract from
   `livepeer-network-protocol/proto/`
 
-The resolver protos are loaded at runtime by the resolver gRPC client
-when `LIVEPEER_RESOLVER_SOCKET` is set. The payment protos are vendored
-now so the payer-daemon migration can switch from the legacy wrapper to
-the current gRPC contract without another contract-vendoring step.
+The resolver protos are loaded at runtime by the resolver gRPC client when
+`LIVEPEER_RESOLVER_SOCKET` is set. The payment protos remain as migration
+history while the legacy path exists; the v2 target delegates payer behavior
+to LOC and deletes the direct payer client at cutover.
 
 `runtime/rtmp/` (live RTMP listener) lands under plan 0006. VOD routes
 land under plan 0005.

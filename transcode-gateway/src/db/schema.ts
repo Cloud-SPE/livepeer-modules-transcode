@@ -8,7 +8,11 @@ import {
   numeric,
   jsonb,
   index,
+  uniqueIndex,
+  customType,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ─────────────────────────────────────────────────────────────────
 // auth.*  — landed by plan 0002
@@ -160,6 +164,79 @@ export const liveStreams = media.table("live_streams", {
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
+});
+
+export const paidOperations = media.table(
+  "paid_operations",
+  {
+    id: uuid("id").primaryKey(),
+    operationKind: text("operation_kind").notNull(),
+    apiKeyId: uuid("api_key_id").notNull().references(() => apiKeys.id, { onDelete: "restrict" }),
+    assetId: text("asset_id").references(() => assets.id, { onDelete: "cascade" }),
+    liveStreamId: text("live_stream_id").references(() => liveStreams.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull().unique(),
+    requestContentSha256: text("request_content_sha256").notNull(),
+    workId: text("work_id").notNull(),
+    rotationGeneration: integer("rotation_generation").notNull().default(0),
+    protocol: text("protocol").notNull(),
+    transport: text("transport"),
+    capability: text("capability").notNull(),
+    offering: text("offering").notNull(),
+    requestDescriptor: text("request_descriptor").notNull(),
+    responseDescriptor: text("response_descriptor"),
+    workUnit: text("work_unit").notNull(),
+    estimator: jsonb("estimator"),
+    pricePerUnitWei: numeric("price_per_unit_wei", { precision: 78, scale: 0 }).notNull(),
+    unitsPerPrice: numeric("units_per_price", { precision: 78, scale: 0 }).notNull(),
+    quoteId: text("quote_id").notNull(),
+    quoteVersion: text("quote_version").notNull(),
+    constraintFingerprint: text("constraint_fingerprint").notNull(),
+    routeFingerprint: text("route_fingerprint").notNull(),
+    settlementKey: text("settlement_key").notNull(),
+    routeSnapshot: jsonb("route_snapshot").notNull(),
+    status: text("status").notNull(),
+    locOperationId: text("loc_operation_id").unique(),
+    brokerJobId: text("broker_job_id"),
+    brokerSessionId: text("broker_session_id"),
+    fundedUnits: numeric("funded_units", { precision: 78, scale: 0 }).notNull().default("0"),
+    claimedUnits: numeric("claimed_units", { precision: 78, scale: 0 }),
+    balanceUnits: numeric("balance_units", { precision: 78, scale: 0 }),
+    willRefuseNextRefill: boolean("will_refuse_next_refill"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    settlementSequence: numeric("settlement_sequence", { precision: 78, scale: 0 }).notNull().default("0"),
+    retryCount: integer("retry_count").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    terminalEvidence: jsonb("terminal_evidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    terminalAt: timestamp("terminal_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("paid_operations_api_key_created").on(t.apiKeyId, t.createdAt),
+    index("paid_operations_asset").on(t.assetId),
+    index("paid_operations_live_stream").on(t.liveStreamId),
+    index("paid_operations_recovery").on(t.nextRetryAt, t.updatedAt),
+    uniqueIndex("paid_operations_broker_job").on(t.brokerJobId),
+    uniqueIndex("paid_operations_broker_session").on(t.brokerSessionId),
+    check("paid_operations_owner", sql`(${t.operationKind} = 'job' AND ${t.assetId} IS NOT NULL AND ${t.liveStreamId} IS NULL) OR (${t.operationKind} = 'session' AND ${t.assetId} IS NULL AND ${t.liveStreamId} IS NOT NULL)`),
+    check("paid_operations_protocol_kind", sql`(${t.operationKind} = 'job' AND ${t.protocol} = 'paid-job/v1' AND ${t.transport} IS NOT NULL) OR (${t.operationKind} = 'session' AND ${t.protocol} = 'paid-session/v1')`),
+  ],
+);
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
+
+export const paidOperationSecrets = media.table("paid_operation_secrets", {
+  operationId: uuid("operation_id").primaryKey().references(() => paidOperations.id, { onDelete: "cascade" }),
+  keyId: text("key_id").notNull(),
+  wrappedKey: bytea("wrapped_key").notNull(),
+  wrappedKeyIv: bytea("wrapped_key_iv").notNull(),
+  wrappedKeyTag: bytea("wrapped_key_tag").notNull(),
+  ciphertext: bytea("ciphertext").notNull(),
+  payloadIv: bytea("payload_iv").notNull(),
+  payloadTag: bytea("payload_tag").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const playbackIds = media.table("playback_ids", {

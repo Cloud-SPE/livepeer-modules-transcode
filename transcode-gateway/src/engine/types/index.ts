@@ -9,3 +9,4 @@ export * from "./playbackId.js";
 export * from "./job.js";
 export * from "./worker.js";
 export * from "./error.js";
+export * from "./paidOperation.js";
