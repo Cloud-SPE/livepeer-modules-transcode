@@ -1,6 +1,7 @@
 package transcode
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,21 @@ import (
 //   - playlist.m3u8 (HLS playlist with EXT-X-BYTERANGE directives)
 //   - stream.mp4    (single fragmented MP4 file)
 func HLSRenditionCmd(
+	inputPath string,
+	outputDir string,
+	rendition ABRRendition,
+	segmentDuration int,
+	hw HWProfile,
+	probe ProbeResult,
+) *exec.Cmd {
+	return HLSRenditionCmdContext(context.Background(), inputPath, outputDir, rendition, segmentDuration, hw, probe)
+}
+
+// HLSRenditionCmdContext is HLSRenditionCmd with process cancellation tied to
+// ctx. Long-running paid exchanges use it so a disconnected request stops
+// FFmpeg rather than leaving unclaimed work behind.
+func HLSRenditionCmdContext(
+	ctx context.Context,
 	inputPath string,
 	outputDir string,
 	rendition ABRRendition,
@@ -54,7 +70,7 @@ func HLSRenditionCmd(
 	// Output playlist path
 	args = append(args, filepath.Join(outputDir, "playlist.m3u8"))
 
-	return exec.Command("ffmpeg", args...)
+	return exec.CommandContext(ctx, "ffmpeg", args...)
 }
 
 // buildHLSVideoArgs constructs video encoding arguments for an HLS rendition.

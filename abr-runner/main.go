@@ -35,16 +35,18 @@ var (
 	maxQueueSize = envInt("MAX_QUEUE_SIZE", 2)
 	tempDir      = env("TEMP_DIR", "/tmp/abr")
 	jobTTL       = time.Duration(envInt("JOB_TTL_SECONDS", 3600)) * time.Second
+	stateDir     = env("STATE_DIR", "/var/lib/abr-runner")
 )
 
 // ── Global state ──
 
 var (
-	jobs       = make(map[string]*ABRJob)
-	jobsMu     sync.RWMutex
-	activeJobs atomic.Int32
-	hw         transcode.HWProfile
-	abrPresets []transcode.ABRPreset
+	jobs             = make(map[string]*ABRJob)
+	jobsMu           sync.RWMutex
+	activeJobs       atomic.Int32
+	hw               transcode.HWProfile
+	abrPresets       []transcode.ABRPreset
+	abrCoordinatorV2 *ABRExecutionCoordinatorV2
 )
 
 // ── Request / Response types ──
@@ -429,11 +431,15 @@ func handlePresets(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	current := activeJobs.Load()
+	if abrCoordinatorV2 != nil {
+		current = abrCoordinatorV2.Active()
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":      "ok",
 		"gpu":         hw.GPUName,
 		"vram_mb":     hw.VRAM_MB,
-		"active_jobs": activeJobs.Load(),
+		"active_jobs": current,
 		"max_jobs":    maxQueueSize,
 		"presets":     len(abrPresets),
 	})
@@ -823,21 +829,35 @@ func main() {
 		log.Printf("  [%s] %d renditions: %s", p.Name, len(names), strings.Join(names, ", "))
 	}
 
-	// Start cleanup goroutine
-	go cleanupLoop()
+	storeV2, err := NewFileWorkloadStoreV2(stateDir)
+	if err != nil {
+		log.Fatalf("initialize workload state: %v", err)
+	}
+	executorV2, err := NewDurableABRExecutorV2(storeV2, hw)
+	if err != nil {
+		log.Fatalf("initialize ABR executor: %v", err)
+	}
+	abrCoordinatorV2, err = NewABRExecutionCoordinatorV2(storeV2, executorV2, maxQueueSize)
+	if err != nil {
+		log.Fatalf("initialize ABR coordinator: %v", err)
+	}
+	abrHandlerV2, err := NewABRHandlerV2(storeV2, abrCoordinatorV2, abrPresets)
+	if err != nil {
+		log.Fatalf("initialize ABR handler: %v", err)
+	}
 
 	// HTTP routes
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/video/transcode/abr", handleSubmit)
-	mux.HandleFunc("/v1/video/transcode/abr/status", handleStatus)
+	mux.Handle("/v1/video/transcode/abr", abrHandlerV2)
 	mux.HandleFunc("/v1/video/transcode/abr/presets", handlePresets)
 	mux.HandleFunc("/healthz", handleHealthz)
 
 	server := &http.Server{
-		Addr:         runnerAddr,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:        runnerAddr,
+		Handler:     mux,
+		ReadTimeout: 30 * time.Second,
+		// Streaming paid exchanges own the response through terminal output.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -854,7 +874,7 @@ func main() {
 	}()
 
 	log.Printf("Listening on %s", runnerAddr)
-	log.Printf("Config: max_queue=%d, temp_dir=%s, job_ttl=%s", maxQueueSize, tempDir, jobTTL)
+	log.Printf("Config: max_queue=%d, state_dir=%s", maxQueueSize, stateDir)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}

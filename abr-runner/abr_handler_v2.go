@@ -29,6 +29,8 @@ type ABRExecutionReporterV2 interface {
 	Progress(phase string, overallProgress float64, rendition string, frames uint64) error
 	Prepared(PreparedRenditionV2) error
 	Delivered(RenditionResultV2) error
+	PreparedManifest(PreparedArtifactV2) error
+	DeliveredManifest(string) error
 }
 
 // ABRExecutionErrorV2 is safe to persist and return over SSE. Underlying
@@ -225,6 +227,14 @@ func (r *abrExecutionReporterV2) Prepared(prepared PreparedRenditionV2) error {
 
 func (r *abrExecutionReporterV2) Delivered(delivered RenditionResultV2) error {
 	return r.coordinator.store.SaveDelivered(r.workloadID, delivered)
+}
+
+func (r *abrExecutionReporterV2) PreparedManifest(prepared PreparedArtifactV2) error {
+	return r.coordinator.store.SavePreparedManifest(r.workloadID, prepared)
+}
+
+func (r *abrExecutionReporterV2) DeliveredManifest(artifactURI string) error {
+	return r.coordinator.store.SaveDeliveredManifest(r.workloadID, artifactURI)
 }
 
 type ABRHandlerV2 struct {

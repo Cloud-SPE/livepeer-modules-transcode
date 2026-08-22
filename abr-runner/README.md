@@ -10,7 +10,7 @@ per request.
 
 ## Modules v2 contract
 
-The v2 target is one terminal SSE exchange per complete ladder:
+The runner uses one terminal SSE exchange per complete ladder:
 
 | Contract axis | Value |
 |---|---|
@@ -23,8 +23,9 @@ The v2 target is one terminal SSE exchange per complete ladder:
 Go types and validation are in `contract_v2.go`. Canonical JSON/SSE fixtures
 are under `testdata/contracts/v2/`; their strict-decoding tests are the shared
 starting point for the gateway, runner, Modules extractor, and LOC integration.
-The current handler is not yet wired to this contract—Bead `lmt-65a.3.6`
-replaces its asynchronous 202/poll execution.
+`POST /v1/video/transcode/abr` requires `Accept: text/event-stream` and is
+wired directly to this contract. The removed asynchronous `202` and status
+poll route are not served by the v2 runtime.
 
 ### Request and output safety
 
@@ -66,7 +67,8 @@ SSE HTTP response starts promptly with status 200 and remains open through one
 
 The file-backed journal implementation is `workload_store_v2.go`. It uses
 atomic rename plus file and directory fsync, stores bounded safe SSE history,
-and keeps prepared/delivered checkpoints separate. It deliberately persists
+and keeps prepared/delivered rendition and manifest checkpoints separate. It
+deliberately persists
 only request hashes and non-secret artifact metadata—the identical replayed
 request supplies fresh in-memory access to its credential URLs. Runtime images
 provide `/var/lib/abr-runner` as the persistent volume boundary.

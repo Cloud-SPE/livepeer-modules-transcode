@@ -10,18 +10,17 @@ cross-cutting map.
 
 ## Surface
 
-Current pre-cutover surface:
+Current surface:
 
-- `POST /v1/video/transcode/abr` — submit an ABR ladder job
-- `GET /v1/video/transcode/abr/status?job_id=...` — poll
+- `POST /v1/video/transcode/abr` — terminal Modules v2 SSE exchange
 - `GET /v1/video/transcode/abr/presets` — list embedded ladder presets
 - `GET /healthz` — 200 ready
 - `GET /metrics` — Prometheus (opt-in via `METRICS_ENABLED=true`)
 
-The Modules v2 replacement keeps the POST route behind the broker but changes
-it to one terminal SSE response using the versioned contracts in
-`contract_v2.go`. It has no 202/poll path. Fixtures live in
-`testdata/contracts/v2/`; implementation is tracked by `lmt-65a.3.6`.
+The POST route stays behind the broker and returns one terminal SSE response
+using the versioned contracts in `contract_v2.go`. It has no 202/poll path.
+Fixtures live in `testdata/contracts/v2/`; implementation is tracked by
+`lmt-65a.3.6`.
 
 ## Operating principles
 

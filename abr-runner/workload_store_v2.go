@@ -34,6 +34,11 @@ type PreparedRenditionV2 struct {
 	FileSizeBytes  uint64            `json:"file_size_bytes"`
 }
 
+type PreparedArtifactV2 struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
 type StoredSSEEventV2 struct {
 	Sequence uint64          `json:"sequence"`
 	Event    string          `json:"event"`
@@ -41,16 +46,18 @@ type StoredSSEEventV2 struct {
 }
 
 type WorkloadJournalV2 struct {
-	Version        int                            `json:"version"`
-	WorkloadID     string                         `json:"workload_id"`
-	RequestSHA256  string                         `json:"request_sha256"`
-	State          WorkloadJournalStateV2         `json:"state"`
-	Phase          string                         `json:"phase"`
-	NextSequence   uint64                         `json:"next_sequence"`
-	Prepared       map[string]PreparedRenditionV2 `json:"prepared"`
-	Delivered      map[string]RenditionResultV2   `json:"delivered"`
-	ProgressEvents []StoredSSEEventV2             `json:"progress_events"`
-	TerminalEvent  *StoredSSEEventV2              `json:"terminal_event,omitempty"`
+	Version              int                            `json:"version"`
+	WorkloadID           string                         `json:"workload_id"`
+	RequestSHA256        string                         `json:"request_sha256"`
+	State                WorkloadJournalStateV2         `json:"state"`
+	Phase                string                         `json:"phase"`
+	NextSequence         uint64                         `json:"next_sequence"`
+	Prepared             map[string]PreparedRenditionV2 `json:"prepared"`
+	Delivered            map[string]RenditionResultV2   `json:"delivered"`
+	ManifestPrepared     *PreparedArtifactV2            `json:"manifest_prepared,omitempty"`
+	ManifestDeliveredURI string                         `json:"manifest_delivered_uri,omitempty"`
+	ProgressEvents       []StoredSSEEventV2             `json:"progress_events"`
+	TerminalEvent        *StoredSSEEventV2              `json:"terminal_event,omitempty"`
 }
 
 type FileWorkloadStoreV2 struct {
@@ -192,6 +199,37 @@ func (s *FileWorkloadStoreV2) SaveDelivered(workloadID string, result RenditionR
 	return s.saveLocked(record)
 }
 
+func (s *FileWorkloadStoreV2) SavePreparedManifest(workloadID string, prepared PreparedArtifactV2) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.loadLocked(workloadID)
+	if err != nil {
+		return err
+	}
+	if record.State != WorkloadInProgressV2 || record.ManifestDeliveredURI != "" || !safeJournalPathV2(prepared.Path) || !sha256Pattern.MatchString(prepared.SHA256) {
+		return errors.New("invalid prepared manifest checkpoint")
+	}
+	record.ManifestPrepared = &prepared
+	return s.saveLocked(record)
+}
+
+func (s *FileWorkloadStoreV2) SaveDeliveredManifest(workloadID, artifactURI string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.loadLocked(workloadID)
+	if err != nil {
+		return err
+	}
+	if record.State != WorkloadInProgressV2 || record.ManifestPrepared == nil {
+		return errors.New("manifest has no prepared checkpoint")
+	}
+	if err := validateArtifactURI(artifactURI, "manifest_uri"); err != nil {
+		return err
+	}
+	record.ManifestDeliveredURI = artifactURI
+	return s.saveLocked(record)
+}
+
 func (s *FileWorkloadStoreV2) RecordTerminalResult(workloadID string, result ABRTerminalResultV2) (StoredSSEEventV2, error) {
 	if err := ValidateABRTerminalResultV2(result); err != nil {
 		return StoredSSEEventV2{}, err
@@ -229,6 +267,9 @@ func (s *FileWorkloadStoreV2) recordTerminal(workloadID string, state WorkloadJo
 		return StoredSSEEventV2{}, errors.New("unsupported terminal event type")
 	}
 	if result, ok := value.(ABRTerminalResultV2); ok {
+		if result.ManifestURI != record.ManifestDeliveredURI {
+			return StoredSSEEventV2{}, errors.New("terminal result differs from delivered manifest checkpoint")
+		}
 		if len(result.Renditions) != len(record.Delivered) {
 			return StoredSSEEventV2{}, errors.New("terminal result does not match delivered checkpoints")
 		}
@@ -372,6 +413,17 @@ func (s *FileWorkloadStoreV2) validateJournalLocked(record WorkloadJournalV2) er
 		prepared, ok := record.Prepared[name]
 		if name != delivered.Name || !ok || !preparedMatchesResultV2(prepared, delivered) {
 			return errors.New("delivered checkpoint is invalid")
+		}
+	}
+	if record.ManifestPrepared != nil && (!safeJournalPathV2(record.ManifestPrepared.Path) || !sha256Pattern.MatchString(record.ManifestPrepared.SHA256)) {
+		return errors.New("prepared manifest checkpoint is invalid")
+	}
+	if record.ManifestDeliveredURI != "" {
+		if record.ManifestPrepared == nil {
+			return errors.New("delivered manifest has no prepared checkpoint")
+		}
+		if err := validateArtifactURI(record.ManifestDeliveredURI, "manifest_delivered_uri"); err != nil {
+			return err
 		}
 	}
 	return nil

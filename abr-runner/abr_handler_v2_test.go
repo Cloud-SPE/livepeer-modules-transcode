@@ -60,6 +60,12 @@ func (f *fakeABRExecutorV2) Execute(ctx context.Context, req ABRWorkloadRequestV
 	if err := reporter.Delivered(delivered); err != nil {
 		return ABRTerminalResultV2{}, err
 	}
+	if err := reporter.PreparedManifest(PreparedArtifactV2{Path: "work/asset/master.m3u8", SHA256: strings.Repeat("c", 64)}); err != nil {
+		return ABRTerminalResultV2{}, err
+	}
+	if err := reporter.DeliveredManifest(req.Output.Manifest.ArtifactURI); err != nil {
+		return ABRTerminalResultV2{}, err
+	}
 	hash, _ := RequestContentSHA256V2(req)
 	units, _ := CalculateFrameMegapixelUnitsV2([]RenditionResultV2{delivered})
 	return ABRTerminalResultV2{
@@ -145,7 +151,8 @@ func TestABRHandlerV2TerminalReplayAndContentMismatch(t *testing.T) {
 	req := testABRRequestV2("asset-replay")
 	first := performABRRequestV2(t, handler, req)
 	second := performABRRequestV2(t, handler, req)
-	if first.Code != http.StatusOK || second.Code != http.StatusOK || first.Body.String() != second.Body.String() {
+	withoutKeepalive := func(value string) string { return strings.ReplaceAll(value, ": keepalive\n\n", "") }
+	if first.Code != http.StatusOK || second.Code != http.StatusOK || withoutKeepalive(first.Body.String()) != withoutKeepalive(second.Body.String()) {
 		t.Fatalf("terminal replay differs:\nfirst=%s\nsecond=%s", first.Body.String(), second.Body.String())
 	}
 

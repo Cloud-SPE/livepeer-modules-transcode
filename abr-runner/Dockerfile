@@ -201,6 +201,10 @@ COPY abr-runner/ /app/abr-runner/
 
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin/abr-runner .
 
+# CI target: exercise the same copied source and module graph used by runtime.
+FROM go-builder AS go-test
+RUN go test ./...
+
 # ============================================================================
 # Stage: runtime-nvidia
 # ============================================================================
