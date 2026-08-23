@@ -88,15 +88,28 @@ func TestMediaMTXAuthorizationTracksKeyRotation(t *testing.T) {
 	authorizer := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: "0123456789abcdef0123456789abcdef"}
 	ingestPath, _ := IngestMediaPathV1(response.RunnerSessionID)
 	rotation := StreamKeyIssueRequestV1{RequestID: "key_issue_002", Audience: "gateway-relay"}
-	rotated := StreamKeyIssueResponseV1{RequestID: rotation.RequestID, StreamKey: "new-private-ingest-key", ExpiresAt: "2030-01-01T00:00:00Z"}
+	rotatedKey, _ := BuildPrivateIngestStreamKeyV1(response.RunnerSessionID, "new-private-ingest-key")
+	rotated := StreamKeyIssueResponseV1{RequestID: rotation.RequestID, StreamKey: rotatedKey, ExpiresAt: "2030-01-01T00:00:00Z"}
 	if _, _, err := store.RecordKeyIssue(request.SessionID, rotation, rotated); err != nil {
 		t.Fatal(err)
 	}
 	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: oldKey}) {
 		t.Fatal("superseded stream key remained authorized")
 	}
-	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: rotated.StreamKey}) {
+	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: "new-private-ingest-key"}) {
 		t.Fatal("rotated stream key was not authorized")
+	}
+}
+
+func TestMediaMTXAuthorizationRejectsExpiredIngestKey(t *testing.T) {
+	store, _, response, token := mediaTestSessionV1(t)
+	path, _ := IngestMediaPathV1(response.RunnerSessionID)
+	authorizer := MediaMTXAuthorizerV1{
+		Sessions: store, InternalTokenRoot: "0123456789abcdef0123456789abcdef",
+		Now: func() time.Time { return time.Date(2030, 1, 1, 0, 0, 1, 0, time.UTC) },
+	}
+	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: path, Protocol: "rtmp", Token: token}) {
+		t.Fatal("expired private ingest key remained authorized")
 	}
 }
 
@@ -144,6 +157,22 @@ func TestInternalMediaTokensAreStableAndSessionScoped(t *testing.T) {
 	}
 }
 
+func TestPrivateIngestStreamKeyComposesPathAndEscapedToken(t *testing.T) {
+	streamKey, err := BuildPrivateIngestStreamKeyV1("runner_session_001", "private key+rotation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamPath, token, ok := ParsePrivateIngestStreamKeyV1(streamKey)
+	if !ok || streamPath != "ingest/runner_session_001" || token != "private key+rotation" {
+		t.Fatalf("stream key parsed as path=%q token=%q valid=%v", streamPath, token, ok)
+	}
+	for _, invalid := range []string{"runner_session_001", "runner_session_001?token=", "runner_session_001?token=one&token=two", "ingest/runner_session_001?token=secret"} {
+		if _, _, ok := ParsePrivateIngestStreamKeyV1(invalid); ok {
+			t.Fatalf("invalid stream key accepted: %q", invalid)
+		}
+	}
+}
+
 func TestMediaMTXImageAcceptsGeneratedConfig(t *testing.T) {
 	if os.Getenv("LIVE_RUNNER_CONTAINER_TEST") != "1" {
 		t.Skip("set LIVE_RUNNER_CONTAINER_TEST=1 to exercise the pinned MediaMTX image")
@@ -185,8 +214,10 @@ func mediaTestSessionV1(t *testing.T) (*EncryptedFileSessionStoreV1, RunnerCreat
 	}
 	issue := readStrictFixtureV1[StreamKeyIssueRequestV1](t, "key-issue-request.json")
 	issued := readStrictFixtureV1[StreamKeyIssueResponseV1](t, "key-issue-response.json")
+	issued.StreamKey, _ = BuildPrivateIngestStreamKeyV1(response.RunnerSessionID, issued.StreamKey)
 	if _, _, err := store.RecordKeyIssue(request.SessionID, issue, issued); err != nil {
 		t.Fatal(err)
 	}
-	return store, request, response, issued.StreamKey
+	_, token, _ := ParsePrivateIngestStreamKeyV1(issued.StreamKey)
+	return store, request, response, token
 }

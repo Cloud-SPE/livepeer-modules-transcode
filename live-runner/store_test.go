@@ -221,6 +221,29 @@ func TestEncryptedStoreRequiresDeterministicEventIDs(t *testing.T) {
 	}
 }
 
+func TestEncryptedStorePinsTerminationReasonBeforeTerminalEvent(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x71}, 32))
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	record, began, err := store.BeginTermination(request.SessionID, "gateway_close")
+	if err != nil || !began || !record.Stopping || record.PendingCloseReason != "gateway_close" {
+		t.Fatalf("begin termination began=%v record=%+v err=%v", began, record, err)
+	}
+	if _, began, err := store.BeginTermination(request.SessionID, "runner_failed"); err != nil || began {
+		t.Fatalf("repeated termination began=%v err=%v", began, err)
+	}
+	mismatch := testEventV1(response.RunnerSessionID, 1, "session.ended", "ended", 0, "runner_failed")
+	if err := store.Advance(request.SessionID, mismatch); err == nil {
+		t.Fatal("terminal event changed the durable close reason")
+	}
+	terminal := testEventV1(response.RunnerSessionID, 1, "session.ended", "ended", 0, "gateway_close")
+	if err := store.Advance(request.SessionID, terminal); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newTestStoreV1(t *testing.T, dir string, key []byte) *EncryptedFileSessionStoreV1 {
 	t.Helper()
 	store, err := NewEncryptedFileSessionStoreV1(dir, key)

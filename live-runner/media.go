@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -127,6 +128,7 @@ type MediaSessionLookupV1 interface {
 type MediaMTXAuthorizerV1 struct {
 	Sessions          MediaSessionLookupV1
 	InternalTokenRoot string
+	Now               func() time.Time
 }
 
 func (a MediaMTXAuthorizerV1) Authorize(request MediaMTXAuthRequestV1) bool {
@@ -138,14 +140,20 @@ func (a MediaMTXAuthorizerV1) Authorize(request MediaMTXAuthRequestV1) bool {
 		return false
 	}
 	record, secrets, err := a.Sessions.LoadByRunnerSessionID(runnerSessionID)
-	if err != nil || record.State != "active" || secrets == nil {
+	if err != nil || record.State != "active" || record.Stopping || secrets == nil {
 		return false
 	}
 	internalToken := InternalMediaTokenV1(a.InternalTokenRoot, runnerSessionID)
 	switch {
 	case kind == "ingest" && request.Protocol == "rtmp" && request.Action == "publish":
 		current, ok := secrets.KeyIssues[secrets.CurrentKeyID]
-		return ok && current.Response.StreamKey != "" && secureEqualV1(request.Token, current.Response.StreamKey)
+		streamPath, streamToken, valid := ParsePrivateIngestStreamKeyV1(current.Response.StreamKey)
+		expiresAt, expiryErr := time.Parse(time.RFC3339, current.Response.ExpiresAt)
+		now := time.Now()
+		if a.Now != nil {
+			now = a.Now()
+		}
+		return ok && valid && expiryErr == nil && now.Before(expiresAt) && streamPath == request.Path && secureEqualV1(request.Token, streamToken)
 	case kind == "ingest" && request.Protocol == "rtmp" && request.Action == "read":
 		return secureEqualV1(request.Token, internalToken)
 	case kind == "renditions" && request.Protocol == "rtmp" && request.Action == "publish":
@@ -189,6 +197,27 @@ func RenditionMediaPathV1(runnerSessionID, rendition string) (string, error) {
 		return "", errors.New("invalid runner session or rendition ID")
 	}
 	return "renditions/" + runnerSessionID + "/" + rendition, nil
+}
+
+func BuildPrivateIngestStreamKeyV1(runnerSessionID, secret string) (string, error) {
+	if _, err := IngestMediaPathV1(runnerSessionID); err != nil || secret == "" || len(secret) > 256 || strings.ContainsAny(secret, "\r\n") {
+		return "", errors.New("invalid private ingest key")
+	}
+	return runnerSessionID + "?token=" + url.QueryEscape(secret), nil
+}
+
+func ParsePrivateIngestStreamKeyV1(streamKey string) (string, string, bool) {
+	runnerSessionID, rawQuery, found := strings.Cut(streamKey, "?")
+	if !found {
+		return "", "", false
+	}
+	query, err := url.ParseQuery(rawQuery)
+	token := query.Get("token")
+	ingestPath, pathErr := IngestMediaPathV1(runnerSessionID)
+	if pathErr != nil || err != nil || token == "" || len(query) != 1 || len(query["token"]) != 1 {
+		return "", "", false
+	}
+	return ingestPath, token, true
 }
 
 func parseMediaPathV1(raw string) (kind, runnerSessionID, rendition string, ok bool) {

@@ -23,6 +23,11 @@ Loopback HLS reads are allowed only while the corresponding session is
 active. Rotation immediately rejects the previous ingest key, and terminal
 state rejects every path.
 
+The descriptor's RTMP server URL ends in `/ingest`. Its issued stream key is
+opaque to callers but composes as
+`<runner-session-id>?token=<rotated-secret>`, so joining the two supplies
+MediaMTX with exactly the scoped `ingest/<runner-session-id>` path and token.
+
 ## Runner surface
 
 Paths are operator-configured in Modules; these are this runner's declared
@@ -34,6 +39,7 @@ defaults:
 | `GET` | `/v1/sessions/{id}` | Reconcile runner state and cumulative usage |
 | `DELETE` | `/v1/sessions/{id}` | Idempotently terminate media and credentials |
 | `POST` | `/v1/sessions/{id}/stream-keys` | Issue/rotate a scoped ingest key using the grant |
+| `GET` | `/v1/public/sessions/{id}/status` | Read the credential-free status advertised by the descriptor |
 | `GET` | `/v1/describe` | Declare protocol, descriptor, work unit, paths, and parameter shape |
 | `GET` | `/ready` | Readiness probe |
 
@@ -97,3 +103,6 @@ ingest and HLS, emits one final cumulative event, and destroys callback,
 grant, stream-key, and storage credentials. A runner must never serve media
 after terminal state. Secret destruction removes the current wrapped
 per-session key and encrypted payload from durable runner state.
+The runner persists a stopping intent before touching media; restart retries
+that same termination reason and never re-authorizes ingest while cleanup is
+incomplete.

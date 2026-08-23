@@ -1,0 +1,255 @@
+package liverunner
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+const testBrokerTokenV1 = "broker-token-0123456789abcdef0123"
+
+type fakeLiveRuntimeV1 struct {
+	mu             sync.Mutex
+	ensureCount    int
+	terminateCount int
+	failEnsure     bool
+	failTerminate  bool
+}
+
+func (f *fakeLiveRuntimeV1) EnsureSession(context.Context, SessionRecordV1, SessionSecretsV1) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensureCount++
+	if f.failEnsure {
+		return errors.New("unsafe runtime detail")
+	}
+	return nil
+}
+
+func (f *fakeLiveRuntimeV1) TerminateSession(context.Context, SessionRecordV1) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminateCount++
+	if f.failTerminate {
+		return errors.New("unsafe runtime detail")
+	}
+	return nil
+}
+
+func TestLiveRunnerCreateReplayStatusAndTerminate(t *testing.T) {
+	handler, store, runtime := testLiveRunnerHandlerV1(t)
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+
+	unauthorized := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, "")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized create=%d", unauthorized.Code)
+	}
+	first := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if first.Code != http.StatusOK {
+		t.Fatalf("create=%d %s", first.Code, first.Body.String())
+	}
+	var created RunnerCreateResponseV1
+	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil || ValidateCreateResponseV1(created) != nil {
+		t.Fatalf("create response=%+v err=%v", created, err)
+	}
+	replay := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if replay.Code != http.StatusOK || replay.Body.String() != first.Body.String() {
+		t.Fatalf("create replay=%d %s want %s", replay.Code, replay.Body.String(), first.Body.String())
+	}
+	changed := create
+	changed.CallbackToken = "changed-callback-token"
+	conflict := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", changed, testBrokerTokenV1)
+	if conflict.Code != http.StatusConflict || !bytes.Contains(conflict.Body.Bytes(), []byte(ErrSessionIDReuseV1.Error())) {
+		t.Fatalf("changed create=%d %s", conflict.Code, conflict.Body.String())
+	}
+
+	status := runnerRequestV1(t, handler, http.MethodGet, "/v1/sessions/"+created.RunnerSessionID, nil, testBrokerTokenV1)
+	if status.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", status.Code, status.Body.String())
+	}
+	var gotStatus RunnerStatusV1
+	if err := json.Unmarshal(status.Body.Bytes(), &gotStatus); err != nil || gotStatus.State != "active" || gotStatus.Usage.Unit != WorkUnitV1 {
+		t.Fatalf("status=%+v err=%v", gotStatus, err)
+	}
+	publicStatus := runnerRequestV1(t, handler, http.MethodGet, "/v1/public/sessions/"+created.RunnerSessionID+"/status", nil, "")
+	if publicStatus.Code != http.StatusOK || publicStatus.Body.String() != status.Body.String() {
+		t.Fatalf("public status=%d %s", publicStatus.Code, publicStatus.Body.String())
+	}
+
+	terminated := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
+	if terminated.Code != http.StatusOK {
+		t.Fatalf("terminate=%d %s", terminated.Code, terminated.Body.String())
+	}
+	repeated := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
+	if repeated.Code != http.StatusOK || repeated.Body.String() != terminated.Body.String() {
+		t.Fatalf("terminate replay=%d %s", repeated.Code, repeated.Body.String())
+	}
+	record, _, err := store.Load(create.SessionID)
+	if err != nil || record.State != "ended" || len(record.PendingEvents) != 1 || record.PendingEvents[0].EventType != "session.ended" {
+		t.Fatalf("terminal record=%+v err=%v", record, err)
+	}
+	runtime.mu.Lock()
+	ensureCount, terminateCount := runtime.ensureCount, runtime.terminateCount
+	runtime.mu.Unlock()
+	if ensureCount != 2 || terminateCount != 1 {
+		t.Fatalf("runtime calls ensure=%d terminate=%d", ensureCount, terminateCount)
+	}
+}
+
+func TestLiveRunnerStreamKeyGrantAndRotation(t *testing.T) {
+	handler, _, _ := testLiveRunnerHandlerV1(t)
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	createdRecorder := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	var created RunnerCreateResponseV1
+	_ = json.Unmarshal(createdRecorder.Body.Bytes(), &created)
+	grant := created.Runtime.Grants[0]
+	keyPath := "/v1/sessions/" + created.RunnerSessionID + "/stream-keys"
+	issue := StreamKeyIssueRequestV1{RequestID: "key_issue_001", Audience: "gateway-relay"}
+	first := runnerRequestV1(t, handler, http.MethodPost, keyPath, issue, grant.Secret)
+	if first.Code != http.StatusOK {
+		t.Fatalf("key issue=%d %s", first.Code, first.Body.String())
+	}
+	var issued StreamKeyIssueResponseV1
+	_ = json.Unmarshal(first.Body.Bytes(), &issued)
+	streamPath, token, ok := ParsePrivateIngestStreamKeyV1(issued.StreamKey)
+	if !ok || streamPath != "ingest/"+created.RunnerSessionID || token == "" {
+		t.Fatalf("issued stream key=%q", issued.StreamKey)
+	}
+	replay := runnerRequestV1(t, handler, http.MethodPost, keyPath, issue, grant.Secret)
+	if replay.Code != http.StatusOK || replay.Body.String() != first.Body.String() {
+		t.Fatalf("key replay=%d %s", replay.Code, replay.Body.String())
+	}
+	wrongAudience := StreamKeyIssueRequestV1{RequestID: "key_issue_wrong", Audience: "direct-publisher"}
+	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, wrongAudience, grant.Secret); response.Code != http.StatusBadRequest {
+		t.Fatalf("wrong audience=%d %s", response.Code, response.Body.String())
+	}
+	rotation := StreamKeyIssueRequestV1{RequestID: "key_issue_002", Audience: "gateway-relay"}
+	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, rotation, grant.Secret); response.Code != http.StatusOK {
+		t.Fatalf("rotation=%d %s", response.Code, response.Body.String())
+	}
+	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, issue, grant.Secret); response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(ErrRequestSupersededV1.Error())) {
+		t.Fatalf("superseded replay=%d %s", response.Code, response.Body.String())
+	}
+	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, rotation, "wrong-grant"); response.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong grant=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestLiveRunnerCreatePersistsBeforeRuntimeAndRecovers(t *testing.T) {
+	handler, store, runtime := testLiveRunnerHandlerV1(t)
+	runtime.failEnsure = true
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	first := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if first.Code != http.StatusServiceUnavailable || bytes.Contains(first.Body.Bytes(), []byte("unsafe runtime detail")) {
+		t.Fatalf("failed runtime create=%d %s", first.Code, first.Body.String())
+	}
+	record, secrets, err := store.Load(create.SessionID)
+	if err != nil || secrets == nil || record.State != "active" {
+		t.Fatalf("pre-runtime durable state=%+v secrets=%v err=%v", record, secrets != nil, err)
+	}
+	runtime.failEnsure = false
+	retry := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("recovered create=%d %s", retry.Code, retry.Body.String())
+	}
+	var recovered RunnerCreateResponseV1
+	_ = json.Unmarshal(retry.Body.Bytes(), &recovered)
+	if recovered.RunnerSessionID != record.RunnerSessionID {
+		t.Fatalf("recovery changed runner ID: %q != %q", recovered.RunnerSessionID, record.RunnerSessionID)
+	}
+}
+
+func TestLiveRunnerTerminationIntentSurvivesRuntimeFailure(t *testing.T) {
+	handler, store, runtime := testLiveRunnerHandlerV1(t)
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	createdRecorder := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	var created RunnerCreateResponseV1
+	_ = json.Unmarshal(createdRecorder.Body.Bytes(), &created)
+	runtime.failTerminate = true
+	failed := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
+	if failed.Code != http.StatusServiceUnavailable || bytes.Contains(failed.Body.Bytes(), []byte("unsafe runtime detail")) {
+		t.Fatalf("failed termination=%d %s", failed.Code, failed.Body.String())
+	}
+	record, _, err := store.Load(create.SessionID)
+	if err != nil || !record.Stopping || record.PendingCloseReason != "gateway_close" || record.State != "active" {
+		t.Fatalf("durable stopping intent=%+v err=%v", record, err)
+	}
+	if replay := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1); replay.Code != http.StatusGone {
+		t.Fatalf("create restarted stopping session: %d %s", replay.Code, replay.Body.String())
+	}
+	runtime.failTerminate = false
+	recovered := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: "runner_failed"}, testBrokerTokenV1)
+	if recovered.Code != http.StatusOK {
+		t.Fatalf("termination recovery=%d %s", recovered.Code, recovered.Body.String())
+	}
+	var response TerminateResponseV1
+	_ = json.Unmarshal(recovered.Body.Bytes(), &response)
+	if response.CloseReason != "gateway_close" {
+		t.Fatalf("termination recovery changed first durable reason: %+v", response)
+	}
+}
+
+func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
+	handler, _, _ := testLiveRunnerHandlerV1(t)
+	describe := runnerRequestV1(t, handler, http.MethodGet, "/v1/describe", nil, "")
+	var value DescribeResponseV1
+	if describe.Code != http.StatusOK || json.Unmarshal(describe.Body.Bytes(), &value) != nil || ValidateDescribeV1(value) != nil {
+		t.Fatalf("describe=%d %s", describe.Code, describe.Body.String())
+	}
+	if ready := runnerRequestV1(t, handler, http.MethodGet, "/ready", nil, ""); ready.Code != http.StatusNoContent {
+		t.Fatalf("ready=%d", ready.Code)
+	}
+	unknown := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/unknown_runner", TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
+	if unknown.Code != http.StatusNoContent {
+		t.Fatalf("unknown terminate=%d %s", unknown.Code, unknown.Body.String())
+	}
+}
+
+func testLiveRunnerHandlerV1(t *testing.T) (http.Handler, *EncryptedFileSessionStoreV1, *fakeLiveRuntimeV1) {
+	t.Helper()
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x66}, 32))
+	runtime := &fakeLiveRuntimeV1{}
+	fixedNow := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	var randomByte byte
+	randomSource := func(size int) ([]byte, error) {
+		randomByte++
+		return bytes.Repeat([]byte{randomByte}, size), nil
+	}
+	server := &LiveRunnerServerV1{
+		Store: store, Runtime: runtime, BrokerToken: testBrokerTokenV1, KeyTTL: 10 * time.Minute, Now: func() time.Time { return fixedNow }, Random: randomSource,
+		Factory: RunnerResponseFactoryV1{
+			PublicRTMPURL: "rtmps://runner.example/ingest", PublicHLSBase: "https://runner.example", PublicAPIBase: "https://runner.example", GrantTTL: time.Hour,
+			Now: func() time.Time { return fixedNow }, Random: randomSource,
+		},
+	}
+	handler, err := server.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, store, runtime
+}
+
+func runnerRequestV1(t *testing.T, handler http.Handler, method, path string, body any, bearer string) *httptest.ResponseRecorder {
+	t.Helper()
+	var encoded []byte
+	if body != nil {
+		var err error
+		encoded, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+	if bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}

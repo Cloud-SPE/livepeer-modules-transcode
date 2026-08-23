@@ -43,6 +43,8 @@ type SessionRecordV1 struct {
 	RunnerSessionID      string          `json:"runner_session_id"`
 	CreateFingerprint    string          `json:"create_fingerprint"`
 	State                string          `json:"state"`
+	Stopping             bool            `json:"stopping,omitempty"`
+	PendingCloseReason   string          `json:"pending_close_reason,omitempty"`
 	RuntimePublic        RuntimePublicV1 `json:"runtime_public"`
 	GrantAudit           GrantAuditV1    `json:"grant_audit"`
 	UsageTotal           uint64          `json:"usage_total"`
@@ -113,7 +115,7 @@ func (s *EncryptedFileSessionStoreV1) CreateOrReplay(request RunnerCreateRequest
 		if record.CreateFingerprint != fingerprint {
 			return SessionRecordV1{}, SessionSecretsV1{}, false, ErrSessionIDReuseV1
 		}
-		if record.State != "active" || secrets == nil {
+		if record.State != "active" || record.Stopping || secrets == nil {
 			return SessionRecordV1{}, SessionSecretsV1{}, false, ErrSessionTerminalV1
 		}
 		return cloneSessionRecordV1(record), cloneSessionSecretsV1(*secrets), true, nil
@@ -171,7 +173,7 @@ func (s *EncryptedFileSessionStoreV1) RecordKeyIssue(brokerSessionID string, req
 	if err != nil {
 		return StreamKeyIssueResponseV1{}, false, err
 	}
-	if record.State != "active" || secrets == nil {
+	if record.State != "active" || record.Stopping || secrets == nil {
 		return StreamKeyIssueResponseV1{}, false, ErrSessionTerminalV1
 	}
 	if stored, ok := secrets.KeyIssues[request.RequestID]; ok {
@@ -205,8 +207,11 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 	if err != nil {
 		return err
 	}
-	if record.State != "active" {
+	if record.State != "active" || (record.Stopping && event.State == "active") {
 		return ErrSessionTerminalV1
+	}
+	if record.Stopping && (event.CloseReason == nil || *event.CloseReason != record.PendingCloseReason) {
+		return errors.New("terminal event does not match durable close reason")
 	}
 	if event.EventID != record.RunnerSessionID+":"+strconv.FormatUint(event.Sequence, 10) {
 		return errors.New("event ID must be derived from runner session ID and sequence")
@@ -224,8 +229,34 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 	if event.State == "ended" || event.State == "failed" {
 		record.State = event.State
 		record.CloseReason = *event.CloseReason
+		record.Stopping = false
+		record.PendingCloseReason = ""
 	}
 	return s.saveLocked(record)
+}
+
+func (s *EncryptedFileSessionStoreV1) BeginTermination(brokerSessionID, reason string) (SessionRecordV1, bool, error) {
+	if !validCloseReasonV1(reason) {
+		return SessionRecordV1{}, false, errors.New("termination reason is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, _, err := s.loadLocked(brokerSessionID)
+	if err != nil {
+		return SessionRecordV1{}, false, err
+	}
+	if record.State != "active" {
+		return cloneSessionRecordV1(record), false, nil
+	}
+	if record.Stopping {
+		return cloneSessionRecordV1(record), false, nil
+	}
+	record.Stopping = true
+	record.PendingCloseReason = reason
+	if err := s.saveLocked(record); err != nil {
+		return SessionRecordV1{}, false, err
+	}
+	return cloneSessionRecordV1(record), true, nil
 }
 
 func (s *EncryptedFileSessionStoreV1) AcknowledgeEvent(brokerSessionID, eventID string) error {
@@ -501,6 +532,9 @@ func validateSessionRecordV1(record SessionRecordV1, id string) error {
 	terminal := record.State == "ended" || record.State == "failed"
 	if terminal != (record.CloseReason != "") || (record.CloseReason != "" && !validCloseReasonV1(record.CloseReason)) {
 		return errors.New("session record terminal state is invalid")
+	}
+	if record.Stopping != (record.PendingCloseReason != "") || (record.PendingCloseReason != "" && !validCloseReasonV1(record.PendingCloseReason)) || terminal && record.Stopping {
+		return errors.New("session record stopping state is invalid")
 	}
 	var previousSequence uint64
 	var previousUsage uint64
