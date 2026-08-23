@@ -62,6 +62,11 @@ keeps gateway wall clock plus advancing HLS useful as independent checks.
 Every event has a durable positive sequence and stable event ID. Usage totals
 never decrease. An accepted event is also a heartbeat; otherwise the runner
 emits `session.heartbeat` within the offering's required cadence.
+Callbacks are delivered from the durable outbox in sequence order with the
+per-session callback bearer. Any 2xx broker response acknowledges an event;
+timeouts, 408, 429, and 5xx responses remain retryable. Redirects are never
+followed, preventing callback credentials from crossing the broker-selected
+origin.
 
 ## Credential boundary
 
