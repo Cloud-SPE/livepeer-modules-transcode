@@ -31,7 +31,8 @@ create. Stream-key issuance uses the `stream-key-issue` grant bearer, never
 the broker credential or callback token. A key-issuance `request_id` is its
 idempotency key: an identical retry returns the same key; changed content is
 `request_id_reuse`; a new request ID rotates the key and invalidates its
-predecessor.
+predecessor. Retrying a superseded request ID returns `request_id_superseded`
+instead of disclosing a key that can no longer publish.
 
 ## Metering
 
@@ -65,9 +66,12 @@ runner session ID, exact descriptor, encrypted callback token, grant hash and
 encrypted secret, session parameters, state, event sequence, cumulative
 usage, and issued-key request records. Restart returns the same status and
 continues the next sequence without resetting usage or reissuing a grant.
+Each session's secrets use an independent data-encryption key wrapped by the
+runner master key, and the complete durable record is integrity-protected.
 
 Termination is idempotent. Unknown, already-ended, and repeated termination
 requests succeed without restarting media. The terminal transition stops
 ingest and HLS, emits one final cumulative event, and destroys callback,
 grant, stream-key, and storage credentials. A runner must never serve media
-after terminal state.
+after terminal state. Secret destruction removes the current wrapped
+per-session key and encrypted payload from durable runner state.

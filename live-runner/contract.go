@@ -277,10 +277,53 @@ func ValidateEventV1(value RunnerEventV1) error {
 	if value.Usage != nil && value.Usage.Unit != WorkUnitV1 {
 		return errors.New("event work unit is invalid")
 	}
-	if len(value.Details) == 0 || !json.Valid(value.Details) {
-		return errors.New("event details must be JSON")
+	if err := validateSafeEventDetailsV1(value.Details); err != nil {
+		return err
 	}
 	return nil
+}
+
+func validateSafeEventDetailsV1(raw json.RawMessage) error {
+	if len(raw) == 0 || len(raw) > 2048 || !json.Valid(raw) {
+		return errors.New("event details must be bounded JSON")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var details map[string]any
+	if err := decoder.Decode(&details); err != nil || details == nil {
+		return errors.New("event details must be a JSON object")
+	}
+	if unsafeEventDetailV1(details) {
+		return errors.New("event details contain credential-bearing data")
+	}
+	return nil
+}
+
+func unsafeEventDetailV1(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			lower := strings.ToLower(key)
+			for _, forbidden := range []string{"token", "secret", "credential", "authorization", "stream_key", "streamkey", "url", "password"} {
+				if strings.Contains(lower, forbidden) {
+					return true
+				}
+			}
+			if unsafeEventDetailV1(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if unsafeEventDetailV1(child) {
+				return true
+			}
+		}
+	case string:
+		lower := strings.ToLower(typed)
+		return strings.Contains(lower, "://") || strings.Contains(lower, "sig=") || strings.Contains(lower, "bearer ")
+	}
+	return false
 }
 
 func ValidateEventAdvanceV1(previous, next RunnerEventV1) error {

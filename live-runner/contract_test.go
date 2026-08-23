@@ -174,6 +174,20 @@ func TestTerminalReasonsCannotCarryCredentials(t *testing.T) {
 	}
 }
 
+func TestEventsRejectCredentialBearingDetails(t *testing.T) {
+	event := RunnerEventV1{
+		EventID: "runner_session_001:1", Sequence: 1, EventType: "session.heartbeat",
+		EventTime: "2026-08-23T12:00:00Z", State: "active", Details: json.RawMessage(`{"callback_url":"https://broker.example/callback?sig=secret"}`),
+	}
+	if err := ValidateEventV1(event); err == nil || strings.Contains(err.Error(), "broker.example") {
+		t.Fatalf("credential-bearing details validation = %v", err)
+	}
+	event.Details = json.RawMessage(`{"metering_rendition":"720p","segments":4}`)
+	if err := ValidateEventV1(event); err != nil {
+		t.Fatalf("safe event details rejected: %v", err)
+	}
+}
+
 func readStrictFixtureV1[T any](t *testing.T, name string) T {
 	t.Helper()
 	file, err := os.Open(fixturePathV1(name))
