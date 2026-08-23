@@ -1,0 +1,28 @@
+{
+  "protocols": ["paid-session/v1"],
+  "capabilities": [
+    {
+      "capability_id": "video:live.rtmp",
+      "descriptor_schemas": ["rtmp-hls/v1"],
+      "work_unit": "output_seconds",
+      "metering": "runner-reported",
+      "heartbeat": { "interval_seconds": 5 },
+      "readiness": { "path": "/ready" },
+      "session_params_schema": {
+        "required": ["schema", "publisher_mode", "output_profile", "metering_rendition", "storage"],
+        "properties": {
+          "schema": "string",
+          "publisher_mode": "gateway-relay|direct-publisher",
+          "output_profile": "string",
+          "metering_rendition": "string",
+          "storage": "object"
+        }
+      },
+      "paths": {
+        "create": "/v1/sessions",
+        "status": "/v1/sessions/{id}",
+        "terminate": "/v1/sessions/{id}"
+      }
+    }
+  ]
+}

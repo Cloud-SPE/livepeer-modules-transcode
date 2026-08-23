@@ -32,6 +32,13 @@ The paid-session open uses external attachment and `session_params` for the
 runner-owned ingest configuration. Protocol infrastructure passes those
 parameters verbatim and never interprets, logs, or relays them.
 
+The versioned parameter schema is `rtmp-hls-session/v1`. It selects
+`gateway-relay` or explicitly opted-in `direct-publisher`, names the output
+profile and one metering rendition, and carries either runner-local storage
+or short-lived S3/MinIO STS coordinates. The callback token and storage
+credentials are create-only secrets. The ingest key is not a session
+parameter: it is issued and rotated through the descriptor grant.
+
 ## Session flow
 
 1. The gateway authenticates the customer, creates a public key, and persists
@@ -59,8 +66,17 @@ parameters verbatim and never interprets, logs, or relays them.
 ## Usage and balance
 
 The billable work unit is `output_seconds`, reported and signed by the runner.
+It is the cumulative whole seconds of finalized segments on the named
+metering rendition, floored after summing segment durations. It is measured
+once for the playable program timeline, not multiplied by the ABR ladder.
 Gateway wall-clock duration, RTMP byte counts, and HLS observations are useful
 cross-checks and anomaly signals only; they never replace the protocol claim.
+
+Runner events use durable positive monotonic sequences and stable unique IDs.
+Claims never decrease, retries reuse the same event identity, and terminal
+events carry the final cumulative claim. An accepted usage event refreshes
+liveness; the runner emits a separate heartbeat when no other event occurs
+inside its declared cadence.
 
 The normative balance object includes `will_refuse_next_refill`. A broker must
 advertise refusal before rejecting the next refill and must not accept funding
@@ -95,4 +111,7 @@ safe. Production release is gated on the coordinated LOC/clearinghouse
 resolution tracked in Beads.
 
 See [plan 0018](../exec-plans/active/0018-livepeer-modules-v2-migration.md)
-and [requirements](./requirements.md).
+and [requirements](./requirements.md). Executable cross-repository fixtures
+and strict local types live in
+[`live-runner/testdata/contracts/v1/`](../../live-runner/testdata/contracts/v1/)
+and [`live-runner/contract.go`](../../live-runner/contract.go).

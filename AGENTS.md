@@ -61,6 +61,8 @@ Repository components:
   single-rendition.
 - `abr-runner/` — Go binary. `POST /v1/video/transcode/abr` — VOD
   multi-rendition ABR ladder.
+- `live-runner/` — Go runner for `paid-session/v1` RTMP ingest, LL-HLS
+  output, stream-key grants, and cumulative `output_seconds` events.
 - `codecs-builder/` — Dockerfile-only. Multi-stage base image with x264,
   SVT-AV1, libopus, libvpx, libzimg compiled from source. Other runners
   `FROM codecs-builder:<tag>`.

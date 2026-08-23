@@ -22,7 +22,7 @@ flowchart LR
     G -->|open, recover, refill, close| L[LOC SDK/API]
     L -->|funded protocol requests| B[capability-broker]
     B -->|ABR request + SSE result| A[abr-runner]
-    B -->|live session + credentials| V[live runner]
+    B -->|live session + credentials| V[live-runner]
     C -->|RTMP public key| G
     G -->|RTMP relay with private runner key| B
     G -->|email| E[Resend]

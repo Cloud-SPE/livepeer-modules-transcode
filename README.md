@@ -17,8 +17,9 @@ A single deployable product:
   encoding jobs (presigned upload → one paid ABR exchange → HLS manifest +
   playback URL) and start live streams (RTMP ingest → broker live
   session → LL-HLS strict-proxy).
-- Two Go workload runners (`transcode-runner/` for single-rendition,
-  `abr-runner/` for multi-rendition) plus a shared Go library
+- Three Go workload runners (`transcode-runner/` for single-rendition,
+  `abr-runner/` for multi-rendition, and `live-runner/` for paid RTMP/LL-HLS
+  sessions) plus a shared Go library
   (`transcode-core/`) and a multi-stage codec base image
   (`codecs-builder/`).
 - A Node integration smoke harness (`transcode-tester/`).
