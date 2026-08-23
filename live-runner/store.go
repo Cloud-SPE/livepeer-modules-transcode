@@ -284,6 +284,37 @@ func (s *EncryptedFileSessionStoreV1) Recoverable() ([]SessionRecordV1, error) {
 	return records, nil
 }
 
+func (s *EncryptedFileSessionStoreV1) LoadByRunnerSessionID(runnerSessionID string) (SessionRecordV1, *SessionSecretsV1, error) {
+	if !opaqueIDPattern.MatchString(runnerSessionID) {
+		return SessionRecordV1{}, nil, errors.New("invalid runner session ID")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return SessionRecordV1{}, nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := stringsTrimSuffixV1(entry.Name(), ".json")
+		record, secrets, err := s.loadLocked(id)
+		if err != nil {
+			return SessionRecordV1{}, nil, err
+		}
+		if record.RunnerSessionID == runnerSessionID {
+			copy := cloneSessionRecordV1(record)
+			if secrets == nil {
+				return copy, nil, nil
+			}
+			secretCopy := cloneSessionSecretsV1(*secrets)
+			return copy, &secretCopy, nil
+		}
+	}
+	return SessionRecordV1{}, nil, os.ErrNotExist
+}
+
 func (s *EncryptedFileSessionStoreV1) loadLocked(id string) (SessionRecordV1, *SessionSecretsV1, error) {
 	if !opaqueIDPattern.MatchString(id) {
 		return SessionRecordV1{}, nil, errors.New("invalid broker session ID")

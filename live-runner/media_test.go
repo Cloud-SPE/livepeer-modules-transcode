@@ -1,0 +1,192 @@
+package liverunner
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestMediaMTXConfigIsMinimalLowLatencyAndPrivate(t *testing.T) {
+	config, err := RenderMediaMTXConfigV1(DefaultMediaMTXConfigV1("http://127.0.0.1:8080/internal/mediamtx/auth"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"authMethod: http", "hlsVariant: lowLatency", "hlsAlwaysRemux: true",
+		"rtmp: true", "rtsp: false", "webrtc: false", "srt: false", "moq: false",
+		"hlsAddress: 127.0.0.1:8888", "apiAddress: 127.0.0.1:9997", "metricsAddress: 127.0.0.1:9998",
+		"overridePublisher: false", "record: false",
+	} {
+		if !bytes.Contains(config, []byte(required)) {
+			t.Fatalf("generated config missing %q:\n%s", required, config)
+		}
+	}
+	if bytes.Contains(config, []byte("internal-router-secret")) {
+		t.Fatal("generated MediaMTX config contains the runner media token")
+	}
+	unsafe := DefaultMediaMTXConfigV1("http://127.0.0.1:8080/internal/mediamtx/auth")
+	unsafe.HLSAddress = ":8888"
+	if _, err := RenderMediaMTXConfigV1(unsafe); err == nil {
+		t.Fatal("public MediaMTX HLS listener was accepted")
+	}
+	unsafe.HLSAddress = "127.0.0.1:8888\nhlsEncryption: true"
+	if _, err := RenderMediaMTXConfigV1(unsafe); err == nil {
+		t.Fatal("configuration injection through a listen address was accepted")
+	}
+}
+
+func TestMediaMTXAuthorizationSeparatesIngestInternalAndPlayback(t *testing.T) {
+	store, request, response, streamKey := mediaTestSessionV1(t)
+	rootToken := "0123456789abcdef0123456789abcdef"
+	authorizer := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: rootToken}
+	internalToken := InternalMediaTokenV1(rootToken, response.RunnerSessionID)
+	ingestPath, _ := IngestMediaPathV1(response.RunnerSessionID)
+	renditionPath, _ := RenditionMediaPathV1(response.RunnerSessionID, "720p")
+
+	tests := []struct {
+		name    string
+		request MediaMTXAuthRequestV1
+		want    bool
+	}{
+		{"gateway publish", MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: streamKey}, true},
+		{"wrong gateway key", MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: "wrong"}, false},
+		{"runner ingest read", MediaMTXAuthRequestV1{Action: "read", Path: ingestPath, Protocol: "rtmp", Token: internalToken}, true},
+		{"customer cannot read ingest", MediaMTXAuthRequestV1{Action: "read", Path: ingestPath, Protocol: "rtmp", Token: streamKey}, false},
+		{"runner rendition publish", MediaMTXAuthRequestV1{Action: "publish", Path: renditionPath, Protocol: "rtmp", Token: internalToken}, true},
+		{"customer cannot publish rendition", MediaMTXAuthRequestV1{Action: "publish", Path: renditionPath, Protocol: "rtmp", Token: streamKey}, false},
+		{"private HLS playback", MediaMTXAuthRequestV1{Action: "read", Path: renditionPath, Protocol: "hls"}, true},
+		{"unknown path", MediaMTXAuthRequestV1{Action: "read", Path: "other/" + response.RunnerSessionID, Protocol: "hls"}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := authorizer.Authorize(test.request); got != test.want {
+				t.Fatalf("Authorize(%+v)=%v want %v", test.request, got, test.want)
+			}
+		})
+	}
+
+	ended := testEventV1(response.RunnerSessionID, 1, "session.ended", "ended", 0, "gateway_close")
+	if err := store.Advance(request.SessionID, ended); err != nil {
+		t.Fatal(err)
+	}
+	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "read", Path: renditionPath, Protocol: "hls"}) {
+		t.Fatal("terminal session retained media access")
+	}
+}
+
+func TestMediaMTXAuthorizationTracksKeyRotation(t *testing.T) {
+	store, request, response, oldKey := mediaTestSessionV1(t)
+	authorizer := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: "0123456789abcdef0123456789abcdef"}
+	ingestPath, _ := IngestMediaPathV1(response.RunnerSessionID)
+	rotation := StreamKeyIssueRequestV1{RequestID: "key_issue_002", Audience: "gateway-relay"}
+	rotated := StreamKeyIssueResponseV1{RequestID: rotation.RequestID, StreamKey: "new-private-ingest-key", ExpiresAt: "2030-01-01T00:00:00Z"}
+	if _, _, err := store.RecordKeyIssue(request.SessionID, rotation, rotated); err != nil {
+		t.Fatal(err)
+	}
+	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: oldKey}) {
+		t.Fatal("superseded stream key remained authorized")
+	}
+	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: rotated.StreamKey}) {
+		t.Fatal("rotated stream key was not authorized")
+	}
+}
+
+func TestMediaMTXAuthHTTPHandlerFailsClosed(t *testing.T) {
+	store, _, response, streamKey := mediaTestSessionV1(t)
+	handler := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: "0123456789abcdef0123456789abcdef"}
+	ingestPath, _ := IngestMediaPathV1(response.RunnerSessionID)
+	body, _ := json.Marshal(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: streamKey})
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/mediamtx/auth", bytes.NewReader(body))
+	responseRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(responseRecorder, request)
+	if responseRecorder.Code != http.StatusNoContent || responseRecorder.Body.Len() != 0 {
+		t.Fatalf("authorized response=%d %q", responseRecorder.Code, responseRecorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/internal/mediamtx/auth", strings.NewReader(`{"action":"publish","path":"bad","protocol":"rtmp","token":"do-not-echo","extra":true}`))
+	responseRecorder = httptest.NewRecorder()
+	handler.ServeHTTP(responseRecorder, request)
+	if responseRecorder.Code != http.StatusBadRequest || strings.Contains(responseRecorder.Body.String(), "do-not-echo") {
+		t.Fatalf("malformed response=%d %q", responseRecorder.Code, responseRecorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/internal/mediamtx/auth", strings.NewReader(`{"userAgent":"`+strings.Repeat("x", 17*1024)+`"}`))
+	responseRecorder = httptest.NewRecorder()
+	handler.ServeHTTP(responseRecorder, request)
+	if responseRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("oversized authentication request response=%d", responseRecorder.Code)
+	}
+}
+
+func TestMediaPathsRejectTraversal(t *testing.T) {
+	for _, raw := range []string{"/ingest/runner", "ingest/../runner", "renditions/runner", "renditions/runner/../../secret"} {
+		if _, _, _, ok := parseMediaPathV1(raw); ok {
+			t.Fatalf("unsafe media path accepted: %q", raw)
+		}
+	}
+}
+
+func TestInternalMediaTokensAreStableAndSessionScoped(t *testing.T) {
+	root := "0123456789abcdef0123456789abcdef"
+	first := InternalMediaTokenV1(root, "runner_session_001")
+	if first != InternalMediaTokenV1(root, "runner_session_001") || first == InternalMediaTokenV1(root, "runner_session_002") || len(first) != 64 {
+		t.Fatal("internal media token derivation is not stable and session-scoped")
+	}
+}
+
+func TestMediaMTXImageAcceptsGeneratedConfig(t *testing.T) {
+	if os.Getenv("LIVE_RUNNER_CONTAINER_TEST") != "1" {
+		t.Skip("set LIVE_RUNNER_CONTAINER_TEST=1 to exercise the pinned MediaMTX image")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker is not installed")
+	}
+	config, err := RenderMediaMTXConfigV1(DefaultMediaMTXConfigV1("http://127.0.0.1:8080/internal/mediamtx/auth"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "mediamtx.yml")
+	if err := os.WriteFile(configPath, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	containerName := fmt.Sprintf("live-runner-mediamtx-test-%d", os.Getpid())
+	cleanup := func() { _ = exec.Command("docker", "rm", "-f", containerName).Run() }
+	cleanup()
+	defer cleanup()
+	command := exec.CommandContext(ctx, "docker", "run", "--rm", "--name", containerName, "-v", configPath+":/mediamtx.yml:ro", MediaMTXImageV1)
+	output, runErr := command.CombinedOutput()
+	cleanup()
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("MediaMTX exited before readiness window: err=%v output=%s", runErr, output)
+	}
+	if bytes.Contains(bytes.ToLower(output), []byte("error")) {
+		t.Fatalf("MediaMTX reported a configuration error: %s", output)
+	}
+}
+
+func mediaTestSessionV1(t *testing.T) (*EncryptedFileSessionStoreV1, RunnerCreateRequestV1, RunnerCreateResponseV1, string) {
+	t.Helper()
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x44}, 32))
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	issue := readStrictFixtureV1[StreamKeyIssueRequestV1](t, "key-issue-request.json")
+	issued := readStrictFixtureV1[StreamKeyIssueResponseV1](t, "key-issue-response.json")
+	if _, _, err := store.RecordKeyIssue(request.SessionID, issue, issued); err != nil {
+		t.Fatal(err)
+	}
+	return store, request, response, issued.StreamKey
+}

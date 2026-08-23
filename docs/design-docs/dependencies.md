@@ -60,6 +60,9 @@ safe local email sink; raw secrets must not be written to production logs.
   `video-transcode-abr-result/v2` response per ladder.
 - `transcode-runner`: retained single-rendition runner where separately
   offered, but not used to split a product ABR request into paid sub-jobs.
+- `live-runner`: paid-session runner that supervises the pinned MediaMTX
+  `1.20.1` media router for authenticated RTMP and LL-HLS, and uses
+  `transcode-core` for the live rendition ladder.
 - `transcode-core` and `codecs-builder`: shared FFmpeg implementation/images.
 - `transcode-tester` and `e2e`: contract and integrated release gates.
 

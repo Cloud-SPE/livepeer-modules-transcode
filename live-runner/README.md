@@ -6,6 +6,23 @@ capability-owned `rtmp-hls/v1` runtime descriptor.
 This component currently pins the runner contract. Runtime implementation is
 tracked by Bead `lmt-65a.4.5`.
 
+## Media router
+
+The runner uses a pinned MediaMTX `1.20.1` process for authenticated
+RTMP routing and real low-latency HLS muxing. The immutable container image is
+recorded in `media.go`. RTMP is its only network-facing listener and is
+restricted to the broker/gateway network (or a TLS edge); HLS, API, and
+metrics bind to loopback and are reached through runner-owned surfaces.
+RTSP, WebRTC, SRT, MoQ, recording, and publisher replacement are disabled.
+
+MediaMTX delegates authentication to the runner. The current issued stream
+key can publish only `ingest/<runner-session-id>`. A separate per-session
+token derived from a runner-only root secret reads that ingest and publishes
+`renditions/<runner-session-id>/<name>`.
+Loopback HLS reads are allowed only while the corresponding session is
+active. Rotation immediately rejects the previous ingest key, and terminal
+state rejects every path.
+
 ## Runner surface
 
 Paths are operator-configured in Modules; these are this runner's declared
