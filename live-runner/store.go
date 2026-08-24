@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,6 +52,9 @@ type SessionRecordV1 struct {
 	GrantAudit             GrantAuditV1    `json:"grant_audit"`
 	UsageTotal             uint64          `json:"usage_total"`
 	LastSequence           uint64          `json:"last_sequence"`
+	MeteredMicroseconds    uint64          `json:"metered_microseconds,omitempty"`
+	MeteredSegmentSHA256   []string        `json:"metered_segment_sha256,omitempty"`
+	LastEventAt            string          `json:"last_event_at,omitempty"`
 	PendingEvents          []RunnerEventV1 `json:"pending_events"`
 	CloseReason            string          `json:"close_reason,omitempty"`
 	IntegritySHA256        string          `json:"integrity_sha256"`
@@ -247,6 +251,9 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 	if event.EventID != record.RunnerSessionID+":"+strconv.FormatUint(event.Sequence, 10) {
 		return errors.New("event ID must be derived from runner session ID and sequence")
 	}
+	if (record.MeteredMicroseconds > 0 || len(record.MeteredSegmentSHA256) > 0) && event.Usage != nil && event.Usage.Total != record.MeteredMicroseconds/1_000_000 {
+		return errors.New("event usage does not match the durable meter")
+	}
 	cursor := EventCursorV1{Sequence: record.LastSequence, UsageTotal: record.UsageTotal, HasUsage: record.LastSequence > 0, SeenIDs: make(map[string]struct{})}
 	for _, pending := range record.PendingEvents {
 		cursor.SeenIDs[pending.EventID] = struct{}{}
@@ -256,6 +263,7 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 	}
 	record.LastSequence = cursor.Sequence
 	record.UsageTotal = cursor.UsageTotal
+	record.LastEventAt = event.EventTime
 	record.PendingEvents = append(record.PendingEvents, event)
 	if event.State == "ended" || event.State == "failed" {
 		record.State = event.State
@@ -265,6 +273,74 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 		record.PendingKeyActivationID = ""
 	}
 	return s.saveLocked(record)
+}
+
+// RecordFinalizedSegments persists the exactly-once segment cursor, fractional
+// duration, and any newly earned whole-second usage event in one file replace.
+// The caller may safely replay any playlist after a timeout or process restart.
+func (s *EncryptedFileSessionStoreV1) RecordFinalizedSegments(brokerSessionID string, segments []FinalizedHLSSegmentV1, eventTime time.Time) (bool, error) {
+	if eventTime.IsZero() {
+		return false, errors.New("metering event time is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, _, err := s.loadLocked(brokerSessionID)
+	if err != nil {
+		return false, err
+	}
+	if record.State != "active" || record.Stopping {
+		return false, ErrSessionTerminalV1
+	}
+	if record.LastSequence == 0 {
+		return false, errors.New("session start must be recorded before usage")
+	}
+	seen := make(map[string]struct{}, len(record.MeteredSegmentSHA256)+len(segments))
+	for _, identity := range record.MeteredSegmentSHA256 {
+		seen[identity] = struct{}{}
+	}
+	changed := false
+	for _, segment := range segments {
+		if segment.URI == "" || segment.DurationMicroseconds == 0 {
+			return false, errors.New("finalized HLS segment is invalid")
+		}
+		digest := sha256.Sum256([]byte(segment.URI))
+		identity := hex.EncodeToString(digest[:])
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		total, carry := bits.Add64(record.MeteredMicroseconds, segment.DurationMicroseconds, 0)
+		if carry != 0 {
+			return false, errors.New("output timeline overflow")
+		}
+		record.MeteredMicroseconds = total
+		record.MeteredSegmentSHA256 = append(record.MeteredSegmentSHA256, identity)
+		seen[identity] = struct{}{}
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	usageTotal := record.MeteredMicroseconds / 1_000_000
+	emitted := usageTotal > record.UsageTotal
+	if emitted {
+		if record.LastSequence == ^uint64(0) {
+			return false, errors.New("event sequence overflow")
+		}
+		sequence := record.LastSequence + 1
+		event := RunnerEventV1{
+			EventID: record.RunnerSessionID + ":" + strconv.FormatUint(sequence, 10), Sequence: sequence,
+			EventType: "session.usage.tick", EventTime: eventTime.UTC().Format(time.RFC3339Nano), State: "active",
+			Usage: &UsageV1{Unit: WorkUnitV1, Total: usageTotal}, Details: json.RawMessage(`{}`),
+		}
+		if err := ValidateEventV1(event); err != nil {
+			return false, err
+		}
+		record.LastSequence = sequence
+		record.UsageTotal = usageTotal
+		record.LastEventAt = event.EventTime
+		record.PendingEvents = append(record.PendingEvents, event)
+	}
+	return emitted, s.saveLocked(record)
 }
 
 func (s *EncryptedFileSessionStoreV1) BeginTermination(brokerSessionID, reason string) (SessionRecordV1, bool, error) {
@@ -590,6 +666,25 @@ func validateSessionRecordV1(record SessionRecordV1, id string) error {
 	}
 	if record.UsageTotal > 0 && record.LastSequence == 0 {
 		return errors.New("session record usage cursor is invalid")
+	}
+	hasMeteringCursor := record.MeteredMicroseconds > 0 || len(record.MeteredSegmentSHA256) > 0
+	if (hasMeteringCursor && record.MeteredMicroseconds/1_000_000 != record.UsageTotal) || (len(record.MeteredSegmentSHA256) > 0 && record.MeteredMicroseconds == 0) {
+		return errors.New("session record metering cursor is invalid")
+	}
+	seenSegments := make(map[string]struct{}, len(record.MeteredSegmentSHA256))
+	for _, identity := range record.MeteredSegmentSHA256 {
+		if !workIDPattern.MatchString(identity) {
+			return errors.New("session record segment identity is invalid")
+		}
+		if _, exists := seenSegments[identity]; exists {
+			return errors.New("session record segment identity is duplicated")
+		}
+		seenSegments[identity] = struct{}{}
+	}
+	if record.LastEventAt != "" {
+		if _, err := time.Parse(time.RFC3339Nano, record.LastEventAt); err != nil || record.LastSequence == 0 {
+			return errors.New("session record event time is invalid")
+		}
 	}
 	if len(record.PendingEvents) > 0 {
 		last := record.PendingEvents[len(record.PendingEvents)-1]

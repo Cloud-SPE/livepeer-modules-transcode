@@ -146,6 +146,46 @@ func TestEncryptedStoreEventOutboxRecoveryAndCryptoErase(t *testing.T) {
 	}
 }
 
+func TestEncryptedStoreMetersFinalizedSegmentsExactlyOnceAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	key := bytes.Repeat([]byte{0x5e}, 32)
+	store := newTestStoreV1(t, dir, key)
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Advance(request.SessionID, testEventV1(response.RunnerSessionID, 1, "session.started", "active", 0, "")); err != nil {
+		t.Fatal(err)
+	}
+	first := []FinalizedHLSSegmentV1{{URI: "seg-1.mp4", DurationMicroseconds: 400_000}, {URI: "seg-2.mp4", DurationMicroseconds: 600_000}}
+	emitted, err := store.RecordFinalizedSegments(request.SessionID, first, time.Date(2026, 8, 24, 12, 0, 1, 0, time.UTC))
+	if err != nil || !emitted {
+		t.Fatalf("first emitted=%v err=%v", emitted, err)
+	}
+	record, _, err := store.Load(request.SessionID)
+	if err != nil || record.MeteredMicroseconds != 1_000_000 || record.UsageTotal != 1 || record.LastSequence != 2 || len(record.MeteredSegmentSHA256) != 2 || len(record.PendingEvents) != 2 {
+		t.Fatalf("first record=%+v err=%v", record, err)
+	}
+
+	restarted := newTestStoreV1(t, dir, key)
+	emitted, err = restarted.RecordFinalizedSegments(request.SessionID, append(first, FinalizedHLSSegmentV1{URI: "seg-3.mp4", DurationMicroseconds: 500_000}), time.Date(2026, 8, 24, 12, 0, 2, 0, time.UTC))
+	if err != nil || emitted {
+		t.Fatalf("fraction emitted=%v err=%v", emitted, err)
+	}
+	emitted, err = restarted.RecordFinalizedSegments(request.SessionID, []FinalizedHLSSegmentV1{{URI: "seg-3.mp4", DurationMicroseconds: 500_000}, {URI: "seg-4.mp4", DurationMicroseconds: 500_000}}, time.Date(2026, 8, 24, 12, 0, 3, 0, time.UTC))
+	if err != nil || !emitted {
+		t.Fatalf("second emitted=%v err=%v", emitted, err)
+	}
+	record, _, err = restarted.Load(request.SessionID)
+	if err != nil || record.MeteredMicroseconds != 2_000_000 || record.UsageTotal != 2 || record.LastSequence != 3 || len(record.MeteredSegmentSHA256) != 4 || len(record.PendingEvents) != 3 {
+		t.Fatalf("restarted record=%+v err=%v", record, err)
+	}
+	last := record.PendingEvents[len(record.PendingEvents)-1]
+	if last.EventID != response.RunnerSessionID+":3" || last.EventType != "session.usage.tick" || last.Usage == nil || last.Usage.Total != 2 {
+		t.Fatalf("usage event=%+v", last)
+	}
+}
+
 func TestEncryptedStoreRejectsTamperedState(t *testing.T) {
 	dir := t.TempDir()
 	store := newTestStoreV1(t, dir, bytes.Repeat([]byte{0x6e}, 32))
