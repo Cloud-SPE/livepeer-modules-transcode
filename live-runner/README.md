@@ -109,6 +109,13 @@ session's named `metering_rendition`. Segment durations are summed once and
 floored after aggregation. It is not input duration, wall-clock time, or a
 sum across the ABR ladder. This makes the claim a playable-output measure and
 keeps gateway wall clock plus advancing HLS useful as independent checks.
+The runner polls MediaMTX's rendition media playlist and counts only complete
+`EXTINF` segments, never low-latency parts. It atomically persists hashed
+segment identities, the fractional microsecond total, and any resulting usage
+event. Playlist rereads and process restarts therefore converge without a
+second claim, while a new media epoch's new segment identities continue the
+same cumulative timeline. Unavailable or malformed playlists are retried and
+cannot advance usage.
 
 Every event has a durable positive sequence and stable event ID. Usage totals
 never decrease. An accepted event is also a heartbeat; otherwise the runner
@@ -137,7 +144,8 @@ the runner contract and descriptor remain identical.
 Before starting media, the runner durably records the create fingerprint,
 runner session ID, exact descriptor, encrypted callback token, grant hash and
 encrypted secret, session parameters, state, event sequence, cumulative
-usage, and issued-key request records. Restart returns the same status and
+usage, finalized-segment cursor and fractional remainder, and issued-key
+request records. Restart returns the same status and
 continues the next sequence without resetting usage or reissuing a grant.
 Each session's secrets use an independent data-encryption key wrapped by the
 runner master key, and the complete durable record is integrity-protected.

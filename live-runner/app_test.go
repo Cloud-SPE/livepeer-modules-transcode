@@ -44,7 +44,7 @@ func TestPackagedLivePresetsSupportSoftwareFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x79}, 32))
-	runtime, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, presets, transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
+	runtime, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, presets, transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

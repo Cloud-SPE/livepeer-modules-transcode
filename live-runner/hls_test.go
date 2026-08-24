@@ -27,7 +27,10 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 			t.Skip(binary + " is not installed")
 		}
 	}
-	store, _, response, _ := mediaTestSessionV1(t)
+	store, request, response, _ := mediaTestSessionV1(t)
+	if err := store.Advance(request.SessionID, testEventV1(response.RunnerSessionID, 1, "session.started", "active", 0, "")); err != nil {
+		t.Fatal(err)
+	}
 	internalRoot := "0123456789abcdef0123456789abcdef"
 	authorizer := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: internalRoot}
 	var authMu sync.Mutex
@@ -138,6 +141,26 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 	master := hlsRequestV1(t, handler, response.RunnerSessionID, "master.m3u8", "")
 	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") {
 		t.Fatalf("real HLS master=%d %q", master.Code, master.Body.String())
+	}
+	meter, err := NewLiveOutputMeterV1(store, handler, 50*time.Millisecond, time.Hour, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usageDeadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(usageDeadline) {
+		meter.poll(context.Background(), SessionRecordV1{BrokerSessionID: request.SessionID, RunnerSessionID: response.RunnerSessionID}, renderPath)
+		metered, _, loadErr := store.Load(request.SessionID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if metered.UsageTotal >= 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	metered, _, err := store.Load(request.SessionID)
+	if err != nil || metered.UsageTotal < 1 || len(metered.MeteredSegmentSHA256) == 0 {
+		t.Fatalf("real finalized HLS was not metered: usage=%d segments=%d err=%v", metered.UsageTotal, len(metered.MeteredSegmentSHA256), err)
 	}
 	cleanupRouter()
 }

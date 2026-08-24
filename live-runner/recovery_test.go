@@ -69,3 +69,26 @@ func TestRecoverLiveSessionsConvergesActiveActivationAndStoppingState(t *testing
 		t.Fatalf("recovered stopping session=%+v err=%v", recoveredStopping, err)
 	}
 }
+
+func TestCompleteLiveTerminationReportsDurableMeterTotal(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x79}, 32))
+	record, _ := createRuntimeSessionV1(t, store, "sess_terminate_meter", "runner_terminate_meter")
+	if err := store.Advance(record.BrokerSessionID, testEventV1(record.RunnerSessionID, 1, "session.started", "active", 0, "")); err != nil {
+		t.Fatal(err)
+	}
+	if emitted, err := store.RecordFinalizedSegments(record.BrokerSessionID, []FinalizedHLSSegmentV1{{URI: "final-segment.mp4", DurationMicroseconds: 1_250_000}}, time.Now()); err != nil || !emitted {
+		t.Fatalf("meter emitted=%v err=%v", emitted, err)
+	}
+	record, _, err := store.BeginTermination(record.BrokerSessionID, "gateway_close")
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := CompleteLiveTerminationV1(context.Background(), store, &recoveryRuntimeV1{}, record, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := completed.PendingEvents[len(completed.PendingEvents)-1]
+	if completed.State != "ended" || completed.UsageTotal != 1 || last.EventType != "session.ended" || last.Usage == nil || last.Usage.Total != 1 {
+		t.Fatalf("completed session=%+v final=%+v", completed, last)
+	}
+}

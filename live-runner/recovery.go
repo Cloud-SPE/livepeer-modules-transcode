@@ -59,6 +59,10 @@ func CompleteLiveTerminationV1(ctx context.Context, store *EncryptedFileSessionS
 	if err := runtime.TerminateSession(ctx, record); err != nil {
 		return SessionRecordV1{}, err
 	}
+	record, _, err := store.Load(record.BrokerSessionID)
+	if err != nil || record.State != "active" || !record.Stopping {
+		return SessionRecordV1{}, errors.Join(errors.New("reload live termination state failed"), err)
+	}
 	closeReason := record.PendingCloseReason
 	event := RunnerEventV1{
 		EventID: record.RunnerSessionID + ":" + strconv.FormatUint(record.LastSequence+1, 10), Sequence: record.LastSequence + 1,

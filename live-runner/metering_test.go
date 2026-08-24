@@ -57,6 +57,7 @@ func TestParseFinalizedHLSSegmentsRejectsMalformedOrAmbiguousInput(t *testing.T)
 
 func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) {
 	var server *httptest.Server
+	mediaRequests := 0
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Cookie") != "hls_auth=ok" {
 			http.SetCookie(writer, &http.Cookie{Name: "hls_auth", Value: "ok"})
@@ -67,6 +68,11 @@ func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) 
 		case "/renditions/runner_meter_001/720p/index.m3u8":
 			_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvideo1_stream.m3u8\n")
 		case "/renditions/runner_meter_001/720p/video1_stream.m3u8":
+			mediaRequests++
+			if mediaRequests == 1 {
+				_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-PART:DURATION=0.2,URI=part.mp4\n")
+				return
+			}
 			_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-PART:DURATION=0.2,URI=part.mp4\n#EXTINF:1.0,\nsegment.mp4\n")
 		default:
 			http.NotFound(writer, request)
@@ -83,7 +89,7 @@ func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err := NewLiveOutputMeterV1(store, hls, time.Millisecond, time.Hour)
+	meter, err := NewLiveOutputMeterV1(store, hls, time.Millisecond, time.Hour, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +97,7 @@ func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) 
 	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
 	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
 	persisted, _, err := store.Load(record.BrokerSessionID)
-	if err != nil || persisted.UsageTotal != 1 || persisted.LastSequence != 2 || len(persisted.MeteredSegmentSHA256) != 1 {
+	if err != nil || persisted.UsageTotal != 1 || persisted.LastSequence != 3 || len(persisted.PendingEvents) != 3 || persisted.PendingEvents[1].EventType != "session.heartbeat" || len(persisted.MeteredSegmentSHA256) != 1 {
 		t.Fatalf("metered record=%+v err=%v", persisted, err)
 	}
 }

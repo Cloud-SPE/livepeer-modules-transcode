@@ -26,6 +26,10 @@ type LiveLadderLauncherV1 interface {
 	Start(context.Context, string, []transcode.LiveRTMPOutput, transcode.HWProfile, transcode.ProbeResult) (LiveLadderProcessV1, error)
 }
 
+type LiveSessionMeterV1 interface {
+	Run(context.Context, SessionRecordV1, SessionSecretsV1)
+}
+
 type FFmpegLiveLadderLauncherV1 struct{}
 
 func (l FFmpegLiveLadderLauncherV1) Start(ctx context.Context, inputURL string, outputs []transcode.LiveRTMPOutput, hardware transcode.HWProfile, probe transcode.ProbeResult) (LiveLadderProcessV1, error) {
@@ -58,6 +62,7 @@ type LiveRuntimeCoordinatorV1 struct {
 	store             *EncryptedFileSessionStoreV1
 	router            MediaPublisherWaiterV1
 	launcher          LiveLadderLauncherV1
+	meter             LiveSessionMeterV1
 	presets           map[string]transcode.ABRPreset
 	hardware          transcode.HWProfile
 	routerRTMPBase    string
@@ -69,8 +74,8 @@ type LiveRuntimeCoordinatorV1 struct {
 	sessions map[string]*activeLiveSessionV1
 }
 
-func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, presets []transcode.ABRPreset, hardware transcode.HWProfile, routerRTMPBase, internalTokenRoot string, pollInterval time.Duration, maxConcurrent int) (*LiveRuntimeCoordinatorV1, error) {
-	if store == nil || router == nil || launcher == nil || len(presets) == 0 || len(internalTokenRoot) < 32 || pollInterval <= 0 || maxConcurrent < 0 {
+func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, meter LiveSessionMeterV1, presets []transcode.ABRPreset, hardware transcode.HWProfile, routerRTMPBase, internalTokenRoot string, pollInterval time.Duration, maxConcurrent int) (*LiveRuntimeCoordinatorV1, error) {
+	if store == nil || router == nil || launcher == nil || meter == nil || len(presets) == 0 || len(internalTokenRoot) < 32 || pollInterval <= 0 || maxConcurrent < 0 {
 		return nil, errors.New("live runtime dependencies are incomplete")
 	}
 	parsed, err := url.Parse(routerRTMPBase)
@@ -93,7 +98,7 @@ func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router Medi
 		capacity = make(chan struct{}, maxConcurrent)
 	}
 	return &LiveRuntimeCoordinatorV1{
-		store: store, router: router, launcher: launcher, presets: byName, hardware: hardware,
+		store: store, router: router, launcher: launcher, meter: meter, presets: byName, hardware: hardware,
 		routerRTMPBase: strings.TrimRight(routerRTMPBase, "/"), internalTokenRoot: internalTokenRoot,
 		pollInterval: pollInterval, capacity: capacity, sessions: make(map[string]*activeLiveSessionV1),
 	}, nil
@@ -205,6 +210,16 @@ func (c *LiveRuntimeCoordinatorV1) Shutdown(ctx context.Context) error {
 func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSessionV1, record SessionRecordV1, secrets SessionSecretsV1) {
 	defer close(active.done)
 	defer c.remove(record.RunnerSessionID, active)
+	runContext, cancel := context.WithCancel(ctx)
+	meterDone := make(chan struct{})
+	go func() {
+		defer close(meterDone)
+		c.meter.Run(runContext, record, secrets)
+	}()
+	defer func() {
+		cancel()
+		<-meterDone
+	}()
 	ingestPath, _ := IngestMediaPathV1(record.RunnerSessionID)
 	preset := c.presets[strings.ToLower(secrets.CreateRequest.SessionParams.OutputProfile)]
 	internalToken := InternalMediaTokenV1(c.internalTokenRoot, record.RunnerSessionID)
@@ -215,23 +230,23 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		outputs = append(outputs, transcode.LiveRTMPOutput{Rendition: rendition, URL: c.routerRTMPBase + "/" + outputPath + "?token=" + url.QueryEscape(internalToken), KeyframeInterval: time.Duration(preset.SegmentDuration) * time.Second})
 	}
 	for {
-		if _, err := c.router.WaitForRTMPPublisher(ctx, ingestPath, c.pollInterval); err != nil {
+		if _, err := c.router.WaitForRTMPPublisher(runContext, ingestPath, c.pollInterval); err != nil {
 			return
 		}
-		if !c.acquire(ctx) {
+		if !c.acquire(runContext) {
 			return
 		}
-		process, err := c.launcher.Start(ctx, inputURL, outputs, c.hardware, transcode.ProbeResult{})
+		process, err := c.launcher.Start(runContext, inputURL, outputs, c.hardware, transcode.ProbeResult{})
 		if err == nil {
 			_ = process.Wait()
 		}
 		c.release()
-		if ctx.Err() != nil {
+		if runContext.Err() != nil {
 			return
 		}
 		timer := time.NewTimer(c.pollInterval)
 		select {
-		case <-ctx.Done():
+		case <-runContext.Done():
 			timer.Stop()
 			return
 		case <-timer.C:

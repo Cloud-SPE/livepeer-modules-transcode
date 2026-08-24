@@ -127,14 +127,15 @@ type LiveOutputMeterV1 struct {
 	hls               *HLSHandlerV1
 	pollInterval      time.Duration
 	heartbeatInterval time.Duration
+	requestTimeout    time.Duration
 	now               func() time.Time
 }
 
-func NewLiveOutputMeterV1(store *EncryptedFileSessionStoreV1, hls *HLSHandlerV1, pollInterval, heartbeatInterval time.Duration) (*LiveOutputMeterV1, error) {
-	if store == nil || hls == nil || pollInterval <= 0 || heartbeatInterval <= 0 || pollInterval > heartbeatInterval {
+func NewLiveOutputMeterV1(store *EncryptedFileSessionStoreV1, hls *HLSHandlerV1, pollInterval, heartbeatInterval, requestTimeout time.Duration) (*LiveOutputMeterV1, error) {
+	if store == nil || hls == nil || pollInterval <= 0 || heartbeatInterval <= 0 || requestTimeout <= 0 || pollInterval > heartbeatInterval {
 		return nil, errors.New("live output meter dependencies are invalid")
 	}
-	return &LiveOutputMeterV1{store: store, hls: hls, pollInterval: pollInterval, heartbeatInterval: heartbeatInterval, now: time.Now}, nil
+	return &LiveOutputMeterV1{store: store, hls: hls, pollInterval: pollInterval, heartbeatInterval: heartbeatInterval, requestTimeout: requestTimeout, now: time.Now}, nil
 }
 
 // Run polls the one rendition named by the immutable session parameters. A
@@ -170,6 +171,8 @@ func (m *LiveOutputMeterV1) poll(ctx context.Context, record SessionRecordV1, re
 }
 
 func (m *LiveOutputMeterV1) finalizedSegments(ctx context.Context, runnerID, renderPath string) ([]FinalizedHLSSegmentV1, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.requestTimeout)
+	defer cancel()
 	master, err := m.fetchPlaylist(ctx, runnerID, renderPath+"/index.m3u8")
 	if err != nil {
 		return nil, err

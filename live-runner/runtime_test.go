@@ -38,6 +38,23 @@ type fakeLiveProcessV1 struct {
 	ctx context.Context
 }
 
+type noopLiveMeterV1 struct{}
+
+func (noopLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) {
+	<-ctx.Done()
+}
+
+type trackingLiveMeterV1 struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (m trackingLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) {
+	close(m.started)
+	<-ctx.Done()
+	close(m.stopped)
+}
+
 func (p fakeLiveProcessV1) Wait() error {
 	<-p.ctx.Done()
 	return p.ctx.Err()
@@ -142,6 +159,34 @@ func TestLiveRuntimeTerminationWithoutActiveFFmpegPropagatesKickFailure(t *testi
 	}
 }
 
+func TestLiveRuntimeTerminationJoinsSessionMeter(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x77}, 32))
+	meter := trackingLiveMeterV1{started: make(chan struct{}), stopped: make(chan struct{})}
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, meter, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, secrets := createRuntimeSessionV1(t, store, "sess_runtime_meter", "runner_runtime_meter")
+	if err := coordinator.EnsureSession(context.Background(), record, secrets); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-meter.started:
+	case <-time.After(time.Second):
+		t.Fatal("session meter did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := coordinator.TerminateSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-meter.stopped:
+	default:
+		t.Fatal("termination returned before the session meter stopped")
+	}
+}
+
 func TestLiveRuntimeRestartDoesNotDuplicateStartedEvent(t *testing.T) {
 	ready := make(chan struct{})
 	launcher := &fakeLiveLauncherV1{started: make(chan struct{}, 4)}
@@ -193,7 +238,7 @@ func TestLiveRuntimeValidatesProfileAndMeteringRendition(t *testing.T) {
 
 func TestLiveRuntimeConstructorRejectsNonRTMPRouter(t *testing.T) {
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x75}, 32))
-	_, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, testLivePresetsV1(), transcode.HWProfile{}, "http://127.0.0.1:1935", strings.Repeat("x", 32), time.Millisecond, 1)
+	_, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "http://127.0.0.1:1935", strings.Repeat("x", 32), time.Millisecond, 1)
 	if err == nil {
 		t.Fatal("non-RTMP internal router URL was accepted")
 	}
@@ -201,7 +246,7 @@ func TestLiveRuntimeConstructorRejectsNonRTMPRouter(t *testing.T) {
 
 func newTestRuntimeCoordinatorV1(t *testing.T, store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, capacity int) *LiveRuntimeCoordinatorV1 {
 	t.Helper()
-	coordinator, err := NewLiveRuntimeCoordinatorV1(store, router, launcher, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, capacity)
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, router, launcher, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, capacity)
 	if err != nil {
 		t.Fatal(err)
 	}
