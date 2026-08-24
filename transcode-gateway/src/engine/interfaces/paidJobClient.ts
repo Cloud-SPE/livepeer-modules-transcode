@@ -9,6 +9,10 @@ export interface PaidJobRequest {
   maxTotalUnits?: number;
   contentType: string;
   body: Uint8Array;
+  validateTerminal?: (input: {
+    brokerBody: Uint8Array;
+    settlement: PaidJobSettlement;
+  }) => void | Promise<void>;
 }
 
 export interface PaidJobSettlement {

@@ -286,3 +286,24 @@ test("accounting pending is bounded and DEBIT_FAILED or identity drift fails clo
     );
   }
 });
+
+test("product terminal validation runs before LOC settlement", async () => {
+  const { loc, settlements } = fakeLoc();
+  const client = createPaidJobClient(loc, {
+    fetch: async () => new Response("data: unsafe\n\n", {
+      headers: {
+        [HEADER.JOB_ID]: "broker-job-1",
+        [HEADER.WORK_UNITS]: "12",
+        [HEADER.WORK_UNIT]: route.workUnit,
+        [HEADER.SETTLEMENT]: encodedSettlement(),
+      },
+    }),
+  });
+  await assert.rejects(() => client.execute({
+    ...request("stream"),
+    validateTerminal() {
+      throw new Error("terminal body and claim diverged");
+    },
+  }), /terminal body and claim diverged/);
+  assert.equal(settlements.length, 0);
+});

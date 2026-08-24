@@ -142,7 +142,7 @@ export function createPaidJobClient(
           actualUnits: safeUnits(units),
           workUnit: unit,
           envelope: decodeSettlement(encodedSettlement),
-        });
+        }, input.validateTerminal, brokerBody);
       } else if (brokerJobId) {
         const recovered = await pollSettlement(
           loc,
@@ -152,6 +152,8 @@ export function createPaidJobClient(
           pollAttempts,
           pollDelayMs,
           delay,
+          input.validateTerminal,
+          brokerBody,
         );
         if (recovered.kind !== "settled") return recovered;
         terminal = recovered;
@@ -205,6 +207,8 @@ async function pollSettlement(
   attempts: number,
   delayMs: number,
   delay: (milliseconds: number) => Promise<void>,
+  validateTerminal?: PaidJobRequest["validateTerminal"],
+  brokerBody = new Uint8Array(),
 ): Promise<Awaited<ReturnType<typeof settle>> | PaidJobUnresolvedResult> {
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt += 1) {
     const response = await fetchImpl(
@@ -214,7 +218,7 @@ async function pollSettlement(
     if (response.status === 200) {
       const value = exchangeWire.safeParse({ ...asRecord(raw), outcome: "SETTLED", request_id: opened.requestId });
       if (!value.success) throw invalidEvidence();
-      return settleFromExchange(loc, opened, value.data);
+      return settleFromExchange(loc, opened, value.data, validateTerminal, brokerBody);
     }
     if (response.status !== 202) throw brokerLookupError(response);
     const state = asRecord(raw).state;
@@ -230,6 +234,8 @@ async function settleFromExchange(
   loc: LocClient,
   opened: LocOpenJobResult,
   exchange: z.infer<typeof exchangeWire>,
+  validateTerminal?: PaidJobRequest["validateTerminal"],
+  brokerBody = new Uint8Array(),
 ) {
   if (!exchange.job_id || exchange.work_units === undefined || !exchange.unit || !exchange.settlement) {
     throw invalidEvidence();
@@ -239,15 +245,18 @@ async function settleFromExchange(
     actualUnits: safeUnits(exchange.work_units),
     workUnit: exchange.unit,
     envelope: decodeSettlement(exchange.settlement),
-  });
+  }, validateTerminal, brokerBody);
 }
 
 async function settle(
   loc: LocClient,
   opened: LocOpenJobResult,
   claim: Omit<PaidJobSettlement, "outcome">,
+  validateTerminal?: PaidJobRequest["validateTerminal"],
+  brokerBody = new Uint8Array(),
 ) {
   const settlement = validateSettlement(opened, claim);
+  await validateTerminal?.({ brokerBody, settlement });
   const accounting = await loc.settleJob({
     operationId: opened.operationId,
     actualUnits: settlement.actualUnits,
