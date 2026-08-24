@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // LiveRTMPOutput is one encoded rendition published back into the local media
 // router. URL can contain a short-lived router credential and must not be
 // logged or persisted by callers.
 type LiveRTMPOutput struct {
-	Rendition ABRRendition
-	URL       string
+	Rendition        ABRRendition
+	URL              string
+	KeyframeInterval time.Duration
 }
 
 // LiveLadderCmdContext builds one FFmpeg process that decodes a live RTMP
@@ -44,11 +47,16 @@ func LiveLadderCmdContext(ctx context.Context, inputURL string, outputs []LiveRT
 		if rendition.Video == nil {
 			args = append(args, "-map", "0:a:0?", "-vn")
 		} else {
+			if output.KeyframeInterval <= 0 || output.KeyframeInterval > 10*time.Second {
+				return nil, errors.New("live keyframe interval must be between zero and ten seconds")
+			}
 			if !strings.EqualFold(rendition.Video.Codec, "h264") && !strings.EqualFold(rendition.Video.Codec, "avc") {
 				return nil, errors.New("RTMP live outputs require H.264 video")
 			}
 			args = append(args, "-map", "0:v:0", "-map", "0:a:0?")
 			args = append(args, buildHLSVideoArgs(rendition, hw)...)
+			seconds := strconv.FormatFloat(output.KeyframeInterval.Seconds(), 'f', 3, 64)
+			args = append(args, "-force_key_frames", "expr:gte(t,n_forced*"+seconds+")")
 			if filters := buildLiveFilterGraph(rendition, hw, probe); filters != "" {
 				args = append(args, "-vf", filters)
 			}

@@ -229,6 +229,6 @@ func testLivePresetsV1() []transcode.ABRPreset {
 		Name: "live-standard", Renditions: []transcode.ABRRendition{
 			{Name: "720p", Video: &transcode.ABRVideoSettings{Codec: "h264", Width: 1280, Height: 720, Bitrate: "2.5M", MaxBitrate: "3.75M"}, Audio: transcode.ABRAudioSettings{Codec: "aac", Bitrate: "96k", Channels: 2}},
 			{Name: "360p", Video: &transcode.ABRVideoSettings{Codec: "h264", Width: 640, Height: 360, Bitrate: "600k", MaxBitrate: "900k"}, Audio: transcode.ABRAudioSettings{Codec: "aac", Bitrate: "64k", Channels: 2}},
-		},
+		}, SegmentDuration: 1,
 	}}
 }

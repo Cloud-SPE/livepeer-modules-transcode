@@ -80,7 +80,7 @@ func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router Medi
 	byName := make(map[string]transcode.ABRPreset, len(presets))
 	for _, preset := range presets {
 		key := strings.ToLower(preset.Name)
-		if key == "" || len(preset.Renditions) == 0 {
+		if key == "" || len(preset.Renditions) == 0 || preset.SegmentDuration <= 0 || preset.SegmentDuration > 10 {
 			return nil, errors.New("live runtime preset is invalid")
 		}
 		if _, duplicate := byName[key]; duplicate {
@@ -212,7 +212,7 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 	outputs := make([]transcode.LiveRTMPOutput, 0, len(preset.Renditions))
 	for _, rendition := range preset.Renditions {
 		outputPath, _ := RenditionMediaPathV1(record.RunnerSessionID, rendition.Name)
-		outputs = append(outputs, transcode.LiveRTMPOutput{Rendition: rendition, URL: c.routerRTMPBase + "/" + outputPath + "?token=" + url.QueryEscape(internalToken)})
+		outputs = append(outputs, transcode.LiveRTMPOutput{Rendition: rendition, URL: c.routerRTMPBase + "/" + outputPath + "?token=" + url.QueryEscape(internalToken), KeyframeInterval: time.Duration(preset.SegmentDuration) * time.Second})
 	}
 	for {
 		if _, err := c.router.WaitForRTMPPublisher(ctx, ingestPath, c.pollInterval); err != nil {
