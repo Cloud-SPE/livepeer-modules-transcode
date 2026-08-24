@@ -42,6 +42,19 @@ export interface PaidSessionControl {
   eventsWs: string;
 }
 
+export interface PaidSessionStreamKeyRequest {
+  keyIssueUrl: string;
+  grant: PaidSessionGrant;
+  requestId: string;
+  audience: "gateway-relay" | "direct-publisher";
+}
+
+export interface PaidSessionStreamKeyResult {
+  requestId: string;
+  streamKey: string;
+  expiresAt: string;
+}
+
 export interface PaidSessionOpenResult {
   opened: LocOpenSessionResult;
   gatewaySessionId: string;
@@ -111,6 +124,7 @@ export interface PaidSessionEndResult {
 
 export interface PaidSessionClient {
   open(input: PaidSessionOpenRequest): Promise<PaidSessionOpenResult>;
+  issueStreamKey(input: PaidSessionStreamKeyRequest): Promise<PaidSessionStreamKeyResult>;
   status(input: { opened: LocOpenSessionResult; brokerSessionId: string; workId: string; credential: string }): Promise<PaidSessionStatusResult>;
   refill(input: PaidSessionRefillRequest): Promise<PaidSessionRefillResult>;
   end(input: PaidSessionEndRequest): Promise<PaidSessionEndResult>;

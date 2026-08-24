@@ -233,6 +233,60 @@ test("paid session open replays identical LOC and broker content while returning
   assert.equal(headers.get(HEADER.PAYMENT), opened.paymentEnvelope);
 });
 
+test("stream-key issuance consumes only its scoped grant and replays byte-identically", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = createPaidSessionClient(fakeLoc().loc, {
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return Response.json({
+        request_id: "key-request-1",
+        stream_key: "private-runner-key",
+        expires_at: "2026-08-25T00:00:00Z",
+      }, { status: 201 });
+    },
+  });
+  const input = {
+    keyIssueUrl: "https://runner.example/v1/sessions/runner-1/stream-keys",
+    grant: {
+      id: "grant-1",
+      operations: ["stream-key-issue"],
+      secret: "grant-secret",
+      expiresAt: "2026-08-25T00:00:00Z",
+      maxUses: 1,
+    },
+    requestId: "key-request-1",
+    audience: "gateway-relay" as const,
+  };
+
+  const first = await client.issueStreamKey(input);
+  const replay = await client.issueStreamKey(input);
+  assert.equal(first.streamKey, "private-runner-key");
+  assert.deepEqual(replay, first);
+  assert.equal(calls[0]?.init?.body, calls[1]?.init?.body);
+  assert.equal(new Headers(calls[0]?.init?.headers).get("authorization"), "Bearer grant-secret");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ request_id: "key-request-1", audience: "gateway-relay" }));
+});
+
+test("stream-key issuance rejects malformed or unscoped grant evidence", async () => {
+  let fetched = false;
+  const client = createPaidSessionClient(fakeLoc().loc, {
+    fetch: async () => {
+      fetched = true;
+      return Response.json({});
+    },
+  });
+  await assert.rejects(
+    () => client.issueStreamKey({
+      keyIssueUrl: "https://runner.example/keys",
+      grant: { id: "grant-1", operations: ["status"], secret: "secret", expiresAt: "2026-08-25T00:00:00Z" },
+      requestId: "key-request-1",
+      audience: "gateway-relay",
+    }),
+    (error: unknown) => error instanceof PaidSessionClientError && error.code === "paid_session_request_invalid",
+  );
+  assert.equal(fetched, false);
+});
+
 test("status is authoritative and never has a credential or grant field", async () => {
   const client = createPaidSessionClient(fakeLoc().loc, {
     fetch: async () => Response.json({

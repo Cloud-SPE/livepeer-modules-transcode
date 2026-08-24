@@ -54,6 +54,11 @@ const openWire = z.object({
   credential: z.string().min(1),
   balance: balanceWire,
 }).strict();
+const streamKeyWire = z.object({
+  request_id: z.string().min(1),
+  stream_key: z.string().min(1).max(512),
+  expires_at: z.string().min(1),
+}).strict();
 const statusWire = z.object({
   session_id: z.string().min(1),
   gateway_session_id: z.string().min(1),
@@ -168,6 +173,34 @@ export function createPaidSessionClient(
         leaseExpiresAt: value.lease.expires_at,
         balance: mapBalance(value.balance),
         control: mapControl(value.control),
+      };
+    },
+
+    async issueStreamKey(input) {
+      if (
+        input.requestId.length === 0 ||
+        !input.grant.operations.includes("stream-key-issue") ||
+        input.grant.secret.length === 0 ||
+        !validRunnerUrl(input.keyIssueUrl)
+      ) throw invalidRequest();
+      const value = await jsonRequest(fetchImpl, input.keyIssueUrl, {
+        method: "POST",
+        headers: new Headers({
+          Authorization: `Bearer ${input.grant.secret}`,
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          request_id: input.requestId,
+          audience: input.audience,
+        }),
+      }, streamKeyWire);
+      if (value.request_id !== input.requestId || !validTimestamp(value.expires_at)) {
+        throw invalidEvidence();
+      }
+      return {
+        requestId: value.request_id,
+        streamKey: value.stream_key,
+        expiresAt: value.expires_at,
       };
     },
 
@@ -436,6 +469,25 @@ function validateOpen(input: PaidSessionOpenRequest): void {
     !Number.isSafeInteger(input.maxTotalUnits) ||
     input.maxTotalUnits < input.estimatedRunwayUnits
   ) throw invalidRequest();
+}
+
+function validRunnerUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.username === "" &&
+      url.password === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validTimestamp(value: string): boolean {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp);
 }
 
 function validateRefill(input: PaidSessionRefillRequest): void {
