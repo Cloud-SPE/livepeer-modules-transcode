@@ -11,9 +11,9 @@ export interface PaymentBuildInput {
   brokerUrl: string;
   workUnit: string;
   pricePerWorkUnitWei: string;
-  unitsPerPrice: number | null | undefined;
+  unitsPerPrice: string | null | undefined;
   quoteId: string | null | undefined;
-  quoteVersion: number | null | undefined;
+  quoteVersion: string | null | undefined;
   constraintFingerprint: Uint8Array | null | undefined;
   routeFingerprint: Uint8Array | null | undefined;
 }
@@ -28,7 +28,7 @@ export interface PaymentBuilderDeps {
 
 export function createPaymentBuilder(deps: PaymentBuilderDeps) {
   return async function buildPayment(input: PaymentBuildInput): Promise<PaymentTicket> {
-    const unitsPerPrice = input.unitsPerPrice ?? 1;
+    const unitsPerPrice = decimalToSafeInteger(input.unitsPerPrice ?? "1", "unitsPerPrice");
     if (!input.quoteId || input.quoteVersion === null || input.quoteVersion === undefined) {
       throw new Error("resolver selected route missing quote_ref metadata");
     }
@@ -54,7 +54,7 @@ export function createPaymentBuilder(deps: PaymentBuilderDeps) {
         offering: input.offering,
         quoteRef: {
           quoteId: input.quoteId,
-          quoteVersion: input.quoteVersion,
+          quoteVersion: decimalToSafeInteger(input.quoteVersion, "quoteVersion"),
           constraintFingerprint: input.constraintFingerprint,
           routeFingerprint: input.routeFingerprint,
         },
@@ -67,6 +67,17 @@ export function createPaymentBuilder(deps: PaymentBuilderDeps) {
     });
     return { header: resp.paymentHeader };
   };
+}
+
+function decimalToSafeInteger(value: string, field: string): number {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error(`${field} must be a canonical unsigned decimal`);
+  }
+  const parsed = BigInt(value);
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${field} exceeds legacy payer range`);
+  }
+  return Number(parsed);
 }
 
 function bigintToSafeInteger(value: bigint, field: string): number {

@@ -28,7 +28,7 @@ import {
   parseBigIntHeader,
   parseOpaqueBytes,
   parseJsonHeader,
-  parseOptionalInteger,
+  parseOptionalUint64,
   parseOpaqueJson,
   safeBigInt,
 } from "./routeSelectorHelpers.js";
@@ -67,10 +67,10 @@ export interface VideoRouteCandidate {
   workUnitEstimator: WorkUnitEstimator | null;
   settlementKeys: SettlementKey[];
   quoteId: string | null;
-  quoteVersion: number | null;
+  quoteVersion: string | null;
   constraintFingerprint: Uint8Array | null;
   routeFingerprint: Uint8Array | null;
-  unitsPerPrice: number | null;
+  unitsPerPrice: string | null;
   extra: JsonValue | null;
   constraints: JsonValue | null;
 }
@@ -421,10 +421,10 @@ function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate | null 
     workUnitEstimator: estimator,
     settlementKeys,
     quoteId: route.quoteId ?? null,
-    quoteVersion: parseOptionalInteger(route.quoteVersion),
+    quoteVersion: parseOptionalUint64(route.quoteVersion),
     constraintFingerprint: parseOpaqueBytes(route.constraintFingerprint),
     routeFingerprint: parseOpaqueBytes(route.routeFingerprint),
-    unitsPerPrice: parseOptionalInteger(route.unitsPerPrice),
+    unitsPerPrice: parseOptionalUint64(route.unitsPerPrice),
     extra,
     constraints: parseOpaqueJson(route.constraintsJson),
   };

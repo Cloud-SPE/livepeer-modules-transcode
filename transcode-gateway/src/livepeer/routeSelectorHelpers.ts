@@ -30,14 +30,17 @@ export function parseOpaqueBytes(raw: Buffer | Uint8Array | string | undefined):
   return Uint8Array.from(raw);
 }
 
-export function parseOptionalInteger(value: unknown): number | null {
+const UINT64_MAX = 18_446_744_073_709_551_615n;
+
+export function parseOptionalUint64(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
+    if (!Number.isSafeInteger(value) || value < 0) return null;
+    return String(value);
   }
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+  if (typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)) {
+    const parsed = BigInt(value);
+    return parsed <= UINT64_MAX ? value : null;
   }
   return null;
 }

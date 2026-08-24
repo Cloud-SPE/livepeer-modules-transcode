@@ -85,4 +85,4 @@ safe local email sink; raw secrets must not be written to production logs.
 Dependencies default to latest stable under
 [core beliefs](./core-beliefs.md). Exact approved Modules and LOC revisions
 are recorded in the immutable
-[contract baseline](../references/2026-08-22-livepeer-modules-v2-contract-baseline.md).
+[contract baseline](../references/2026-08-24-livepeer-modules-v2-contract-baseline.md).

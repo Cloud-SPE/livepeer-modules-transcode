@@ -166,8 +166,8 @@ test("wire path resolves a route, mints payment over payer-daemon gRPC, and disp
     assert.equal(route.session, null);
     assert.equal(route.workUnitEstimator?.id, "abr-output-frame-megapixels/v1");
     assert.equal(route.settlementKeys.length, 2, "rotation overlap must survive projection");
-    assert.equal(route.settlementKeys[0]?.introducedInPublicationSeq, 7);
-    assert.equal(route.settlementKeys[1]?.introducedInPublicationSeq, 6);
+    assert.equal(route.settlementKeys[0]?.introducedInPublicationSeq, "7");
+    assert.equal(route.settlementKeys[1]?.introducedInPublicationSeq, "6");
 
     const resp = await workerClient.callWorker<{ job_id: string }, { ok: boolean }>({
       route,

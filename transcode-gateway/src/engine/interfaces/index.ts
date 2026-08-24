@@ -10,3 +10,4 @@ export * from "./workerClient.js";
 export * from "./logger.js";
 export * from "./streamKeyHasher.js";
 export * from "./locTransport.js";
+export * from "./locClient.js";

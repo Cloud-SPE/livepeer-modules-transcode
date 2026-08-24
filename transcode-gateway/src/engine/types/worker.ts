@@ -44,7 +44,7 @@ export interface SettlementKey {
   publicKey: string;
   notBefore: string;
   expiresAt: string;
-  introducedInPublicationSeq: number;
+  introducedInPublicationSeq: string;
 }
 
 export interface SelectedWorkerRoute {
@@ -59,9 +59,9 @@ export interface SelectedWorkerRoute {
   session: PaidSessionAxes | null;
   workUnitEstimator: WorkUnitEstimator | null;
   settlementKeys: SettlementKey[];
-  unitsPerPrice?: number;
+  unitsPerPrice?: string;
   quoteId?: string;
-  quoteVersion?: number;
+  quoteVersion?: string;
   constraintFingerprint?: Uint8Array;
   routeFingerprint?: Uint8Array;
   extra?: Record<string, unknown>;

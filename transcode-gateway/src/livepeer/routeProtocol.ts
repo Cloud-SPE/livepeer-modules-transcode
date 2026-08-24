@@ -97,14 +97,21 @@ export function parseSettlementKeys(value: unknown): SettlementKey[] | null {
     const publicKey = nonEmptyString(raw.publicKey ?? raw.public_key);
     const notBefore = nonEmptyString(raw.notBefore ?? raw.not_before);
     const expiresAt = nonEmptyString(raw.expiresAt ?? raw.expires_at);
-    const introduced = positiveSafeInteger(
+    const introduced = canonicalUint64(
       raw.introducedInPublicationSeq ?? raw.introduced_in_publication_seq,
-      true,
     );
     if (!publicKey || !notBefore || !expiresAt || introduced === null) return null;
     keys.push({ publicKey, notBefore, expiresAt, introducedInPublicationSeq: introduced });
   }
   return keys;
+}
+
+function canonicalUint64(value: unknown): string | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+  return BigInt(value) <= 18_446_744_073_709_551_615n ? value : null;
 }
 
 function parseJobAxes(value: unknown): PaidJobAxes | null {
