@@ -39,13 +39,19 @@ settlement keys. Unsupported protocols, ABR transports, and live descriptor
 schemas are rejected during route selection, before payment minting or session
 open.
 
-Migration `0003_paid_operations_v2.sql` adds the durable v2 recovery boundary:
+Migrations `0003_paid_operations_v2.sql` and
+`0004_paid_session_recovery.sql` add the durable v2 recovery boundary:
 stable request/content identity, selected route and quote evidence, LOC and
 broker correlations, funding/lease/settlement state, retries, and terminal
-evidence. Runner credentials and session parameters live only in a separate
-envelope-encrypted table and are deleted atomically when an operation becomes
-terminal. The v2 clients are not wired yet; Beads epic `lmt-65a` tracks that
-remaining cutover work.
+evidence. Paid-session recovery uses kind-scoped `FOR UPDATE SKIP LOCKED`
+claims, expiring ownership leases, and a lifecycle-version fence on every
+mutation and secret read. Runner credentials, exact open intent, grants, and
+session parameters live only in a separate envelope-encrypted table and are
+deleted atomically when an operation becomes terminal. The
+`PaidSessionStore` is the process boundary for claiming and advancing that
+state; startup reconciliation is completed by the later live-winddown work.
+The v2 clients are not wired yet; Beads epic `lmt-65a` tracks that remaining
+cutover work.
 
 ## Build + run
 
