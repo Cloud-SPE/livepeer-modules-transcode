@@ -87,3 +87,12 @@ The v2 live path requires `LIVEPEER_OPERATION_SECRETS_KEK` (canonical base64
 for 32 random bytes held outside Postgres) and an operator-visible
 `LIVEPEER_OPERATION_SECRETS_KEY_ID`. They remain optional until that path is
 enabled so the pre-cutover gateway can still boot.
+
+The LOC boundary is enabled only when `LIVEPEER_LOC_URL` and
+`LIVEPEER_LOC_API_KEY` are both set; partial configuration fails startup.
+`LIVEPEER_LOC_TIMEOUT_MS` defaults to 15 seconds and
+`LIVEPEER_LOC_CLIENT_ID` defaults to `livepeer-modules-transcode/0.0.0`.
+The gateway sends the credential only to `/v1/*` paths on the configured
+origin, refuses redirects, requires a caller-owned idempotency key for every
+mutation, and never includes LOC response bodies or credentials in transport
+errors.
