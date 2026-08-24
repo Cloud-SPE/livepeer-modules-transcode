@@ -7,7 +7,7 @@ import { runMigrations } from "./db/migrate.js";
 import { createRateLimiter } from "./auth/rateLimit.js";
 import { createEmailClient } from "./email/client.js";
 import { createServer } from "./server.js";
-import type { PaidJobClient, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { PaidJobClient, PaidSessionClient, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
 import type { PaidOperationRepo } from "./engine/repo/index.js";
 import {
   createStubWorkerClient,
@@ -20,6 +20,7 @@ import {
   createLocHttpTransport,
   createOperationSecretCipher,
   createPaidJobClient,
+  createPaidSessionClient,
   decodeWrappingKey,
   type PayerDaemonClient,
   type VideoRouteSelector,
@@ -34,6 +35,7 @@ import { createPlaybackIdRepo } from "./repo/playbackIds.js";
 import { createPaidOperationRepo } from "./repo/paidOperations.js";
 import { createSourceProbe } from "./runtime/sourceProbe.js";
 import { recoverPaidAbrOperations } from "./engine/service/paidAbrRecovery.js";
+import { createPaidSessionStore, type PaidSessionStore } from "./livepeer/paidSessionStore.js";
 import { createRtmpListener, type RtmpListenerHandle } from "./runtime/rtmp/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -134,7 +136,9 @@ async function main(): Promise<void> {
   });
   const recoveryOwner = `gateway:${process.pid}:${randomUUID()}`;
   let paidJobClient: PaidJobClient | null = null;
+  let paidSessionClient: PaidSessionClient | null = null;
   let paidOperationRepo: PaidOperationRepo | null = null;
+  let paidSessionStore: PaidSessionStore | null = null;
   if (config.LIVEPEER_LOC_URL && config.LIVEPEER_LOC_API_KEY) {
     const loc = createLocClient(createLocHttpTransport({
       baseUrl: config.LIVEPEER_LOC_URL,
@@ -143,12 +147,18 @@ async function main(): Promise<void> {
       timeoutMs: config.LIVEPEER_LOC_TIMEOUT_MS,
     }));
     paidJobClient = createPaidJobClient(loc);
+    paidSessionClient = createPaidSessionClient(loc);
     if (config.LIVEPEER_OPERATION_SECRETS_KEK) {
       const cipher = createOperationSecretCipher(
         config.LIVEPEER_OPERATION_SECRETS_KEY_ID,
         decodeWrappingKey(config.LIVEPEER_OPERATION_SECRETS_KEK),
       );
       paidOperationRepo = createPaidOperationRepo(pool, cipher);
+      paidSessionStore = createPaidSessionStore({
+        repo: paidOperationRepo,
+        owner: recoveryOwner,
+        leaseDurationMs: config.LIVEPEER_SESSION_RECOVERY_LEASE_MS,
+      });
     }
   }
 
@@ -162,6 +172,8 @@ async function main(): Promise<void> {
     workerClient,
     paidJobClient,
     paidOperationRepo,
+    paidSessionClient,
+    paidSessionStore,
     sourceProbe,
     recoveryOwner,
     routeSelector,

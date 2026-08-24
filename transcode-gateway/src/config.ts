@@ -27,6 +27,10 @@ const envSchema = z.object({
   LIVEPEER_FUNDED_VALUE_WEI: z.string().optional(),
   LIVEPEER_FACE_VALUE_WEI: z.string().optional(),
   LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("default"),
+  LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("live-standard"),
+  LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: z.coerce.number().int().positive().default(60),
+  LIVEPEER_LIVE_MAX_TOTAL_UNITS: z.coerce.number().int().positive().default(3_600),
+  LIVEPEER_SESSION_RECOVERY_LEASE_MS: z.coerce.number().int().min(1_000).default(60_000),
   // Required by v2 live paths before they may persist session credentials.
   // Canonical base64 for a 32-byte wrapping key held outside Postgres.
   LIVEPEER_OPERATION_SECRETS_KEK: z.string().optional(),
@@ -69,6 +73,13 @@ const envSchema = z.object({
       code: "custom",
       path: [value.LIVEPEER_LOC_URL ? "LIVEPEER_LOC_API_KEY" : "LIVEPEER_LOC_URL"],
       message: "LIVEPEER_LOC_URL and LIVEPEER_LOC_API_KEY must be set together",
+    });
+  }
+  if (value.LIVEPEER_LIVE_MAX_TOTAL_UNITS < value.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS) {
+    context.addIssue({
+      code: "custom",
+      path: ["LIVEPEER_LIVE_MAX_TOTAL_UNITS"],
+      message: "LIVEPEER_LIVE_MAX_TOTAL_UNITS must cover LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS",
     });
   }
 });

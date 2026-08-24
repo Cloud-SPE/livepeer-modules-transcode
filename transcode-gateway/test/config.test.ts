@@ -14,6 +14,17 @@ test("LOC configuration is disabled only when URL and API key are both absent", 
   assert.equal(config.LIVEPEER_LOC_API_KEY, undefined);
   assert.equal(config.LIVEPEER_LOC_TIMEOUT_MS, 15_000);
   assert.equal(config.LIVEPEER_LOC_CLIENT_ID, "livepeer-modules-transcode/0.0.0");
+  assert.equal(config.LIVEPEER_LIVE_OFFERING_DEFAULT, "live-standard");
+  assert.equal(config.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS, 60);
+  assert.equal(config.LIVEPEER_LIVE_MAX_TOTAL_UNITS, 3_600);
+});
+
+test("live funding ceiling must cover the initial finite runway", () => {
+  assert.throws(() => loadConfig({
+    ...required,
+    LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: "120",
+    LIVEPEER_LIVE_MAX_TOTAL_UNITS: "60",
+  }), /must cover LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS/);
 });
 
 test("LOC configuration rejects partial credentials", () => {

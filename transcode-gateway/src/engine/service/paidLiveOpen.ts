@@ -118,12 +118,11 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     brokerSessionId: opened.brokerSessionId,
     fundedUnits: String(deps.estimatedRunwayUnits),
     claimedUnits: String(opened.balance.claimedUnits),
-    balanceUnits: String(Math.max(0, deps.estimatedRunwayUnits - opened.balance.debitedUnits)),
+    balanceUnits: String(opened.balance.runwayUnits ?? Math.max(0, deps.estimatedRunwayUnits - opened.balance.debitedUnits)),
     willRefuseNextRefill: opened.balance.willRefuseNextRefill,
     leaseExpiresAt: timestamp(opened.leaseExpiresAt),
     sessionRuntime: {
       ...owned.operation.sessionRuntime!,
-      runnerSessionId: stringField(opened.runtimePublic, "runner_session_id") ?? opened.brokerSessionId,
       runnerHlsUrl: runtime.hls_url,
     },
   });
@@ -228,9 +227,4 @@ function timestamp(value: string): Date {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new Error("paid live lease is invalid");
   return parsed;
-}
-
-function stringField(value: JsonValue, field: string): string | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  return typeof value[field] === "string" ? value[field] : null;
 }

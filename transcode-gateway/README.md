@@ -106,3 +106,10 @@ the encrypted original request. The recovery interval, lease, and retry delay
 default to 5 seconds, 60 seconds, and 2 seconds respectively and are controlled
 by `VOD_RECOVERY_INTERVAL_MS`, `VOD_RECOVERY_LEASE_MS`, and
 `VOD_RECOVERY_RETRY_MS`.
+
+Live creation uses only `paid-session/v1` with gateway-owned public RTMP
+ingest. Set `LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL`, keep `RTMP_RELAY_ENABLED`
+enabled, and configure LOC plus the operation-secrets key. The default live
+offering is `live-standard`; finite funding defaults to 60 initial
+`output_seconds` and a 3,600-unit lifetime ceiling through
+`LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS` and `LIVEPEER_LIVE_MAX_TOTAL_UNITS`.
