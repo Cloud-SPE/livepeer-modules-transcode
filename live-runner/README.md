@@ -28,6 +28,13 @@ opaque to callers but composes as
 `<runner-session-id>?token=<rotated-secret>`, so joining the two supplies
 MediaMTX with exactly the scoped `ingest/<runner-session-id>` path and token.
 
+An idempotent runtime coordinator watches the loopback MediaMTX path API for
+the session's authenticated RTMP publisher. Only then does it acquire encoder
+capacity and start one context-bound FFmpeg process that decodes once and
+publishes the selected ladder back to the private rendition paths. Publisher
+disconnects or transient launch failures return to the watch loop; runner
+termination and process shutdown cancel and join the FFmpeg process.
+
 ## Runner surface
 
 Paths are operator-configured in Modules; these are this runner's declared

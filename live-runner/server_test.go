@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,14 @@ type fakeLiveRuntimeV1 struct {
 	terminateCount int
 	failEnsure     bool
 	failTerminate  bool
+	failValidation bool
+}
+
+func (f *fakeLiveRuntimeV1) ValidateSession(RunnerCreateRequestV1) error {
+	if f.failValidation {
+		return errors.New("unsafe validation detail")
+	}
+	return nil
 }
 
 func (f *fakeLiveRuntimeV1) EnsureSession(context.Context, SessionRecordV1, SessionSecretsV1) error {
@@ -162,6 +171,19 @@ func TestLiveRunnerCreatePersistsBeforeRuntimeAndRecovers(t *testing.T) {
 	_ = json.Unmarshal(retry.Body.Bytes(), &recovered)
 	if recovered.RunnerSessionID != record.RunnerSessionID {
 		t.Fatalf("recovery changed runner ID: %q != %q", recovered.RunnerSessionID, record.RunnerSessionID)
+	}
+}
+
+func TestLiveRunnerRejectsRuntimeParametersBeforePersistence(t *testing.T) {
+	handler, store, runtime := testLiveRunnerHandlerV1(t)
+	runtime.failValidation = true
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	response := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if response.Code != http.StatusBadRequest || bytes.Contains(response.Body.Bytes(), []byte("unsafe validation detail")) {
+		t.Fatalf("invalid runtime parameters=%d %s", response.Code, response.Body.String())
+	}
+	if _, _, err := store.Load(create.SessionID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid runtime parameters were persisted: %v", err)
 	}
 }
 

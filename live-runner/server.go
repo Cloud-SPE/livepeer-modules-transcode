@@ -18,6 +18,7 @@ import (
 const maxRunnerRequestBodyV1 = 256 * 1024
 
 type LiveSessionRuntimeV1 interface {
+	ValidateSession(RunnerCreateRequestV1) error
 	EnsureSession(context.Context, SessionRecordV1, SessionSecretsV1) error
 	TerminateSession(context.Context, SessionRecordV1) error
 }
@@ -127,6 +128,10 @@ func (s *LiveRunnerServerV1) handleCreateV1(writer http.ResponseWriter, request 
 	var create RunnerCreateRequestV1
 	if err := decodeRunnerRequestV1(writer, request, &create); err != nil || ValidateCreateRequestV1(create) != nil {
 		writeRunnerErrorV1(writer, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err := s.Runtime.ValidateSession(create); err != nil {
+		writeRunnerErrorV1(writer, http.StatusBadRequest, "invalid_session_params")
 		return
 	}
 	response, err := s.Factory.Create(create)
