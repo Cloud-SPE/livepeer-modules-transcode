@@ -13,3 +13,4 @@ export * from "./locTransport.js";
 export * from "./locClient.js";
 export * from "./paidJobClient.js";
 export * from "./paidSessionClient.js";
+export * from "./sourceProbe.js";
