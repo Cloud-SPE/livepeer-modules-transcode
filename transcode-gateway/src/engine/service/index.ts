@@ -9,3 +9,4 @@ export * from "./vodUsage.js";
 export * from "./abrExchange.js";
 export * from "./paidAbrOrchestrator.js";
 export * from "./paidAbrRecovery.js";
+export * from "./paidLiveOpen.js";

@@ -25,6 +25,7 @@ export interface PaidSessionStore {
   byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
   byBrokerSessionId(brokerSessionId: string): Promise<PaidOperation | null>;
   readSecrets(value: OwnedPaidSession): Promise<PaidOperationSecrets | null>;
+  putSecrets(value: OwnedPaidSession, secrets: PaidOperationSecrets): Promise<boolean>;
   recordProgress(
     value: OwnedPaidSession,
     progress: PaidOperationProgress,
@@ -131,6 +132,10 @@ export function createPaidSessionStore(
 
     readSecrets(value) {
       return options.repo.readSecrets(value.operation.id, value.claim);
+    },
+
+    putSecrets(value, secrets) {
+      return options.repo.putSecrets(value.operation.id, value.claim, secrets);
     },
 
     async recordProgress(value, progress) {
