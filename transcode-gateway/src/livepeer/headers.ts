@@ -12,6 +12,7 @@ export const HEADER = {
   WORK_UNITS:   "Livepeer-Work-Units",
   WORK_UNIT:    "Livepeer-Work-Unit",
   JOB_ID:       "Livepeer-Job-Id",
+  REBIND_FROM:  "Livepeer-Rebind-From",
   SETTLEMENT:   "Livepeer-Settlement",
   ERROR:        "Livepeer-Error",
 } as const;

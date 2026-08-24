@@ -110,8 +110,68 @@ export interface LocOpenSessionResult {
   openedAt: string;
 }
 
+export interface LocCapStatus {
+  sessionPctUsed: number;
+  spendPeriodPctUsed: number | null;
+  userBalancePctUsed: number | null;
+  operatorPoolPctUsed: number | null;
+  willRefuseNextRefill: boolean;
+  winddownReason: string | null;
+}
+
+export interface LocRefillSessionInput {
+  operationId: string;
+  requestId: string;
+  observedConsumedUnits?: number;
+  rebindFrom?: string;
+  replacesRequestId?: string;
+}
+
+export interface LocRefillSessionResult {
+  workId: string;
+  requestId: string;
+  refillSequence: number;
+  paymentEnvelope: string;
+  fundedValueWei: number;
+  capStatus: LocCapStatus;
+  rebindFrom: string | null;
+}
+
+export interface LocSessionStatus {
+  operationId: string;
+  workId: string;
+  state: string;
+  fundedValueWei: number;
+  billedValueWei: number;
+  refillCount: number;
+  capStatus: LocCapStatus | null;
+  actualUnits: number | null;
+  outcome: string | null;
+  closedAt: string | null;
+}
+
+export interface LocCloseSessionInput {
+  operationId: string;
+  actualUnits: number;
+  outcome: string;
+  settlement: LocSettlementEnvelope;
+}
+
+export interface LocCloseSessionResult {
+  operationId: string;
+  workId: string;
+  actualUnits: number;
+  billedValueWei: number;
+  refundWei: number;
+  outcome: string;
+  closedAt: string;
+}
+
 export interface LocClient {
   openJob(input: LocOpenJobInput): Promise<LocOpenJobResult>;
   settleJob(input: LocSettleJobInput): Promise<LocSettleJobResult>;
   openSession(input: LocOpenSessionInput): Promise<LocOpenSessionResult>;
+  refillSession(input: LocRefillSessionInput): Promise<LocRefillSessionResult>;
+  getSession(operationId: string): Promise<LocSessionStatus>;
+  closeSession(input: LocCloseSessionInput): Promise<LocCloseSessionResult>;
 }

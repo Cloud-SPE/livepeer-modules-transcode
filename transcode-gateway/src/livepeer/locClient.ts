@@ -7,6 +7,11 @@ import type {
   LocOpenSessionResult,
   LocRouteBinding,
   LocRouteSnapshot,
+  LocCloseSessionInput,
+  LocCloseSessionResult,
+  LocRefillSessionInput,
+  LocRefillSessionResult,
+  LocSessionStatus,
   LocSettleJobInput,
   LocSettleJobResult,
   LocTransport,
@@ -135,6 +140,59 @@ const settleJobWire = z
     cap_status: z.unknown(),
   })
   .strict();
+const capStatusWire = z
+  .object({
+    session_pct_used: z.number().min(0).max(1),
+    spend_period_pct_used: z.number().min(0).max(1).nullable(),
+    user_balance_pct_used: z.number().min(0).max(1).nullable(),
+    operator_pool_pct_used: z.number().min(0).max(1).nullable(),
+    will_refuse_next_refill: z.boolean(),
+    winddown_reason: z.string().nullable(),
+  })
+  .strict();
+const refillSessionWire = z
+  .object({
+    work_id: z.string().min(1),
+    request_id: z.string().min(1),
+    refill_seq: z.number().int().nonnegative(),
+    payment_envelope: z.string().min(1),
+    expected_value_wei: z.number().int().nonnegative(),
+    funded_value_wei: z.number().int().nonnegative(),
+    cap_status: capStatusWire,
+    rebind_from: z.string().nullable().optional(),
+  })
+  .strict();
+const sessionStatusWire = z
+  .object({
+    session_id: z.string().uuid(),
+    work_id: z.string().min(1),
+    capability: z.string().min(1),
+    offering: z.string().min(1),
+    protocol: z.literal("paid-session/v1"),
+    state: z.string().min(1),
+    estimated_units: z.number().int().positive(),
+    max_total_units: z.number().int().positive(),
+    funded_value_wei: z.number().int().nonnegative(),
+    billed_value_wei: z.number().int().nonnegative(),
+    refill_count: z.number().int().nonnegative(),
+    cap_status: capStatusWire.nullable(),
+    opened_at: z.string().min(1),
+    closed_at: z.string().nullable(),
+    actual_units: z.number().int().nonnegative().nullable(),
+    outcome: z.string().nullable(),
+  })
+  .strict();
+const closeSessionWire = z
+  .object({
+    session_id: z.string().uuid(),
+    work_id: z.string().min(1),
+    actual_units: z.number().int().nonnegative(),
+    billed_value_wei: z.number().int().nonnegative(),
+    refund_wei: z.number().int().nonnegative(),
+    outcome: z.string().min(1),
+    closed_at: z.string().min(1),
+  })
+  .strict();
 
 export function routeBindingFor(route: SelectedWorkerRoute): LocRouteBinding {
   if (
@@ -218,6 +276,122 @@ export function createLocClient(transport: LocTransport): LocClient {
       });
       return mapSessionOpen(response, input);
     },
+
+    async refillSession(input) {
+      validateRefill(input);
+      const response = await transport.request({
+        method: "POST",
+        path: `/v1/sessions/${encodeURIComponent(input.operationId)}/refill`,
+        idempotencyKey: input.requestId,
+        body: {
+          ...(input.observedConsumedUnits === undefined
+            ? {}
+            : { observed_consumed_units: input.observedConsumedUnits }),
+          ...(input.rebindFrom === undefined
+            ? {}
+            : {
+                rebind_from: input.rebindFrom,
+                replaces_request_id: input.replacesRequestId,
+              }),
+        },
+        schema: refillSessionWire,
+      });
+      return mapRefill(response, input);
+    },
+
+    async getSession(operationId) {
+      if (!z.string().uuid().safeParse(operationId).success) throw invalidRequest();
+      const response = await transport.request({
+        method: "GET",
+        path: `/v1/sessions/${encodeURIComponent(operationId)}`,
+        schema: sessionStatusWire,
+      });
+      return mapSessionStatus(response, operationId);
+    },
+
+    async closeSession(input) {
+      validateClose(input);
+      const response = await transport.request({
+        method: "POST",
+        path: `/v1/sessions/${encodeURIComponent(input.operationId)}/close`,
+        idempotencyKey: `close:${input.operationId}`,
+        body: {
+          actual_units: input.actualUnits,
+          outcome: input.outcome,
+          settlement: input.settlement,
+        },
+        schema: closeSessionWire,
+      });
+      return mapClose(response, input);
+    },
+  };
+}
+
+function mapRefill(
+  value: z.infer<typeof refillSessionWire>,
+  input: LocRefillSessionInput,
+): LocRefillSessionResult {
+  if (
+    (value.rebind_from ?? null) !== (input.rebindFrom ?? null)
+  ) throw invalidResponse();
+  return {
+    workId: value.work_id,
+    requestId: value.request_id,
+    refillSequence: value.refill_seq,
+    paymentEnvelope: value.payment_envelope,
+    fundedValueWei: value.funded_value_wei,
+    capStatus: mapCapStatus(value.cap_status),
+    rebindFrom: value.rebind_from ?? null,
+  };
+}
+
+function mapSessionStatus(
+  value: z.infer<typeof sessionStatusWire>,
+  operationId: string,
+): LocSessionStatus {
+  if (value.session_id !== operationId) throw invalidResponse();
+  return {
+    operationId: value.session_id,
+    workId: value.work_id,
+    state: value.state,
+    fundedValueWei: value.funded_value_wei,
+    billedValueWei: value.billed_value_wei,
+    refillCount: value.refill_count,
+    capStatus: value.cap_status === null ? null : mapCapStatus(value.cap_status),
+    actualUnits: value.actual_units,
+    outcome: value.outcome,
+    closedAt: value.closed_at,
+  };
+}
+
+function mapClose(
+  value: z.infer<typeof closeSessionWire>,
+  input: LocCloseSessionInput,
+): LocCloseSessionResult {
+  if (
+    value.session_id !== input.operationId ||
+    value.actual_units !== input.actualUnits ||
+    value.outcome !== input.outcome
+  ) throw invalidResponse();
+  return {
+    operationId: value.session_id,
+    workId: value.work_id,
+    actualUnits: value.actual_units,
+    billedValueWei: value.billed_value_wei,
+    refundWei: value.refund_wei,
+    outcome: value.outcome,
+    closedAt: value.closed_at,
+  };
+}
+
+function mapCapStatus(value: z.infer<typeof capStatusWire>) {
+  return {
+    sessionPctUsed: value.session_pct_used,
+    spendPeriodPctUsed: value.spend_period_pct_used,
+    userBalancePctUsed: value.user_balance_pct_used,
+    operatorPoolPctUsed: value.operator_pool_pct_used,
+    willRefuseNextRefill: value.will_refuse_next_refill,
+    winddownReason: value.winddown_reason,
   };
 }
 
@@ -250,7 +424,6 @@ function mapJobOpen(
   const routeSnapshot = mapRouteSnapshot(value.route_snapshot);
   requireSnapshot(input, routeSnapshot, "paid-job/v1");
   if (
-    value.request_id !== input.requestId ||
     value.broker_url !== routeSnapshot.brokerUrl ||
     value.work_unit !== routeSnapshot.workUnit ||
     value.transport !== input.transport ||
@@ -285,7 +458,6 @@ function mapSessionOpen(
   });
   if (
     !declaration?.session ||
-    value.request_id !== input.requestId ||
     value.broker_url !== routeSnapshot.brokerUrl ||
     declaration.session.descriptorSchema !== input.descriptorSchema ||
     !sameJson(declaration.session, routeSnapshot.session) ||
@@ -414,6 +586,28 @@ function validateSettleJob(input: LocSettleJobInput): void {
   ) {
     throw invalidRequest();
   }
+}
+
+function validateRefill(input: LocRefillSessionInput): void {
+  if (
+    !z.string().uuid().safeParse(input.operationId).success ||
+    input.requestId.length === 0 ||
+    (input.observedConsumedUnits !== undefined &&
+      (!Number.isSafeInteger(input.observedConsumedUnits) || input.observedConsumedUnits < 0)) ||
+    ((input.rebindFrom === undefined) !== (input.replacesRequestId === undefined)) ||
+    (input.rebindFrom !== undefined && input.rebindFrom.length === 0) ||
+    (input.replacesRequestId !== undefined && input.replacesRequestId.length === 0)
+  ) throw invalidRequest();
+}
+
+function validateClose(input: LocCloseSessionInput): void {
+  if (
+    !z.string().uuid().safeParse(input.operationId).success ||
+    !Number.isSafeInteger(input.actualUnits) ||
+    input.actualUnits < 0 ||
+    input.outcome.length === 0 ||
+    !settlementEnvelopeWire.safeParse(input.settlement).success
+  ) throw invalidRequest();
 }
 
 function hexFingerprint(value: Uint8Array): string {

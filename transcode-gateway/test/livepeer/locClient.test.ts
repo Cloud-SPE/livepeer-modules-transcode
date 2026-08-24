@@ -61,7 +61,7 @@ function snapshot(protocol: "paid-job/v1" | "paid-session/v1") {
 function jobResponse() {
   return {
     job_id: JOB_ID,
-    request_id: "request-1",
+    request_id: "broker-request-1",
     work_id: "work-1",
     broker_url: "https://broker.example/livepeer",
     protocol: "paid-job/v1",
@@ -125,6 +125,7 @@ test("LOC client opens and replays an exact bound paid job", async () => {
 
   assert.deepEqual(replay, first);
   assert.equal(first.routeSnapshot.schemaVersion, "route-snapshot/v1");
+  assert.equal(first.requestId, "broker-request-1");
   assert.equal(first.routeSnapshot.unitsPerPrice, "18446744073709551615");
   assert.equal(
     first.routeSnapshot.settlementKeys[0]?.introducedInPublicationSeq,
@@ -261,5 +262,40 @@ test("LOC client submits the decoded broker settlement to the recorded job endpo
     work_unit: "frame_megapixel",
     outcome: "OVERFUNDED",
     settlement,
+  });
+});
+
+test("LOC session refill preserves its idempotency and recipient rebind identities", async () => {
+  const { transport, requests } = fakeTransport({
+    work_id: "work-2",
+    request_id: "broker-refill-request-1",
+    refill_seq: 2,
+    payment_envelope: "refill-envelope",
+    expected_value_wei: 10,
+    funded_value_wei: 20,
+    cap_status: {
+      session_pct_used: 0.5,
+      spend_period_pct_used: null,
+      user_balance_pct_used: null,
+      operator_pool_pct_used: null,
+      will_refuse_next_refill: false,
+      winddown_reason: null,
+    },
+    rebind_from: "work-1",
+  });
+  const result = await createLocClient(transport).refillSession({
+    operationId: SESSION_ID,
+    requestId: "gateway-refill-1",
+    observedConsumedUnits: 12,
+    rebindFrom: "work-1",
+    replacesRequestId: "broker-refill-old",
+  });
+
+  assert.equal(result.workId, "work-2");
+  assert.equal(requests[0]?.idempotencyKey, "gateway-refill-1");
+  assert.deepEqual(requests[0]?.body, {
+    observed_consumed_units: 12,
+    rebind_from: "work-1",
+    replaces_request_id: "broker-refill-old",
   });
 });

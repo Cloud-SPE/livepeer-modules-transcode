@@ -120,6 +120,15 @@ function fakeLoc() {
     async openSession() {
       throw new Error("unused");
     },
+    async refillSession() {
+      throw new Error("unused");
+    },
+    async getSession() {
+      throw new Error("unused");
+    },
+    async closeSession() {
+      throw new Error("unused");
+    },
   };
   return { loc, opens, settlements };
 }
