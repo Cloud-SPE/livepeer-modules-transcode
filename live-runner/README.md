@@ -6,6 +6,24 @@ capability-owned `rtmp-hls/v1` runtime descriptor.
 This component currently pins the runner contract. Runtime implementation is
 tracked by Bead `lmt-65a.4.5`.
 
+## Process startup
+
+The executable lives at `./cmd/live-runner`. Startup is fail-closed: it loads
+and validates the configured live presets, opens the encrypted state store,
+starts the pinned MediaMTX binary, waits for its loopback API, and converges
+pending key activation, active sessions, and durable stopping intents before
+serving HTTP. An unexpected MediaMTX exit terminates the runner. Graceful
+shutdown stops HTTP admission, joins FFmpeg sessions, and then stops
+MediaMTX.
+
+Required environment variables are `LIVE_RUNNER_MASTER_KEY` (base64 for 32
+bytes), `LIVE_RUNNER_BROKER_TOKEN`, `LIVE_RUNNER_INTERNAL_MEDIA_TOKEN`,
+`LIVE_RUNNER_PUBLIC_RTMP_URL`, `LIVE_RUNNER_PUBLIC_HLS_BASE`,
+`LIVE_RUNNER_PUBLIC_API_BASE`, and `LIVE_RUNNER_PRESETS_FILE`. MediaMTX
+listener addresses, its internal auth URL, the state directory, binary path,
+and encoder concurrency have `LIVE_RUNNER_*` overrides; private HLS, API, and
+metrics addresses are still rejected unless loopback-only.
+
 ## Media router
 
 The runner uses a pinned MediaMTX `1.20.1` process for authenticated

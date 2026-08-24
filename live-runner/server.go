@@ -33,18 +33,8 @@ type RunnerResponseFactoryV1 struct {
 }
 
 func (f RunnerResponseFactoryV1) Create(_ RunnerCreateRequestV1) (RunnerCreateResponseV1, error) {
-	if err := validateURLScheme(f.PublicRTMPURL, "rtmp", "rtmps"); err != nil {
-		return RunnerCreateResponseV1{}, errors.New("public RTMP URL is invalid")
-	}
-	rtmpURL, _ := url.Parse(f.PublicRTMPURL)
-	if strings.TrimRight(rtmpURL.Path, "/") != "/ingest" || rtmpURL.RawQuery != "" || rtmpURL.Fragment != "" {
-		return RunnerCreateResponseV1{}, errors.New("public RTMP URL must end at the ingest application")
-	}
-	if err := validatePublicHTTPBaseV1(f.PublicHLSBase); err != nil {
-		return RunnerCreateResponseV1{}, errors.New("public HLS base URL is invalid")
-	}
-	if err := validatePublicHTTPBaseV1(f.PublicAPIBase); err != nil || f.GrantTTL <= 0 {
-		return RunnerCreateResponseV1{}, errors.New("public API base URL or grant TTL is invalid")
+	if err := f.Validate(); err != nil {
+		return RunnerCreateResponseV1{}, err
 	}
 	runnerID, err := f.randomHexV1("runner_", 16)
 	if err != nil {
@@ -79,6 +69,23 @@ func (f RunnerResponseFactoryV1) Create(_ RunnerCreateRequestV1) (RunnerCreateRe
 		return RunnerCreateResponseV1{}, err
 	}
 	return response, nil
+}
+
+func (f RunnerResponseFactoryV1) Validate() error {
+	if err := validateURLScheme(f.PublicRTMPURL, "rtmp", "rtmps"); err != nil {
+		return errors.New("public RTMP URL is invalid")
+	}
+	rtmpURL, _ := url.Parse(f.PublicRTMPURL)
+	if strings.TrimRight(rtmpURL.Path, "/") != "/ingest" || rtmpURL.RawQuery != "" || rtmpURL.Fragment != "" {
+		return errors.New("public RTMP URL must end at the ingest application")
+	}
+	if err := validatePublicHTTPBaseV1(f.PublicHLSBase); err != nil {
+		return errors.New("public HLS base URL is invalid")
+	}
+	if err := validatePublicHTTPBaseV1(f.PublicAPIBase); err != nil || f.GrantTTL <= 0 {
+		return errors.New("public API base URL or grant TTL is invalid")
+	}
+	return nil
 }
 
 func (f RunnerResponseFactoryV1) randomHexV1(prefix string, size int) (string, error) {
