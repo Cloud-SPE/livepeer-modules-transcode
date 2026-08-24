@@ -146,6 +146,9 @@ func (a MediaMTXAuthorizerV1) Authorize(request MediaMTXAuthRequestV1) bool {
 	internalToken := InternalMediaTokenV1(a.InternalTokenRoot, runnerSessionID)
 	switch {
 	case kind == "ingest" && request.Protocol == "rtmp" && request.Action == "publish":
+		if record.PendingKeyActivationID != "" {
+			return false
+		}
 		current, ok := secrets.KeyIssues[secrets.CurrentKeyID]
 		streamPath, streamToken, valid := ParsePrivateIngestStreamKeyV1(current.Response.StreamKey)
 		expiresAt, expiryErr := time.Parse(time.RFC3339, current.Response.ExpiresAt)

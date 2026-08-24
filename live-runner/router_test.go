@@ -90,6 +90,45 @@ func TestMediaRouterClientRequiresLoopbackAPI(t *testing.T) {
 	}
 }
 
+func TestMediaRouterClientKicksRTMPAndRTMPSPublishers(t *testing.T) {
+	for _, sourceType := range []string{"rtmpConn", "rtmpsConn"} {
+		t.Run(sourceType, func(t *testing.T) {
+			var kicked atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method == http.MethodGet {
+					_, _ = writer.Write([]byte(`{"name":"ingest/runner_session_001","online":true,"source":{"id":"connection-001","type":"` + sourceType + `"}}`))
+					return
+				}
+				collection := "rtmpconns"
+				if sourceType == "rtmpsConn" {
+					collection = "rtmpsconns"
+				}
+				if request.Method != http.MethodPost || request.RequestURI != "/v3/"+collection+"/kick/connection-001" {
+					t.Errorf("kick request=%s %s", request.Method, request.RequestURI)
+				}
+				kicked.Store(true)
+				_, _ = writer.Write([]byte(`{"status":"ok"}`))
+			}))
+			defer server.Close()
+			client, _ := NewMediaRouterClientV1(server.URL, nil, time.Second)
+			if err := client.KickPublisher(context.Background(), "ingest/runner_session_001"); err != nil || !kicked.Load() {
+				t.Fatalf("kick completed=%v err=%v", kicked.Load(), err)
+			}
+		})
+	}
+}
+
+func TestMediaRouterClientTreatsAbsentPublisherKickAsComplete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	client, _ := NewMediaRouterClientV1(server.URL, nil, time.Second)
+	if err := client.KickPublisher(context.Background(), "ingest/runner_session_001"); err != nil {
+		t.Fatalf("absent publisher kick=%v", err)
+	}
+}
+
 func TestMediaRouterWaitHonorsCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "not found", http.StatusNotFound)

@@ -20,8 +20,12 @@ key can publish only `ingest/<runner-session-id>`. A separate per-session
 token derived from a runner-only root secret reads that ingest and publishes
 `renditions/<runner-session-id>/<name>`.
 Loopback HLS reads are allowed only while the corresponding session is
-active. Rotation immediately rejects the previous ingest key, and terminal
-state rejects every path.
+active. Rotation durably marks the replacement key as pending, disconnects
+the existing MediaMTX publisher, and only then activates the replacement.
+An identical retry completes an interrupted disconnect without issuing a
+second key; completed retries do not disconnect the replacement publisher.
+Terminal state rejects every path and termination also disconnects any
+already-authenticated ingest publisher.
 
 The descriptor's RTMP server URL ends in `/ingest`. Its issued stream key is
 opaque to callers but composes as

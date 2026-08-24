@@ -16,12 +16,14 @@ import (
 const testBrokerTokenV1 = "broker-token-0123456789abcdef0123"
 
 type fakeLiveRuntimeV1 struct {
-	mu             sync.Mutex
-	ensureCount    int
-	terminateCount int
-	failEnsure     bool
-	failTerminate  bool
-	failValidation bool
+	mu              sync.Mutex
+	ensureCount     int
+	terminateCount  int
+	failEnsure      bool
+	failTerminate   bool
+	failValidation  bool
+	activationCount int
+	failActivation  bool
 }
 
 func (f *fakeLiveRuntimeV1) ValidateSession(RunnerCreateRequestV1) error {
@@ -47,6 +49,16 @@ func (f *fakeLiveRuntimeV1) TerminateSession(context.Context, SessionRecordV1) e
 	f.terminateCount++
 	if f.failTerminate {
 		return errors.New("unsafe runtime detail")
+	}
+	return nil
+}
+
+func (f *fakeLiveRuntimeV1) ActivateStreamKey(context.Context, SessionRecordV1) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.activationCount++
+	if f.failActivation {
+		return errors.New("unsafe activation detail")
 	}
 	return nil
 }
@@ -112,7 +124,7 @@ func TestLiveRunnerCreateReplayStatusAndTerminate(t *testing.T) {
 }
 
 func TestLiveRunnerStreamKeyGrantAndRotation(t *testing.T) {
-	handler, _, _ := testLiveRunnerHandlerV1(t)
+	handler, _, runtime := testLiveRunnerHandlerV1(t)
 	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
 	createdRecorder := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
 	var created RunnerCreateResponseV1
@@ -142,11 +154,65 @@ func TestLiveRunnerStreamKeyGrantAndRotation(t *testing.T) {
 	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, rotation, grant.Secret); response.Code != http.StatusOK {
 		t.Fatalf("rotation=%d %s", response.Code, response.Body.String())
 	}
+	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, rotation, grant.Secret); response.Code != http.StatusOK {
+		t.Fatalf("rotation replay=%d %s", response.Code, response.Body.String())
+	}
 	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, issue, grant.Secret); response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(ErrRequestSupersededV1.Error())) {
 		t.Fatalf("superseded replay=%d %s", response.Code, response.Body.String())
 	}
 	if response := runnerRequestV1(t, handler, http.MethodPost, keyPath, rotation, "wrong-grant"); response.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong grant=%d %s", response.Code, response.Body.String())
+	}
+	runtime.mu.Lock()
+	activationCount := runtime.activationCount
+	runtime.mu.Unlock()
+	if activationCount != 1 {
+		t.Fatalf("completed rotation activation count=%d", activationCount)
+	}
+}
+
+func TestLiveRunnerRecoversPendingKeyActivation(t *testing.T) {
+	handler, store, runtime := testLiveRunnerHandlerV1(t)
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	createdRecorder := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	var created RunnerCreateResponseV1
+	_ = json.Unmarshal(createdRecorder.Body.Bytes(), &created)
+	grant := created.Runtime.Grants[0]
+	path := "/v1/sessions/" + created.RunnerSessionID + "/stream-keys"
+	first := StreamKeyIssueRequestV1{RequestID: "key_issue_001", Audience: "gateway-relay"}
+	if response := runnerRequestV1(t, handler, http.MethodPost, path, first, grant.Secret); response.Code != http.StatusOK {
+		t.Fatalf("first issue=%d %s", response.Code, response.Body.String())
+	}
+	runtime.failActivation = true
+	rotation := StreamKeyIssueRequestV1{RequestID: "key_issue_002", Audience: "gateway-relay"}
+	failed := runnerRequestV1(t, handler, http.MethodPost, path, rotation, grant.Secret)
+	if failed.Code != http.StatusServiceUnavailable || bytes.Contains(failed.Body.Bytes(), []byte("unsafe activation detail")) {
+		t.Fatalf("failed activation=%d %s", failed.Code, failed.Body.String())
+	}
+	record, _, err := store.Load(create.SessionID)
+	if err != nil || record.PendingKeyActivationID != rotation.RequestID {
+		t.Fatalf("pending activation=%q err=%v", record.PendingKeyActivationID, err)
+	}
+	competing := StreamKeyIssueRequestV1{RequestID: "key_issue_003", Audience: "gateway-relay"}
+	if response := runnerRequestV1(t, handler, http.MethodPost, path, competing, grant.Secret); response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(ErrKeyActivationInFlightV1.Error())) {
+		t.Fatalf("competing activation=%d %s", response.Code, response.Body.String())
+	}
+	runtime.failActivation = false
+	if response := runnerRequestV1(t, handler, http.MethodPost, path, rotation, grant.Secret); response.Code != http.StatusOK {
+		t.Fatalf("activation recovery=%d %s", response.Code, response.Body.String())
+	}
+	if response := runnerRequestV1(t, handler, http.MethodPost, path, rotation, grant.Secret); response.Code != http.StatusOK {
+		t.Fatalf("completed activation replay=%d %s", response.Code, response.Body.String())
+	}
+	record, _, err = store.Load(create.SessionID)
+	if err != nil || record.PendingKeyActivationID != "" {
+		t.Fatalf("completed activation remained pending=%q err=%v", record.PendingKeyActivationID, err)
+	}
+	runtime.mu.Lock()
+	activationCount := runtime.activationCount
+	runtime.mu.Unlock()
+	if activationCount != 2 {
+		t.Fatalf("activation attempts=%d", activationCount)
 	}
 }
 

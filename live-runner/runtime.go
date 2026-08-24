@@ -15,6 +15,7 @@ import (
 
 type MediaPublisherWaiterV1 interface {
 	WaitForRTMPPublisher(context.Context, string, time.Duration) (MediaPathStatusV1, error)
+	KickPublisher(context.Context, string) error
 }
 
 type LiveLadderProcessV1 interface {
@@ -153,19 +154,34 @@ func (c *LiveRuntimeCoordinatorV1) EnsureSession(_ context.Context, record Sessi
 }
 
 func (c *LiveRuntimeCoordinatorV1) TerminateSession(ctx context.Context, record SessionRecordV1) error {
+	ingestPath, err := IngestMediaPathV1(record.RunnerSessionID)
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
 	active := c.sessions[record.RunnerSessionID]
 	c.mu.Unlock()
-	if active == nil {
-		return nil
+	if active != nil {
+		active.cancel()
 	}
-	active.cancel()
+	kickErr := c.router.KickPublisher(ctx, ingestPath)
+	if active == nil {
+		return kickErr
+	}
 	select {
 	case <-active.done:
-		return nil
+		return kickErr
 	case <-ctx.Done():
-		return ctx.Err()
+		return errors.Join(kickErr, ctx.Err())
 	}
+}
+
+func (c *LiveRuntimeCoordinatorV1) ActivateStreamKey(ctx context.Context, record SessionRecordV1) error {
+	ingestPath, err := IngestMediaPathV1(record.RunnerSessionID)
+	if err != nil {
+		return err
+	}
+	return c.router.KickPublisher(ctx, ingestPath)
 }
 
 func (c *LiveRuntimeCoordinatorV1) Shutdown(ctx context.Context) error {

@@ -49,6 +49,40 @@ type MediaRouterClientV1 struct {
 	client  *http.Client
 }
 
+func (c *MediaRouterClientV1) KickPublisher(ctx context.Context, ingestPath string) error {
+	status, err := c.Path(ctx, ingestPath)
+	if errors.Is(err, ErrMediaPathNotFoundV1) || (err == nil && (!status.Online || status.Source == nil)) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status.Source.ID == "" || (status.Source.Type != "rtmpConn" && status.Source.Type != "rtmpsConn") {
+		return ErrUnexpectedMediaSourceV1
+	}
+	collection := "rtmpconns"
+	if status.Source.Type == "rtmpsConn" {
+		collection = "rtmpsconns"
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v3/"+collection+"/kick/"+url.PathEscape(status.Source.ID), nil)
+	if err != nil {
+		return errors.New("media router kick request failed")
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return errors.New("media router kick request failed")
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if response.StatusCode == http.StatusNotFound || (response.StatusCode >= 200 && response.StatusCode < 300) {
+		return nil
+	}
+	return &MediaRouterAPIErrorV1{StatusCode: response.StatusCode}
+}
+
 func NewMediaRouterClientV1(baseURL string, transport http.RoundTripper, timeout time.Duration) (*MediaRouterClientV1, error) {
 	if timeout <= 0 {
 		return nil, errors.New("positive media router timeout is required")

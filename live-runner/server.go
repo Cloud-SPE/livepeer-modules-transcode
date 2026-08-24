@@ -21,6 +21,7 @@ type LiveSessionRuntimeV1 interface {
 	ValidateSession(RunnerCreateRequestV1) error
 	EnsureSession(context.Context, SessionRecordV1, SessionSecretsV1) error
 	TerminateSession(context.Context, SessionRecordV1) error
+	ActivateStreamKey(context.Context, SessionRecordV1) error
 }
 
 type RunnerResponseFactoryV1 struct {
@@ -271,9 +272,26 @@ func (s *LiveRunnerServerV1) handleStreamKeyV1(writer http.ResponseWriter, reque
 		writeRunnerErrorV1(writer, http.StatusConflict, ErrRequestIDReuseV1.Error())
 	case errors.Is(err, ErrRequestSupersededV1):
 		writeRunnerErrorV1(writer, http.StatusConflict, ErrRequestSupersededV1.Error())
+	case errors.Is(err, ErrKeyActivationInFlightV1):
+		writeRunnerErrorV1(writer, http.StatusConflict, ErrKeyActivationInFlightV1.Error())
 	case err != nil:
 		writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
 	default:
+		current, _, loadErr := s.Store.Load(record.BrokerSessionID)
+		if loadErr != nil {
+			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
+			return
+		}
+		if current.PendingKeyActivationID == issue.RequestID {
+			if err := s.Runtime.ActivateStreamKey(request.Context(), current); err != nil {
+				writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "runtime_unavailable")
+				return
+			}
+			if err := s.Store.CompleteKeyActivation(record.BrokerSessionID, issue.RequestID); err != nil {
+				writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
+				return
+			}
+		}
 		writeRunnerJSONV1(writer, http.StatusOK, response)
 	}
 }

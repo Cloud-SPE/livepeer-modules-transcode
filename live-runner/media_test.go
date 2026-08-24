@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +97,20 @@ func TestMediaMTXAuthorizationTracksKeyRotation(t *testing.T) {
 	}
 	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: oldKey}) {
 		t.Fatal("superseded stream key remained authorized")
+	}
+	if authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: "new-private-ingest-key"}) {
+		t.Fatal("replacement stream key was authorized before publisher kick completed")
+	}
+	internalToken := InternalMediaTokenV1(authorizer.InternalTokenRoot, response.RunnerSessionID)
+	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "read", Path: ingestPath, Protocol: "rtmp", Token: internalToken}) {
+		t.Fatal("key activation interrupted the runner's existing ingest read")
+	}
+	renditionPath, _ := RenditionMediaPathV1(response.RunnerSessionID, "720p")
+	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "read", Path: renditionPath, Protocol: "hls"}) {
+		t.Fatal("key activation interrupted HLS playback")
+	}
+	if err := store.CompleteKeyActivation(request.SessionID, rotation.RequestID); err != nil {
+		t.Fatal(err)
 	}
 	if !authorizer.Authorize(MediaMTXAuthRequestV1{Action: "publish", Path: ingestPath, Protocol: "rtmp", Token: "new-private-ingest-key"}) {
 		t.Fatal("rotated stream key was not authorized")
@@ -203,6 +219,118 @@ func TestMediaMTXImageAcceptsGeneratedConfig(t *testing.T) {
 	if bytes.Contains(bytes.ToLower(output), []byte("error")) {
 		t.Fatalf("MediaMTX reported a configuration error: %s", output)
 	}
+}
+
+func TestMediaMTXRealPublisherCanBeKicked(t *testing.T) {
+	if os.Getenv("LIVE_RUNNER_CONTAINER_TEST") != "1" {
+		t.Skip("set LIVE_RUNNER_CONTAINER_TEST=1 to exercise real MediaMTX RTMP")
+	}
+	for _, binary := range []string{"docker", "ffmpeg"} {
+		if _, err := exec.LookPath(binary); err != nil {
+			t.Skip(binary + " is not installed")
+		}
+	}
+	store, _, createResponse, streamToken := mediaTestSessionV1(t)
+	authServer := httptest.NewServer(MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: "0123456789abcdef0123456789abcdef"})
+	defer authServer.Close()
+	rtmpPort := freeTCPPortV1(t)
+	hlsPort := freeTCPPortV1(t)
+	apiPort := freeTCPPortV1(t)
+	metricsPort := freeTCPPortV1(t)
+	configValue := DefaultMediaMTXConfigV1(authServer.URL)
+	configValue.RTMPAddress = fmt.Sprintf("127.0.0.1:%d", rtmpPort)
+	configValue.HLSAddress = fmt.Sprintf("127.0.0.1:%d", hlsPort)
+	configValue.APIAddress = fmt.Sprintf("127.0.0.1:%d", apiPort)
+	configValue.MetricsAddress = fmt.Sprintf("127.0.0.1:%d", metricsPort)
+	config, err := RenderMediaMTXConfigV1(configValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "mediamtx.yml")
+	if err := os.WriteFile(configPath, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	containerName := fmt.Sprintf("live-runner-mediamtx-real-%d", os.Getpid())
+	cleanup := func() { _ = exec.Command("docker", "rm", "-f", containerName).Run() }
+	cleanup()
+	defer cleanup()
+	routerProcess := exec.Command("docker", "run", "--rm", "--network", "host", "--name", containerName, "-v", configPath+":/mediamtx.yml:ro", MediaMTXImageV1)
+	routerProcess.Stdout = io.Discard
+	routerProcess.Stderr = io.Discard
+	if err := routerProcess.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup()
+		_ = routerProcess.Wait()
+	}()
+	apiBase := fmt.Sprintf("http://127.0.0.1:%d", apiPort)
+	waitForHTTPV1(t, apiBase+"/v3/paths/list", 5*time.Second)
+
+	streamKey, err := BuildPrivateIngestStreamKeyV1(createResponse.RunnerSessionID, streamToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishURL := fmt.Sprintf("rtmp://127.0.0.1:%d/ingest/%s", rtmpPort, streamKey)
+	publisher := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-re", "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=44100", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "flv", publishURL)
+	publisher.Stdout = io.Discard
+	publisher.Stderr = io.Discard
+	if err := publisher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if publisher.Process != nil {
+			_ = publisher.Process.Kill()
+		}
+	}()
+	routerClient, err := NewMediaRouterClientV1(apiBase, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingestPath, _ := IngestMediaPathV1(createResponse.RunnerSessionID)
+	waitContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := routerClient.WaitForRTMPPublisher(waitContext, ingestPath, 20*time.Millisecond); err != nil {
+		t.Fatalf("real RTMP publisher did not come online: %v", err)
+	}
+	if err := routerClient.KickPublisher(context.Background(), ingestPath); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- publisher.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("FFmpeg publisher remained connected after MediaMTX kick")
+	}
+	cleanup()
+}
+
+func freeTCPPortV1(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func waitForHTTPV1(t *testing.T, endpoint string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		response, err := client.Get(endpoint)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode >= 200 && response.StatusCode < 500 {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("HTTP endpoint did not become ready: %s", endpoint)
 }
 
 func mediaTestSessionV1(t *testing.T) (*EncryptedFileSessionStoreV1, RunnerCreateRequestV1, RunnerCreateResponseV1, string) {

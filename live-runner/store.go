@@ -24,10 +24,11 @@ import (
 const sessionRecordVersionV1 = 1
 
 var (
-	ErrSessionIDReuseV1    = errors.New("runner_session_id_reuse")
-	ErrRequestIDReuseV1    = errors.New("request_id_reuse")
-	ErrRequestSupersededV1 = errors.New("request_id_superseded")
-	ErrSessionTerminalV1   = errors.New("session_terminal")
+	ErrSessionIDReuseV1        = errors.New("runner_session_id_reuse")
+	ErrRequestIDReuseV1        = errors.New("request_id_reuse")
+	ErrRequestSupersededV1     = errors.New("request_id_superseded")
+	ErrKeyActivationInFlightV1 = errors.New("key_activation_in_flight")
+	ErrSessionTerminalV1       = errors.New("session_terminal")
 )
 
 type GrantAuditV1 struct {
@@ -38,24 +39,25 @@ type GrantAuditV1 struct {
 }
 
 type SessionRecordV1 struct {
-	Version              int             `json:"version"`
-	BrokerSessionID      string          `json:"broker_session_id"`
-	RunnerSessionID      string          `json:"runner_session_id"`
-	CreateFingerprint    string          `json:"create_fingerprint"`
-	State                string          `json:"state"`
-	Stopping             bool            `json:"stopping,omitempty"`
-	PendingCloseReason   string          `json:"pending_close_reason,omitempty"`
-	RuntimePublic        RuntimePublicV1 `json:"runtime_public"`
-	GrantAudit           GrantAuditV1    `json:"grant_audit"`
-	UsageTotal           uint64          `json:"usage_total"`
-	LastSequence         uint64          `json:"last_sequence"`
-	PendingEvents        []RunnerEventV1 `json:"pending_events"`
-	CloseReason          string          `json:"close_reason,omitempty"`
-	IntegritySHA256      string          `json:"integrity_sha256"`
-	WrappedKeyNonce      string          `json:"wrapped_key_nonce,omitempty"`
-	WrappedKeyCiphertext string          `json:"wrapped_key_ciphertext,omitempty"`
-	SecretNonce          string          `json:"secret_nonce,omitempty"`
-	SecretCiphertext     string          `json:"secret_ciphertext,omitempty"`
+	Version                int             `json:"version"`
+	BrokerSessionID        string          `json:"broker_session_id"`
+	RunnerSessionID        string          `json:"runner_session_id"`
+	CreateFingerprint      string          `json:"create_fingerprint"`
+	State                  string          `json:"state"`
+	Stopping               bool            `json:"stopping,omitempty"`
+	PendingCloseReason     string          `json:"pending_close_reason,omitempty"`
+	PendingKeyActivationID string          `json:"pending_key_activation_id,omitempty"`
+	RuntimePublic          RuntimePublicV1 `json:"runtime_public"`
+	GrantAudit             GrantAuditV1    `json:"grant_audit"`
+	UsageTotal             uint64          `json:"usage_total"`
+	LastSequence           uint64          `json:"last_sequence"`
+	PendingEvents          []RunnerEventV1 `json:"pending_events"`
+	CloseReason            string          `json:"close_reason,omitempty"`
+	IntegritySHA256        string          `json:"integrity_sha256"`
+	WrappedKeyNonce        string          `json:"wrapped_key_nonce,omitempty"`
+	WrappedKeyCiphertext   string          `json:"wrapped_key_ciphertext,omitempty"`
+	SecretNonce            string          `json:"secret_nonce,omitempty"`
+	SecretCiphertext       string          `json:"secret_ciphertext,omitempty"`
 }
 
 type SessionSecretsV1 struct {
@@ -185,9 +187,15 @@ func (s *EncryptedFileSessionStoreV1) RecordKeyIssue(brokerSessionID string, req
 		}
 		return stored.Response, true, nil
 	}
+	if record.PendingKeyActivationID != "" {
+		return StreamKeyIssueResponseV1{}, false, ErrKeyActivationInFlightV1
+	}
 	for id, stored := range secrets.KeyIssues {
 		stored.Response.StreamKey = ""
 		secrets.KeyIssues[id] = stored
+	}
+	if secrets.CurrentKeyID != "" {
+		record.PendingKeyActivationID = request.RequestID
 	}
 	secrets.KeyIssues[request.RequestID] = StoredKeyIssueV1{Fingerprint: fingerprint, Request: request, Response: response}
 	secrets.CurrentKeyID = request.RequestID
@@ -198,6 +206,29 @@ func (s *EncryptedFileSessionStoreV1) RecordKeyIssue(brokerSessionID string, req
 		return StreamKeyIssueResponseV1{}, false, err
 	}
 	return response, false, nil
+}
+
+func (s *EncryptedFileSessionStoreV1) CompleteKeyActivation(brokerSessionID, requestID string) error {
+	if !opaqueIDPattern.MatchString(requestID) {
+		return errors.New("key activation request ID is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, secrets, err := s.loadLocked(brokerSessionID)
+	if err != nil {
+		return err
+	}
+	if record.State != "active" || record.Stopping || secrets == nil {
+		return ErrSessionTerminalV1
+	}
+	if record.PendingKeyActivationID == "" {
+		return nil
+	}
+	if record.PendingKeyActivationID != requestID || secrets.CurrentKeyID != requestID {
+		return errors.New("key activation identity mismatch")
+	}
+	record.PendingKeyActivationID = ""
+	return s.saveLocked(record)
 }
 
 func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event RunnerEventV1) error {
@@ -231,6 +262,7 @@ func (s *EncryptedFileSessionStoreV1) Advance(brokerSessionID string, event Runn
 		record.CloseReason = *event.CloseReason
 		record.Stopping = false
 		record.PendingCloseReason = ""
+		record.PendingKeyActivationID = ""
 	}
 	return s.saveLocked(record)
 }
@@ -253,6 +285,7 @@ func (s *EncryptedFileSessionStoreV1) BeginTermination(brokerSessionID, reason s
 	}
 	record.Stopping = true
 	record.PendingCloseReason = reason
+	record.PendingKeyActivationID = ""
 	if err := s.saveLocked(record); err != nil {
 		return SessionRecordV1{}, false, err
 	}
@@ -536,6 +569,9 @@ func validateSessionRecordV1(record SessionRecordV1, id string) error {
 	if record.Stopping != (record.PendingCloseReason != "") || (record.PendingCloseReason != "" && !validCloseReasonV1(record.PendingCloseReason)) || terminal && record.Stopping {
 		return errors.New("session record stopping state is invalid")
 	}
+	if record.PendingKeyActivationID != "" && (!opaqueIDPattern.MatchString(record.PendingKeyActivationID) || record.State != "active" || record.Stopping) {
+		return errors.New("session record key activation is invalid")
+	}
 	var previousSequence uint64
 	var previousUsage uint64
 	var hasUsage bool
@@ -583,6 +619,9 @@ func validateSessionSecretsV1(record SessionRecordV1, secrets SessionSecretsV1) 
 		if _, ok := secrets.KeyIssues[secrets.CurrentKeyID]; !ok {
 			return errors.New("session current stream key is missing")
 		}
+	}
+	if record.PendingKeyActivationID != "" && secrets.CurrentKeyID != record.PendingKeyActivationID {
+		return errors.New("session pending key activation is invalid")
 	}
 	for id, issue := range secrets.KeyIssues {
 		fingerprint, err := KeyIssueFingerprintV1(issue.Request)

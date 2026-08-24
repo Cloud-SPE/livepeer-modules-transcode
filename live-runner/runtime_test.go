@@ -3,6 +3,7 @@ package liverunner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -12,7 +13,16 @@ import (
 )
 
 type fakePublisherWaiterV1 struct {
-	ready <-chan struct{}
+	ready   <-chan struct{}
+	kicked  chan<- string
+	kickErr error
+}
+
+func (f fakePublisherWaiterV1) KickPublisher(_ context.Context, path string) error {
+	if f.kicked != nil {
+		f.kicked <- path
+	}
+	return f.kickErr
 }
 
 func (f fakePublisherWaiterV1) WaitForRTMPPublisher(ctx context.Context, path string, _ time.Duration) (MediaPathStatusV1, error) {
@@ -57,9 +67,10 @@ func (f *fakeLiveLauncherV1) Start(ctx context.Context, input string, outputs []
 
 func TestLiveRuntimeWaitsForPublisherLaunchesOnceAndTerminates(t *testing.T) {
 	ready := make(chan struct{})
+	kicked := make(chan string, 1)
 	launcher := &fakeLiveLauncherV1{started: make(chan struct{}, 2)}
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x72}, 32))
-	coordinator := newTestRuntimeCoordinatorV1(t, store, fakePublisherWaiterV1{ready: ready}, launcher, 1)
+	coordinator := newTestRuntimeCoordinatorV1(t, store, fakePublisherWaiterV1{ready: ready, kicked: kicked}, launcher, 1)
 	record, secrets := createRuntimeSessionV1(t, store, "sess_runtime_001", "runner_runtime_001")
 	if err := coordinator.EnsureSession(context.Background(), record, secrets); err != nil {
 		t.Fatal(err)
@@ -100,6 +111,34 @@ func TestLiveRuntimeWaitsForPublisherLaunchesOnceAndTerminates(t *testing.T) {
 	defer cancel()
 	if err := coordinator.TerminateSession(ctx, record); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case path := <-kicked:
+		if path != "ingest/runner_runtime_001" {
+			t.Fatalf("terminated ingest path=%q", path)
+		}
+	default:
+		t.Fatal("termination did not kick the ingest publisher")
+	}
+}
+
+func TestLiveRuntimeTerminationWithoutActiveFFmpegPropagatesKickFailure(t *testing.T) {
+	kicked := make(chan string, 1)
+	wantErr := errors.New("router unavailable")
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x76}, 32))
+	router := fakePublisherWaiterV1{ready: make(chan struct{}), kicked: kicked, kickErr: wantErr}
+	coordinator := newTestRuntimeCoordinatorV1(t, store, router, &fakeLiveLauncherV1{}, 1)
+	record, _ := createRuntimeSessionV1(t, store, "sess_runtime_003", "runner_runtime_003")
+	if err := coordinator.TerminateSession(context.Background(), record); !errors.Is(err, wantErr) {
+		t.Fatalf("termination error=%v", err)
+	}
+	select {
+	case path := <-kicked:
+		if path != "ingest/runner_runtime_003" {
+			t.Fatalf("terminated ingest path=%q", path)
+		}
+	default:
+		t.Fatal("termination did not attempt to kick the ingest publisher")
 	}
 }
 
