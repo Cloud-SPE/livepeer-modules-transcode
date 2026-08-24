@@ -25,7 +25,7 @@ func TestLoadLiveRunnerConfigRequiresSecretsAndPublicCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ListenAddress != ":8080" || config.MediaMTX.APIAddress != "127.0.0.1:9997" || config.MaxConcurrent != 0 || len(config.MasterKey) != 32 {
+	if config.ListenAddress != ":8080" || config.MediaMTX.APIAddress != "127.0.0.1:9997" || config.MaxConcurrent != 0 || config.CallbackPoll != 250*time.Millisecond || len(config.MasterKey) != 32 {
 		t.Fatal("valid configuration did not produce the expected safe defaults")
 	}
 	delete(values, "LIVE_RUNNER_BROKER_TOKEN")

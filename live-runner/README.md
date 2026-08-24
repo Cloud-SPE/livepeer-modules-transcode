@@ -124,7 +124,10 @@ Callbacks are delivered from the durable outbox in sequence order with the
 per-session callback bearer. Any 2xx broker response acknowledges an event;
 timeouts, 408, 429, and 5xx responses remain retryable. Redirects are never
 followed, preventing callback credentials from crossing the broker-selected
-origin.
+origin. A process-owned worker resumes pending outboxes after restart. It
+retains permanent callback failures for operator inspection and erases a
+terminal session's encrypted credentials only after the final event has been
+durably acknowledged.
 
 ## Credential boundary
 

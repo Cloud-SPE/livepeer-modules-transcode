@@ -211,6 +211,37 @@ func TestCallbackWorkerRecoversAcknowledgedTerminalSecretErase(t *testing.T) {
 	}
 }
 
+func TestCallbackWorkerRetainsPermanentFailureAtBoundedCadence(t *testing.T) {
+	var attempts atomic.Int32
+	broker := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		writer.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer broker.Close()
+	store, request, response := callbackTestSessionV1(t, broker.URL)
+	if err := store.Advance(request.SessionID, testEventV1(response.RunnerSessionID, 1, "session.heartbeat", "active", 0, "")); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, _ := NewCallbackDispatcherV1(store, nil, time.Second)
+	worker, _ := NewCallbackWorkerV1(store, dispatcher, 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	deadline := time.Now().Add(time.Second)
+	for attempts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := store.Load(request.SessionID)
+	if err != nil || attempts.Load() != 1 || len(record.PendingEvents) != 1 || record.PendingEvents[0].EventID != response.RunnerSessionID+":1" {
+		t.Fatalf("attempts=%d record=%+v err=%v", attempts.Load(), record, err)
+	}
+}
+
 func callbackTestSessionV1(t *testing.T, callbackURL string) (*EncryptedFileSessionStoreV1, RunnerCreateRequestV1, RunnerCreateResponseV1) {
 	t.Helper()
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x55}, 32))

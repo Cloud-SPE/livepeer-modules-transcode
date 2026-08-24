@@ -33,6 +33,7 @@ type LiveRunnerConfigV1 struct {
 	RouterPoll       time.Duration
 	MeterPoll        time.Duration
 	HeartbeatEvery   time.Duration
+	CallbackPoll     time.Duration
 	RequestTimeout   time.Duration
 	HLSHeaderTimeout time.Duration
 	GrantTTL         time.Duration
@@ -105,7 +106,7 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 		MediaMTXBinary: valueOrV1(getenv("LIVE_RUNNER_MEDIAMTX_BINARY"), "/usr/local/bin/mediamtx"),
 		RouterRTMPBase: valueOrV1(getenv("LIVE_RUNNER_ROUTER_RTMP_BASE"), "rtmp://127.0.0.1:1935"),
 		MaxConcurrent:  maxConcurrent, StartupTimeout: 30 * time.Second, ShutdownTimeout: 30 * time.Second,
-		RouterPoll: 100 * time.Millisecond, MeterPoll: 250 * time.Millisecond, HeartbeatEvery: 4 * time.Second,
+		RouterPoll: 100 * time.Millisecond, MeterPoll: 250 * time.Millisecond, HeartbeatEvery: 4 * time.Second, CallbackPoll: 250 * time.Millisecond,
 		RequestTimeout: 2 * time.Second, GrantTTL: time.Hour, StreamKeyTTL: 10 * time.Minute,
 		HLSHeaderTimeout: 15 * time.Second,
 	}
@@ -144,6 +145,14 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
+	dispatcher, err := NewCallbackDispatcherV1(store, nil, config.RequestTimeout)
+	if err != nil {
+		return err
+	}
+	callbackWorker, err := NewCallbackWorkerV1(store, dispatcher, config.CallbackPoll)
+	if err != nil {
+		return err
+	}
 	runtime, err := NewLiveRuntimeCoordinatorV1(store, router, FFmpegLiveLadderLauncherV1{}, meter, presets, hardware, config.RouterRTMPBase, config.InternalToken, config.RouterPoll, config.MaxConcurrent)
 	if err != nil {
 		return err
@@ -166,13 +175,20 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err := RecoverLiveSessionsV1(ctx, store, runtime, time.Now); err != nil {
 		return err
 	}
+	callbackContext, cancelCallbacks := context.WithCancel(ctx)
+	callbackExit := make(chan error, 1)
+	go func() { callbackExit <- callbackWorker.Run(callbackContext) }()
 	factory := RunnerResponseFactoryV1{PublicRTMPURL: config.PublicRTMPURL, PublicHLSBase: config.PublicHLSBase, PublicAPIBase: config.PublicAPIBase, GrantTTL: config.GrantTTL}
 	if err := factory.Validate(); err != nil {
+		cancelCallbacks()
+		<-callbackExit
 		return err
 	}
 	serverDefinition := &LiveRunnerServerV1{Store: store, Runtime: runtime, Factory: factory, BrokerToken: config.BrokerToken, KeyTTL: config.StreamKeyTTL, Ready: supervisor.Ready, HLS: hls}
 	handler, err := serverDefinition.Handler(MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: config.InternalToken})
 	if err != nil {
+		cancelCallbacks()
+		<-callbackExit
 		return err
 	}
 	httpServer := &http.Server{Addr: config.ListenAddress, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
@@ -185,18 +201,30 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 		httpExit <- err
 	}()
 	var runErr error
+	callbackStopped := false
 	select {
 	case <-ctx.Done():
 	case <-supervisor.Done():
 		runErr = ErrMediaRouterExitedV1
+	case runErr = <-callbackExit:
+		callbackStopped = true
 	case runErr = <-httpExit:
 	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer cancelShutdown()
+	cancelCallbacks()
 	serverErr := httpServer.Shutdown(shutdown)
 	runtimeErr := runtime.Shutdown(shutdown)
+	var callbackErr error
+	if !callbackStopped {
+		select {
+		case callbackErr = <-callbackExit:
+		case <-shutdown.Done():
+			callbackErr = shutdown.Err()
+		}
+	}
 	mediaErr := supervisor.Stop(shutdown)
-	return errors.Join(runErr, serverErr, runtimeErr, mediaErr)
+	return errors.Join(runErr, serverErr, runtimeErr, callbackErr, mediaErr)
 }
 
 func valueOrV1(value, fallback string) string {
