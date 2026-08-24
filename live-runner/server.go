@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -216,21 +215,11 @@ func (s *LiveRunnerServerV1) handleTerminateV1(writer http.ResponseWriter, reque
 			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
 			return
 		}
-		if err := s.Runtime.TerminateSession(request.Context(), record); err != nil {
+		record, err = CompleteLiveTerminationV1(request.Context(), s.Store, s.Runtime, record, s.nowV1())
+		if err != nil {
 			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "runtime_unavailable")
 			return
 		}
-		event := RunnerEventV1{
-			EventID: record.RunnerSessionID + ":" + strconv.FormatUint(record.LastSequence+1, 10), Sequence: record.LastSequence + 1,
-			EventType: "session.ended", EventTime: s.nowV1().UTC().Format(time.RFC3339Nano), State: "ended",
-			Usage: &UsageV1{Unit: WorkUnitV1, Total: record.UsageTotal}, CloseReason: &record.PendingCloseReason, Details: json.RawMessage(`{}`),
-		}
-		if err := s.Store.Advance(record.BrokerSessionID, event); err != nil {
-			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
-			return
-		}
-		record.State = "ended"
-		record.CloseReason = record.PendingCloseReason
 	}
 	writeRunnerJSONV1(writer, http.StatusOK, TerminateResponseV1{RunnerSessionID: record.RunnerSessionID, State: record.State, CloseReason: record.CloseReason})
 }
