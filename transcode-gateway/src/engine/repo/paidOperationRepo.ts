@@ -18,6 +18,13 @@ export interface NewPaidOperation {
   route: PaidRouteSnapshot;
   status: string;
   fundedUnits: string;
+  sessionRuntime?: PaidOperation["sessionRuntime"];
+}
+
+export interface PaidOperationClaim {
+  owner: string;
+  version: string;
+  leaseExpiresAt: Date;
 }
 
 export interface PaidOperationProgress {
@@ -31,28 +38,66 @@ export interface PaidOperationProgress {
   willRefuseNextRefill?: boolean;
   leaseExpiresAt?: Date;
   settlementSequence?: string;
+  sessionRuntime?: PaidOperation["sessionRuntime"];
 }
 
 export interface PaidOperationRepo {
   insert(value: NewPaidOperation): Promise<PaidOperation>;
+  insertWithSecrets(
+    value: NewPaidOperation,
+    secrets: PaidOperationSecrets,
+    claim: Omit<PaidOperationClaim, "version">,
+  ): Promise<PaidOperation>;
   byId(id: string): Promise<PaidOperation | null>;
   byIdForApiKey(id: string, apiKeyId: string): Promise<PaidOperation | null>;
   byRequestId(requestId: string): Promise<PaidOperation | null>;
+  byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
   recoverable(now: Date, limit: number): Promise<PaidOperation[]>;
-  recordProgress(id: string, value: PaidOperationProgress): Promise<void>;
-  recordRetry(id: string, value: {
-    status: string;
-    nextRetryAt: Date;
-    errorCode: string;
-  }): Promise<void>;
-  recordTerminal(id: string, value: {
-    status: string;
-    claimedUnits: string;
-    settlementSequence: string;
-    evidence: PaidTerminalEvidence;
-    terminalAt: Date;
-  }): Promise<void>;
-  putSecrets(id: string, value: PaidOperationSecrets): Promise<void>;
-  readSecrets(id: string): Promise<PaidOperationSecrets | null>;
-  deleteSecrets(id: string): Promise<void>;
+  claimRecoverable(
+    owner: string,
+    now: Date,
+    leaseExpiresAt: Date,
+    limit: number,
+  ): Promise<PaidOperation[]>;
+  renewClaim(
+    id: string,
+    claim: PaidOperationClaim,
+    leaseExpiresAt: Date,
+  ): Promise<PaidOperation | null>;
+  releaseClaim(id: string, claim: PaidOperationClaim): Promise<boolean>;
+  recordProgress(
+    id: string,
+    claim: PaidOperationClaim,
+    value: PaidOperationProgress,
+  ): Promise<PaidOperation | null>;
+  recordRetry(
+    id: string,
+    claim: PaidOperationClaim,
+    value: {
+      status: string;
+      nextRetryAt: Date;
+      errorCode: string;
+    },
+  ): Promise<PaidOperation | null>;
+  recordTerminal(
+    id: string,
+    claim: PaidOperationClaim,
+    value: {
+      status: string;
+      claimedUnits: string;
+      settlementSequence: string;
+      evidence: PaidTerminalEvidence;
+      terminalAt: Date;
+    },
+  ): Promise<boolean>;
+  putSecrets(
+    id: string,
+    claim: PaidOperationClaim,
+    value: PaidOperationSecrets,
+  ): Promise<boolean>;
+  readSecrets(
+    id: string,
+    claim: PaidOperationClaim,
+  ): Promise<PaidOperationSecrets | null>;
+  deleteSecrets(id: string, claim: PaidOperationClaim): Promise<boolean>;
 }

@@ -9,6 +9,7 @@ import type {
 } from "../engine/types/index.js";
 import type {
   NewPaidOperation,
+  PaidOperationClaim,
   PaidOperationProgress,
   PaidOperationRepo,
 } from "../engine/repo/index.js";
@@ -157,38 +158,153 @@ function encryptedFromRow(row: SecretRow): EncryptedOperationSecrets {
   };
 }
 
+function validateClaim(claim: PaidOperationClaim): void {
+  if (
+    claim.owner.length === 0 ||
+    claim.owner.length > 255 ||
+    !/^(?:0|[1-9][0-9]*)$/.test(claim.version) ||
+    Number.isNaN(claim.leaseExpiresAt.getTime())
+  ) {
+    throw new Error("paid operation claim is invalid");
+  }
+}
+
+function insertStatement(
+  value: NewPaidOperation,
+  claim?: Omit<PaidOperationClaim, "version">,
+): { sql: string; params: unknown[] } {
+  const columns = [
+    "id",
+    "operation_kind",
+    "api_key_id",
+    "asset_id",
+    "live_stream_id",
+    "request_id",
+    "request_content_sha256",
+    "work_id",
+    "rotation_generation",
+    "protocol",
+    "transport",
+    "capability",
+    "offering",
+    "request_descriptor",
+    "response_descriptor",
+    "work_unit",
+    "estimator",
+    "price_per_unit_wei",
+    "units_per_price",
+    "quote_id",
+    "quote_version",
+    "constraint_fingerprint",
+    "route_fingerprint",
+    "settlement_key",
+    "route_snapshot",
+    "status",
+    "funded_units",
+    "session_runtime",
+    "recovery_owner",
+    "recovery_lease_expires_at",
+    "lifecycle_version",
+  ];
+  const params: unknown[] = [
+    value.id,
+    value.kind,
+    value.apiKeyId,
+    value.assetId ?? null,
+    value.liveStreamId ?? null,
+    value.requestId,
+    value.requestContentSha256,
+    value.workId,
+    value.rotationGeneration ?? 0,
+    value.route.protocol,
+    value.route.transport ?? null,
+    value.route.capability,
+    value.route.offering,
+    value.route.requestDescriptor,
+    value.route.responseDescriptor ?? null,
+    value.route.workUnit,
+    value.route.estimator ?? null,
+    value.route.pricePerUnitWei,
+    value.route.unitsPerPrice,
+    value.route.quoteId,
+    value.route.quoteVersion,
+    value.route.constraintFingerprint,
+    value.route.routeFingerprint,
+    value.route.settlementKey,
+    value.route.raw,
+    value.status,
+    value.fundedUnits,
+    value.sessionRuntime ?? null,
+    claim?.owner ?? null,
+    claim?.leaseExpiresAt ?? null,
+    claim === undefined ? "0" : "1",
+  ];
+  const placeholders = params.map((_, index) => `$${index + 1}`).join(", ");
+  return {
+    sql: `INSERT INTO media.paid_operations (${columns.join(", ")})
+		 VALUES (${placeholders}) RETURNING ${SELECT_COLUMNS}`,
+    params,
+  };
+}
+
+function encryptedParams(
+  id: string,
+  encrypted: EncryptedOperationSecrets,
+): unknown[] {
+  return [
+    id,
+    encrypted.keyId,
+    encrypted.wrappedKey,
+    encrypted.wrappedKeyIv,
+    encrypted.wrappedKeyTag,
+    encrypted.ciphertext,
+    encrypted.payloadIv,
+    encrypted.payloadTag,
+  ];
+}
+
+const UPSERT_SECRETS = `INSERT INTO media.paid_operation_secrets
+  (operation_id, key_id, wrapped_key, wrapped_key_iv, wrapped_key_tag,
+   ciphertext, payload_iv, payload_tag)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ ON CONFLICT (operation_id) DO UPDATE SET
+   key_id = EXCLUDED.key_id, wrapped_key = EXCLUDED.wrapped_key,
+   wrapped_key_iv = EXCLUDED.wrapped_key_iv,
+   wrapped_key_tag = EXCLUDED.wrapped_key_tag,
+   ciphertext = EXCLUDED.ciphertext, payload_iv = EXCLUDED.payload_iv,
+   payload_tag = EXCLUDED.payload_tag, updated_at = NOW()`;
+
 export function createPaidOperationRepo(
   pool: DbPool,
   secretCipher: OperationSecretCipher,
 ): PaidOperationRepo {
   return {
     async insert(value: NewPaidOperation) {
-      const columns = [
-        "id", "operation_kind", "api_key_id", "asset_id", "live_stream_id",
-        "request_id", "request_content_sha256", "work_id", "rotation_generation",
-        "protocol", "transport", "capability", "offering", "request_descriptor",
-        "response_descriptor", "work_unit", "estimator", "price_per_unit_wei",
-        "units_per_price", "quote_id", "quote_version", "constraint_fingerprint",
-        "route_fingerprint", "settlement_key", "route_snapshot", "status", "funded_units",
-      ];
-      const params: unknown[] = [
-        value.id, value.kind, value.apiKeyId, value.assetId ?? null,
-        value.liveStreamId ?? null, value.requestId, value.requestContentSha256,
-        value.workId, value.rotationGeneration ?? 0, value.route.protocol,
-        value.route.transport ?? null, value.route.capability, value.route.offering,
-        value.route.requestDescriptor, value.route.responseDescriptor ?? null,
-        value.route.workUnit, value.route.estimator ?? null, value.route.pricePerUnitWei,
-        value.route.unitsPerPrice, value.route.quoteId, value.route.quoteVersion,
-        value.route.constraintFingerprint, value.route.routeFingerprint,
-        value.route.settlementKey, value.route.raw, value.status, value.fundedUnits,
-      ];
-      const placeholders = params.map((_, index) => `$${index + 1}`).join(", ");
-      const result = await pool.query<Row>(
-        `INSERT INTO media.paid_operations (${columns.join(", ")})
-         VALUES (${placeholders}) RETURNING ${SELECT_COLUMNS}`,
-        params,
-      );
+      const statement = insertStatement(value);
+      const result = await pool.query<Row>(statement.sql, statement.params);
       return rowToOperation(result.rows[0]!);
+    },
+
+    async insertWithSecrets(value, secrets, claim) {
+      validateClaim({ ...claim, version: "1" });
+      const encrypted = secretCipher.encrypt(value.id, secrets);
+      const statement = insertStatement(value, claim);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await client.query<Row>(statement.sql, statement.params);
+        await client.query(
+          UPSERT_SECRETS,
+          encryptedParams(value.id, encrypted),
+        );
+        await client.query("COMMIT");
+        return rowToOperation(result.rows[0]!);
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async byId(id) {
@@ -216,9 +332,21 @@ export function createPaidOperationRepo(
       return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
+    async byLiveStreamId(liveStreamId) {
+      const result = await pool.query<Row>(
+        `SELECT ${SELECT_COLUMNS} FROM media.paid_operations
+				 WHERE live_stream_id = $1 AND operation_kind = 'session'
+				 ORDER BY rotation_generation DESC LIMIT 1`,
+        [liveStreamId],
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
     async recoverable(now, limit) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
-        throw new Error("recovery batch limit must be an integer from 1 to 1000");
+        throw new Error(
+          "recovery batch limit must be an integer from 1 to 1000",
+        );
       }
       const result = await pool.query<Row>(
         `SELECT ${SELECT_COLUMNS} FROM media.paid_operations
@@ -229,8 +357,77 @@ export function createPaidOperationRepo(
       return result.rows.map(rowToOperation);
     },
 
-    async recordProgress(id, value: PaidOperationProgress) {
-      const sets = ["status = $2", "updated_at = NOW()", "last_error_code = NULL"];
+    async claimRecoverable(owner, now, leaseExpiresAt, limit) {
+      validateClaim({ owner, version: "0", leaseExpiresAt });
+      if (
+        !Number.isSafeInteger(limit) ||
+        limit < 1 ||
+        limit > 1_000 ||
+        leaseExpiresAt <= now
+      ) {
+        throw new Error("recovery claim inputs are invalid");
+      }
+      const result = await pool.query<Row>(
+        `WITH candidates AS (
+				   SELECT id FROM media.paid_operations
+				   WHERE terminal_at IS NULL
+				     AND (next_retry_at IS NULL OR next_retry_at <= $2)
+				     AND (recovery_lease_expires_at IS NULL OR recovery_lease_expires_at <= $2)
+				   ORDER BY updated_at ASC
+				   FOR UPDATE SKIP LOCKED LIMIT $4
+				 )
+				 UPDATE media.paid_operations AS operation
+				 SET recovery_owner = $1, recovery_lease_expires_at = $3,
+				     lifecycle_version = lifecycle_version + 1, updated_at = NOW()
+				 FROM candidates WHERE operation.id = candidates.id
+				 RETURNING operation.*`,
+        [owner, now, leaseExpiresAt, limit],
+      );
+      return result.rows.map(rowToOperation);
+    },
+
+    async renewClaim(id, claim, leaseExpiresAt) {
+      validateClaim(claim);
+      if (
+        Number.isNaN(leaseExpiresAt.getTime()) ||
+        leaseExpiresAt <= claim.leaseExpiresAt
+      ) {
+        throw new Error("recovery lease extension is invalid");
+      }
+      const result = await pool.query<Row>(
+        `UPDATE media.paid_operations
+				 SET recovery_lease_expires_at = $5, lifecycle_version = lifecycle_version + 1,
+				     updated_at = NOW()
+				 WHERE id = $1 AND recovery_owner = $2 AND lifecycle_version = $3
+				   AND recovery_lease_expires_at = $4 AND recovery_lease_expires_at > NOW()
+				   AND terminal_at IS NULL
+				 RETURNING ${SELECT_COLUMNS}`,
+        [id, claim.owner, claim.version, claim.leaseExpiresAt, leaseExpiresAt],
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
+    async releaseClaim(id, claim) {
+      validateClaim(claim);
+      const result = await pool.query<{ id: string }>(
+        `UPDATE media.paid_operations
+				 SET recovery_owner = NULL, recovery_lease_expires_at = NULL,
+				     lifecycle_version = lifecycle_version + 1, updated_at = NOW()
+				 WHERE id = $1 AND recovery_owner = $2 AND lifecycle_version = $3
+				   AND recovery_lease_expires_at = $4
+				 RETURNING id`,
+        [id, claim.owner, claim.version, claim.leaseExpiresAt],
+      );
+      return (result.rowCount ?? 0) > 0;
+    },
+
+    async recordProgress(id, claim, value: PaidOperationProgress) {
+      validateClaim(claim);
+      const sets = [
+        "status = $2",
+        "updated_at = NOW()",
+        "last_error_code = NULL",
+      ];
       const params: unknown[] = [id, value.status];
       const fields: Array<[string, unknown]> = [
         ["loc_operation_id", value.locOperationId],
@@ -242,70 +439,140 @@ export function createPaidOperationRepo(
         ["will_refuse_next_refill", value.willRefuseNextRefill],
         ["lease_expires_at", value.leaseExpiresAt],
         ["settlement_sequence", value.settlementSequence],
+        ["session_runtime", value.sessionRuntime],
       ];
       for (const [column, fieldValue] of fields) {
         if (fieldValue === undefined) continue;
         params.push(fieldValue);
         sets.push(`${column} = $${params.length}`);
       }
-      await pool.query(`UPDATE media.paid_operations SET ${sets.join(", ")} WHERE id = $1`, params);
+      params.push(claim.owner, claim.version, claim.leaseExpiresAt);
+      sets.push("lifecycle_version = lifecycle_version + 1");
+      const result = await pool.query<Row>(
+        `UPDATE media.paid_operations SET ${sets.join(", ")}
+				 WHERE id = $1 AND recovery_owner = $${params.length - 2}
+				   AND lifecycle_version = $${params.length - 1}
+				   AND recovery_lease_expires_at = $${params.length}
+				   AND recovery_lease_expires_at > NOW()
+				 RETURNING ${SELECT_COLUMNS}`,
+        params,
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
-    async recordRetry(id, value) {
-      await pool.query(
+    async recordRetry(id, claim, value) {
+      validateClaim(claim);
+      const result = await pool.query<Row>(
         `UPDATE media.paid_operations SET status = $2, retry_count = retry_count + 1,
            next_retry_at = $3, last_error_code = $4,
-           updated_at = NOW() WHERE id = $1`,
-        [id, value.status, value.nextRetryAt, value.errorCode],
+				 lifecycle_version = lifecycle_version + 1, updated_at = NOW()
+				 WHERE id = $1 AND recovery_owner = $5 AND lifecycle_version = $6
+				   AND recovery_lease_expires_at = $7 AND recovery_lease_expires_at > NOW()
+				 RETURNING ${SELECT_COLUMNS}`,
+        [
+          id,
+          value.status,
+          value.nextRetryAt,
+          value.errorCode,
+          claim.owner,
+          claim.version,
+          claim.leaseExpiresAt,
+        ],
       );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
-    async recordTerminal(id, value) {
-      await pool.query(
+    async recordTerminal(id, claim, value) {
+      validateClaim(claim);
+      const result = await pool.query<{ id: string }>(
         `WITH terminal AS (
            UPDATE media.paid_operations SET status = $2, claimed_units = $3,
              settlement_sequence = $4, terminal_evidence = $5, terminal_at = $6,
-             next_retry_at = NULL, last_error_code = NULL, updated_at = NOW()
-           WHERE id = $1 RETURNING id
+				 next_retry_at = NULL, last_error_code = NULL, updated_at = NOW(),
+				 lifecycle_version = lifecycle_version + 1,
+				 recovery_owner = NULL, recovery_lease_expires_at = NULL
+				 WHERE id = $1 AND recovery_owner = $7 AND lifecycle_version = $8
+				   AND recovery_lease_expires_at = $9 AND recovery_lease_expires_at > NOW()
+				 RETURNING id
+			 ), erased AS (
+			   DELETE FROM media.paid_operation_secrets
+			   WHERE operation_id IN (SELECT id FROM terminal)
+			   RETURNING operation_id
          )
-         DELETE FROM media.paid_operation_secrets
-         WHERE operation_id IN (SELECT id FROM terminal)`,
-        [id, value.status, value.claimedUnits, value.settlementSequence, value.evidence, value.terminalAt],
+			 SELECT id FROM terminal`,
+        [
+          id,
+          value.status,
+          value.claimedUnits,
+          value.settlementSequence,
+          value.evidence,
+          value.terminalAt,
+          claim.owner,
+          claim.version,
+          claim.leaseExpiresAt,
+        ],
       );
+      return (result.rowCount ?? 0) > 0;
     },
 
-    async putSecrets(id, value: PaidOperationSecrets) {
+    async putSecrets(id, claim, value: PaidOperationSecrets) {
+      validateClaim(claim);
       const encrypted = secretCipher.encrypt(id, value);
-      await pool.query(
+      const result = await pool.query<{ operation_id: string }>(
         `INSERT INTO media.paid_operation_secrets
            (operation_id, key_id, wrapped_key, wrapped_key_iv, wrapped_key_tag,
             ciphertext, payload_iv, payload_tag)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			 SELECT $1, $2, $3, $4, $5, $6, $7, $8
+			 WHERE EXISTS (
+			   SELECT 1 FROM media.paid_operations WHERE id = $1
+			     AND recovery_owner = $9 AND lifecycle_version = $10
+			     AND recovery_lease_expires_at = $11 AND recovery_lease_expires_at > NOW()
+			 )
          ON CONFLICT (operation_id) DO UPDATE SET
            key_id = EXCLUDED.key_id, wrapped_key = EXCLUDED.wrapped_key,
            wrapped_key_iv = EXCLUDED.wrapped_key_iv,
            wrapped_key_tag = EXCLUDED.wrapped_key_tag,
            ciphertext = EXCLUDED.ciphertext, payload_iv = EXCLUDED.payload_iv,
-           payload_tag = EXCLUDED.payload_tag, updated_at = NOW()`,
-        [id, encrypted.keyId, encrypted.wrappedKey, encrypted.wrappedKeyIv,
-          encrypted.wrappedKeyTag, encrypted.ciphertext, encrypted.payloadIv,
-          encrypted.payloadTag],
+				 payload_tag = EXCLUDED.payload_tag, updated_at = NOW()
+			 RETURNING operation_id`,
+        [
+          ...encryptedParams(id, encrypted),
+          claim.owner,
+          claim.version,
+          claim.leaseExpiresAt,
+        ],
       );
+      return (result.rowCount ?? 0) > 0;
     },
 
-    async readSecrets(id) {
+    async readSecrets(id, claim) {
+      validateClaim(claim);
       const result = await pool.query<SecretRow>(
         `SELECT key_id, wrapped_key, wrapped_key_iv, wrapped_key_tag, ciphertext,
-           payload_iv, payload_tag FROM media.paid_operation_secrets
-         WHERE operation_id = $1`,
-        [id],
+				 payload_iv, payload_tag FROM media.paid_operation_secrets AS secrets
+			 JOIN media.paid_operations AS operation ON operation.id = secrets.operation_id
+			 WHERE secrets.operation_id = $1 AND operation.recovery_owner = $2
+			   AND operation.lifecycle_version = $3
+			   AND operation.recovery_lease_expires_at = $4
+			   AND operation.recovery_lease_expires_at > NOW()`,
+        [id, claim.owner, claim.version, claim.leaseExpiresAt],
       );
       if (result.rowCount === 0) return null;
       return secretCipher.decrypt(id, encryptedFromRow(result.rows[0]!));
     },
 
-    async deleteSecrets(id) {
-      await pool.query(`DELETE FROM media.paid_operation_secrets WHERE operation_id = $1`, [id]);
+    async deleteSecrets(id, claim) {
+      validateClaim(claim);
+      const result = await pool.query(
+        `DELETE FROM media.paid_operation_secrets AS secrets
+				 USING media.paid_operations AS operation
+				 WHERE secrets.operation_id = $1 AND operation.id = secrets.operation_id
+				   AND operation.recovery_owner = $2 AND operation.lifecycle_version = $3
+				   AND operation.recovery_lease_expires_at = $4
+				   AND operation.recovery_lease_expires_at > NOW()`,
+        [id, claim.owner, claim.version, claim.leaseExpiresAt],
+      );
+      return (result.rowCount ?? 0) > 0;
     },
   };
 }
