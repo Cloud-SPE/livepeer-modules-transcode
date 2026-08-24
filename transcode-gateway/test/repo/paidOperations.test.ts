@@ -88,6 +88,18 @@ test("v2 persistence migration is additive and enforces identity, ownership, and
   assert.doesNotMatch(sql, /runner_ingest_(?:url|key)\s+TEXT/i);
 });
 
+test("paid session recovery migration adds a fenced multi-instance claim without plaintext secrets", async () => {
+  const sql = await readFile(resolve(process.cwd(), "migrations/0004_paid_session_recovery.sql"), "utf8");
+  assert.doesNotMatch(sql, /\b(?:DROP|TRUNCATE)\b/i);
+  assert.match(sql, /lifecycle_version BIGINT NOT NULL DEFAULT 0/);
+  assert.match(sql, /recovery_owner TEXT/);
+  assert.match(sql, /recovery_lease_expires_at TIMESTAMPTZ/);
+  assert.match(sql, /paid_operations_recovery_lease_complete/);
+  assert.match(sql, /session_runtime JSONB/);
+  assert.match(sql, /paid_operations_session_runtime_kind/);
+  assert.doesNotMatch(sql, /(?:stream_key|credential|grant|session_params)\s+(?:TEXT|JSONB)/i);
+});
+
 test("paid operation recovery is restart-safe and customer reads are owner-scoped", async () => {
   const calls: Array<{ sql: string; params?: unknown[] }> = [];
   const pool = {

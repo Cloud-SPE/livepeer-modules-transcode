@@ -5,6 +5,7 @@ import type {
   PaidOperationKind,
   PaidOperationSecrets,
   PaidRouteSnapshot,
+  PaidSessionRuntimeState,
 } from "../engine/types/index.js";
 import type {
   NewPaidOperation,
@@ -52,6 +53,10 @@ interface Row {
   will_refuse_next_refill: boolean | null;
   lease_expires_at: Date | null;
   settlement_sequence: string;
+  lifecycle_version: string;
+  recovery_owner: string | null;
+  recovery_lease_expires_at: Date | null;
+  session_runtime: PaidSessionRuntimeState | null;
   retry_count: number;
   next_retry_at: Date | null;
   last_error_code: string | null;
@@ -79,6 +84,7 @@ const SELECT_COLUMNS = `id, operation_kind, api_key_id, asset_id, live_stream_id
   route_snapshot, status, loc_operation_id, broker_job_id, broker_session_id,
   funded_units, claimed_units, balance_units, will_refuse_next_refill,
   lease_expires_at, settlement_sequence, retry_count, next_retry_at,
+  lifecycle_version, recovery_owner, recovery_lease_expires_at, session_runtime,
   last_error_code, terminal_evidence, created_at, updated_at,
   terminal_at`;
 
@@ -125,6 +131,10 @@ function rowToOperation(row: Row): PaidOperation {
     willRefuseNextRefill: row.will_refuse_next_refill ?? undefined,
     leaseExpiresAt: row.lease_expires_at ?? undefined,
     settlementSequence: row.settlement_sequence,
+    lifecycleVersion: row.lifecycle_version,
+    recoveryOwner: row.recovery_owner ?? undefined,
+    recoveryLeaseExpiresAt: row.recovery_lease_expires_at ?? undefined,
+    sessionRuntime: row.session_runtime ?? undefined,
     retryCount: row.retry_count,
     nextRetryAt: row.next_retry_at ?? undefined,
     lastErrorCode: row.last_error_code ?? undefined,

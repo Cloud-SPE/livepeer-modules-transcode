@@ -48,6 +48,12 @@ export interface PaidOperation {
   willRefuseNextRefill?: boolean;
   leaseExpiresAt?: Date;
   settlementSequence: string;
+  // Optimistic concurrency fence incremented by each recovery claim or
+  // claimed mutation. A stale gateway cannot overwrite a newer owner.
+  lifecycleVersion: string;
+  recoveryOwner?: string;
+  recoveryLeaseExpiresAt?: Date;
+  sessionRuntime?: PaidSessionRuntimeState;
   retryCount: number;
   nextRetryAt?: Date;
   lastErrorCode?: string;
@@ -55,6 +61,18 @@ export interface PaidOperation {
   createdAt: Date;
   updatedAt: Date;
   terminalAt?: Date;
+}
+
+export interface PaidSessionRuntimeState {
+  publisherMode: "gateway-relay" | "direct-publisher";
+  relayStatus: "pending" | "starting" | "active" | "reconnecting" | "stopping" | "stopped" | "failed";
+  relayGeneration: number;
+  runnerSessionId?: string;
+  runnerHlsUrl?: string;
+  lastRunnerEventId?: string;
+  lastRunnerSequence: string;
+  lastRunnerUsage: string;
+  controlCursor?: string;
 }
 
 export interface PaidTerminalEvidence {
@@ -67,8 +85,13 @@ export interface PaidTerminalEvidence {
 }
 
 export interface PaidOperationSecrets {
+  // Exact LOC and broker open inputs are encrypted so an unknown outcome can
+  // be retried byte-for-byte without putting credentials in public columns.
+  openIntent?: JsonValue;
   sessionParams?: JsonValue;
   grants?: JsonValue;
+  control?: JsonValue;
+  loc?: JsonValue;
   runnerIngestUrl?: string;
   runnerIngestKey?: string;
   credentials?: JsonValue;
