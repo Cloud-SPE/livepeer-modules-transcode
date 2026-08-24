@@ -31,6 +31,13 @@ const envSchema = z.object({
   // Canonical base64 for a 32-byte wrapping key held outside Postgres.
   LIVEPEER_OPERATION_SECRETS_KEK: z.string().optional(),
   LIVEPEER_OPERATION_SECRETS_KEY_ID: z.string().min(1).default("local-v1"),
+  LIVEPEER_LOC_URL: z.string().url().optional(),
+  LIVEPEER_LOC_API_KEY: z.string().min(1).optional(),
+  LIVEPEER_LOC_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  LIVEPEER_LOC_CLIENT_ID: z
+    .string()
+    .min(1)
+    .default("livepeer-modules-transcode/0.0.0"),
 
   // VOD storage (plan 0005). All optional; routes return 503 s3_not_configured
   // when unset.
@@ -51,6 +58,14 @@ const envSchema = z.object({
   LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL: z.string().optional(),
   RTMP_RELAY_ENABLED: z.coerce.boolean().default(true),
   RTMP_RELAY_FFMPEG_BIN: z.string().default("ffmpeg"),
+}).superRefine((value, context) => {
+  if (Boolean(value.LIVEPEER_LOC_URL) !== Boolean(value.LIVEPEER_LOC_API_KEY)) {
+    context.addIssue({
+      code: "custom",
+      path: [value.LIVEPEER_LOC_URL ? "LIVEPEER_LOC_API_KEY" : "LIVEPEER_LOC_URL"],
+      message: "LIVEPEER_LOC_URL and LIVEPEER_LOC_API_KEY must be set together",
+    });
+  }
 });
 
 type ParsedConfig = z.infer<typeof envSchema>;
