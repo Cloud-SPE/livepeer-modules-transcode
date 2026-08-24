@@ -24,6 +24,13 @@ listener addresses, its internal auth URL, the state directory, binary path,
 and encoder concurrency have `LIVE_RUNNER_*` overrides; private HLS, API, and
 metrics addresses are still rejected unless loopback-only.
 
+`make image-test` runs the Go suite in the same copied module graph used by
+the image, `make image` builds the non-root runtime containing FFmpeg, the
+pinned MediaMTX binary, and `presets.yaml`, and `make image-smoke` waits for
+container health before proving bounded SIGTERM exit. CPU H.264 is a supported
+fallback; hardware detected by `transcode-core` is preferred when the runtime
+exposes it.
+
 ## Media router
 
 The runner uses a pinned MediaMTX `1.20.1` process for authenticated

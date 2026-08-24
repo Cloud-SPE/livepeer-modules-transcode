@@ -123,10 +123,6 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 		return errors.New("parse live presets failed")
 	}
 	hardware := transcode.DetectGPU()
-	presets, _ = transcode.ValidateABRPresets(presets, hardware)
-	if len(presets) == 0 {
-		return errors.New("no live presets are compatible with this runner")
-	}
 	store, err := NewEncryptedFileSessionStoreV1(config.StateDirectory+"/sessions", config.MasterKey)
 	if err != nil {
 		return err

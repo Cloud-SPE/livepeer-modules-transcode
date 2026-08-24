@@ -1,0 +1,34 @@
+presets:
+  - name: live-standard
+    description: "Low-latency H.264 ladder for live RTMP"
+    type: abr
+    format: hls
+    hls_mode: fmp4
+    segment_duration: 1
+    renditions:
+      - name: "720p"
+        video:
+          codec: h264
+          width: 1280
+          height: 720
+          bitrate: "2.5M"
+          max_bitrate: "3.75M"
+          profile: high
+          level: "3.1"
+        audio:
+          codec: aac
+          bitrate: "96k"
+          channels: 2
+      - name: "360p"
+        video:
+          codec: h264
+          width: 640
+          height: 360
+          bitrate: "600k"
+          max_bitrate: "900k"
+          profile: main
+          level: "3.1"
+        audio:
+          codec: aac
+          bitrate: "64k"
+          channels: 2
