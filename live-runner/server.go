@@ -105,6 +105,7 @@ type LiveRunnerServerV1 struct {
 	KeyTTL      time.Duration
 	Now         func() time.Time
 	Random      func(int) ([]byte, error)
+	Ready       func() bool
 	locksMu     sync.Mutex
 	locks       map[string]*sync.Mutex
 }
@@ -120,7 +121,13 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 	mux.Handle("DELETE /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleTerminateV1)))
 	mux.HandleFunc("POST /v1/sessions/{id}/stream-keys", s.handleStreamKeyV1)
 	mux.HandleFunc("GET /v1/describe", s.handleDescribeV1)
-	mux.HandleFunc("GET /ready", func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("GET /ready", func(writer http.ResponseWriter, _ *http.Request) {
+		if s.Ready != nil && !s.Ready() {
+			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "media_router_unavailable")
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	})
 	mux.Handle("POST /internal/mediamtx/auth", mediaAuthorizer)
 	return mux, nil
 }

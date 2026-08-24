@@ -284,7 +284,7 @@ func TestLiveRunnerTerminationIntentSurvivesRuntimeFailure(t *testing.T) {
 }
 
 func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
-	handler, _, _ := testLiveRunnerHandlerV1(t)
+	handler, _, runtime := testLiveRunnerHandlerV1(t)
 	describe := runnerRequestV1(t, handler, http.MethodGet, "/v1/describe", nil, "")
 	var value DescribeResponseV1
 	if describe.Code != http.StatusOK || json.Unmarshal(describe.Body.Bytes(), &value) != nil || ValidateDescribeV1(value) != nil {
@@ -292,6 +292,15 @@ func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
 	}
 	if ready := runnerRequestV1(t, handler, http.MethodGet, "/ready", nil, ""); ready.Code != http.StatusNoContent {
 		t.Fatalf("ready=%d", ready.Code)
+	}
+	unreadyServer := testLiveRunnerServerV1(t, runtime)
+	unreadyServer.Ready = func() bool { return false }
+	unreadyHandler, err := unreadyServer.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready := runnerRequestV1(t, unreadyHandler, http.MethodGet, "/ready", nil, ""); ready.Code != http.StatusServiceUnavailable || !bytes.Contains(ready.Body.Bytes(), []byte("media_router_unavailable")) {
+		t.Fatalf("unready=%d %s", ready.Code, ready.Body.String())
 	}
 	unknown := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/unknown_runner", TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
 	if unknown.Code != http.StatusNoContent {
@@ -303,24 +312,34 @@ func testLiveRunnerHandlerV1(t *testing.T) (http.Handler, *EncryptedFileSessionS
 	t.Helper()
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x66}, 32))
 	runtime := &fakeLiveRuntimeV1{}
+	server := testLiveRunnerServerWithStoreV1(t, store, runtime)
+	handler, err := server.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, store, runtime
+}
+
+func testLiveRunnerServerV1(t *testing.T, runtime LiveSessionRuntimeV1) *LiveRunnerServerV1 {
+	t.Helper()
+	return testLiveRunnerServerWithStoreV1(t, newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x67}, 32)), runtime)
+}
+
+func testLiveRunnerServerWithStoreV1(t *testing.T, store *EncryptedFileSessionStoreV1, runtime LiveSessionRuntimeV1) *LiveRunnerServerV1 {
+	t.Helper()
 	fixedNow := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	var randomByte byte
 	randomSource := func(size int) ([]byte, error) {
 		randomByte++
 		return bytes.Repeat([]byte{randomByte}, size), nil
 	}
-	server := &LiveRunnerServerV1{
+	return &LiveRunnerServerV1{
 		Store: store, Runtime: runtime, BrokerToken: testBrokerTokenV1, KeyTTL: 10 * time.Minute, Now: func() time.Time { return fixedNow }, Random: randomSource,
 		Factory: RunnerResponseFactoryV1{
 			PublicRTMPURL: "rtmps://runner.example/ingest", PublicHLSBase: "https://runner.example", PublicAPIBase: "https://runner.example", GrantTTL: time.Hour,
 			Now: func() time.Time { return fixedNow }, Random: randomSource,
 		},
 	}
-	handler, err := server.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return handler, store, runtime
 }
 
 func runnerRequestV1(t *testing.T, handler http.Handler, method, path string, body any, bearer string) *httptest.ResponseRecorder {
