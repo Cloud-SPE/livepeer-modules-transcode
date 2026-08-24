@@ -7,6 +7,8 @@ import type {
   LocOpenSessionResult,
   LocRouteBinding,
   LocRouteSnapshot,
+  LocSettleJobInput,
+  LocSettleJobResult,
   LocTransport,
 } from "../engine/interfaces/index.js";
 import type { JsonValue, SelectedWorkerRoute } from "../engine/types/index.js";
@@ -109,6 +111,30 @@ const sessionOpenWire = z
     close_endpoint: z.string().min(1),
   })
   .strict();
+const settlementEnvelopeWire = z
+  .object({
+    payload: z.record(z.string(), z.json()),
+    signature: z
+      .object({
+        algorithm: z.literal("secp256k1"),
+        canonicalization: z.literal("jcs"),
+        value: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+      })
+      .strict(),
+  })
+  .strict();
+const settleJobWire = z
+  .object({
+    job_id: z.string().uuid(),
+    work_id: z.string().min(1),
+    actual_units: z.number().int().nonnegative(),
+    billed_value_wei: z.number().int().nonnegative(),
+    refund_wei: z.number().int().nonnegative(),
+    outcome: z.string().min(1),
+    closed_at: z.string().min(1),
+    cap_status: z.unknown(),
+  })
+  .strict();
 
 export function routeBindingFor(route: SelectedWorkerRoute): LocRouteBinding {
   if (
@@ -154,6 +180,24 @@ export function createLocClient(transport: LocTransport): LocClient {
       return mapJobOpen(response, input);
     },
 
+    async settleJob(input) {
+      validateSettleJob(input);
+      const response = await transport.request({
+        method: "POST",
+        path: `/v1/jobs/${encodeURIComponent(input.operationId)}/settle`,
+        idempotencyKey: `settle:${input.operationId}`,
+        body: {
+          actual_units: input.actualUnits,
+          broker_job_id: input.brokerJobId,
+          work_unit: input.workUnit,
+          outcome: input.outcome,
+          settlement: input.settlement,
+        },
+        schema: settleJobWire,
+      });
+      return mapJobSettlement(response, input);
+    },
+
     async openSession(input) {
       validateOpenUnits(input.estimatedRunwayUnits, input.maxTotalUnits);
       const routeBinding = bindingToWire(input.routeBinding);
@@ -174,6 +218,28 @@ export function createLocClient(transport: LocTransport): LocClient {
       });
       return mapSessionOpen(response, input);
     },
+  };
+}
+
+function mapJobSettlement(
+  value: z.infer<typeof settleJobWire>,
+  input: LocSettleJobInput,
+): LocSettleJobResult {
+  if (
+    value.job_id !== input.operationId ||
+    value.actual_units !== input.actualUnits ||
+    value.outcome !== input.outcome
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    operationId: value.job_id,
+    workId: value.work_id,
+    actualUnits: value.actual_units,
+    billedValueWei: value.billed_value_wei,
+    refundWei: value.refund_wei,
+    outcome: value.outcome,
+    closedAt: value.closed_at,
   };
 }
 
@@ -331,6 +397,20 @@ function validateOpenUnits(estimated: number, maximum: number | undefined): void
     estimated < 1 ||
     (maximum !== undefined &&
       (!Number.isSafeInteger(maximum) || maximum < estimated))
+  ) {
+    throw invalidRequest();
+  }
+}
+
+function validateSettleJob(input: LocSettleJobInput): void {
+  if (
+    !z.string().uuid().safeParse(input.operationId).success ||
+    !Number.isSafeInteger(input.actualUnits) ||
+    input.actualUnits < 0 ||
+    input.brokerJobId.length === 0 ||
+    input.workUnit.length === 0 ||
+    input.outcome.length === 0 ||
+    !settlementEnvelopeWire.safeParse(input.settlement).success
   ) {
     throw invalidRequest();
   }

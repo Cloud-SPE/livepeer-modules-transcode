@@ -216,3 +216,50 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
     },
   });
 });
+
+test("LOC client submits the decoded broker settlement to the recorded job endpoint", async () => {
+  const settlement = {
+    payload: { request_id: "request-1", actual_units: "12" },
+    signature: {
+      algorithm: "secp256k1" as const,
+      canonicalization: "jcs" as const,
+      value: `0x${"44".repeat(65)}`,
+    },
+  };
+  const { transport, requests } = fakeTransport({
+    job_id: JOB_ID,
+    work_id: "work-1",
+    actual_units: 12,
+    billed_value_wei: 10,
+    refund_wei: 2,
+    outcome: "OVERFUNDED",
+    closed_at: "2026-08-24T00:01:00Z",
+    cap_status: {
+      session_pct_used: 0.5,
+      spend_period_pct_used: null,
+      user_balance_pct_used: null,
+      operator_pool_pct_used: null,
+      will_refuse_next_refill: false,
+      winddown_reason: null,
+    },
+  });
+  const result = await createLocClient(transport).settleJob({
+    operationId: JOB_ID,
+    actualUnits: 12,
+    brokerJobId: "broker-job-1",
+    workUnit: "frame_megapixel",
+    outcome: "OVERFUNDED",
+    settlement,
+  });
+
+  assert.equal(result.refundWei, 2);
+  assert.equal(requests[0]?.path, `/v1/jobs/${JOB_ID}/settle`);
+  assert.equal(requests[0]?.idempotencyKey, `settle:${JOB_ID}`);
+  assert.deepEqual(requests[0]?.body, {
+    actual_units: 12,
+    broker_job_id: "broker-job-1",
+    work_unit: "frame_megapixel",
+    outcome: "OVERFUNDED",
+    settlement,
+  });
+});

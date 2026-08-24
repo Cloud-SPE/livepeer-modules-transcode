@@ -57,6 +57,34 @@ export interface LocOpenJobResult {
   openedAt: string;
 }
 
+export interface LocSettlementEnvelope {
+  payload: { [key: string]: JsonValue };
+  signature: {
+    algorithm: "secp256k1";
+    canonicalization: "jcs";
+    value: string;
+  };
+}
+
+export interface LocSettleJobInput {
+  operationId: string;
+  actualUnits: number;
+  brokerJobId: string;
+  workUnit: string;
+  outcome: string;
+  settlement: LocSettlementEnvelope;
+}
+
+export interface LocSettleJobResult {
+  operationId: string;
+  workId: string;
+  actualUnits: number;
+  billedValueWei: number;
+  refundWei: number;
+  outcome: string;
+  closedAt: string;
+}
+
 export interface LocOpenSessionInput {
   requestId: string;
   capability: string;
@@ -84,5 +112,6 @@ export interface LocOpenSessionResult {
 
 export interface LocClient {
   openJob(input: LocOpenJobInput): Promise<LocOpenJobResult>;
+  settleJob(input: LocSettleJobInput): Promise<LocSettleJobResult>;
   openSession(input: LocOpenSessionInput): Promise<LocOpenSessionResult>;
 }
