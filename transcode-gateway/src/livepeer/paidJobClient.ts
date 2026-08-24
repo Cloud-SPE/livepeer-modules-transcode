@@ -12,6 +12,7 @@ import type {
 import { PaidJobClientError } from "../engine/interfaces/index.js";
 import { HEADER } from "./headers.js";
 import { routeBindingFor } from "./locClient.js";
+import { classifyV2Failure } from "./v2Outcome.js";
 
 const PROTOCOL = "paid-job/v1";
 const UINT64 = /^(0|[1-9][0-9]*)$/;
@@ -378,13 +379,13 @@ function brokerError(response: Response, body: Uint8Array): PaidJobClientError {
     // The typed header remains authoritative when the body is not JSON.
   }
   return new PaidJobClientError(code, {
-    retryable: response.status >= 500 || code === "job_in_flight" || code === "accounting_pending",
+    retryable: classifyV2Failure(code, response.status).retryable,
   });
 }
 
 function brokerLookupError(response: Response): PaidJobClientError {
   return new PaidJobClientError(response.headers.get(HEADER.ERROR) ?? "paid_job_recovery_failed", {
-    retryable: response.status >= 500,
+    retryable: classifyV2Failure(response.headers.get(HEADER.ERROR) ?? "", response.status).retryable,
   });
 }
 

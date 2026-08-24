@@ -7,6 +7,7 @@
 // module is ~211 LOC and only one consumer here.
 
 import type { VideoRouteCandidate } from "./routeSelector.js";
+import type { V2FailureCategory } from "./v2Outcome.js";
 
 export interface RouteHealthPolicy {
   failureThreshold: number;
@@ -16,6 +17,8 @@ export interface RouteHealthPolicy {
 export interface RouteOutcome {
   ok: boolean;
   retryable: boolean;
+  category?: V2FailureCategory;
+  penalizeRoute?: boolean;
 }
 
 interface RouteState {
@@ -23,6 +26,7 @@ interface RouteState {
   cooldownUntil: number;
   lastFailureAt: number | null;
   lastFailureReason: string | null;
+  lastFailureCategory: V2FailureCategory | null;
   lastSuccessAt: number | null;
 }
 
@@ -33,6 +37,7 @@ export interface RouteHealthSnapshot {
   cooldownUntil: number | null;
   lastFailureAt: number | null;
   lastFailureReason: string | null;
+  lastFailureCategory: V2FailureCategory | null;
   lastSuccessAt: number | null;
 }
 
@@ -42,6 +47,7 @@ export interface RouteHealthMetrics {
   retryableFailuresTotal: number;
   nonRetryableFailuresTotal: number;
   cooldownsOpenedTotal: number;
+  failuresByCategory: Record<V2FailureCategory, number>;
 }
 
 export interface RouteHealthSummary {
@@ -67,6 +73,7 @@ class GenericRouteHealthTracker<TCandidate> {
     retryableFailuresTotal: 0,
     nonRetryableFailuresTotal: 0,
     cooldownsOpenedTotal: 0,
+    failuresByCategory: freshCategoryCounts(),
   };
 
   constructor(input: GenericRouteHealthTrackerInput<TCandidate>) {
@@ -101,14 +108,24 @@ class GenericRouteHealthTracker<TCandidate> {
 
     if (!outcome.retryable) {
       this.#metrics.nonRetryableFailuresTotal += 1;
+      if (outcome.category) this.#metrics.failuresByCategory[outcome.category] += 1;
+      state.lastFailureAt = now;
+      state.lastFailureReason = reason ?? null;
+      state.lastFailureCategory = outcome.category ?? null;
       this.#states.set(key, state);
       return;
     }
 
     this.#metrics.retryableFailuresTotal += 1;
-    state.consecutiveFailures += 1;
+    if (outcome.category) this.#metrics.failuresByCategory[outcome.category] += 1;
     state.lastFailureAt = now;
     state.lastFailureReason = reason ?? null;
+    state.lastFailureCategory = outcome.category ?? null;
+    if (outcome.penalizeRoute === false) {
+      this.#states.set(key, state);
+      return;
+    }
+    state.consecutiveFailures += 1;
     if (state.consecutiveFailures >= this.#failureThreshold && state.cooldownUntil <= now) {
       this.#metrics.cooldownsOpenedTotal += 1;
       state.cooldownUntil = now + this.#cooldownMs;
@@ -124,12 +141,13 @@ class GenericRouteHealthTracker<TCandidate> {
       cooldownUntil: state.cooldownUntil > 0 ? state.cooldownUntil : null,
       lastFailureAt: state.lastFailureAt,
       lastFailureReason: state.lastFailureReason,
+      lastFailureCategory: state.lastFailureCategory,
       lastSuccessAt: state.lastSuccessAt,
     }));
   }
 
   inspectMetrics(): RouteHealthMetrics {
-    return { ...this.#metrics };
+    return { ...this.#metrics, failuresByCategory: { ...this.#metrics.failuresByCategory } };
   }
 
   #isCoolingDown(candidate: TCandidate, now: number): boolean {
@@ -198,6 +216,9 @@ export function renderRouteHealthMetrics(
     "# HELP livepeer_gateway_route_health_cooldowns_opened_total Total Layer 3 route cooldown windows opened.",
     "# TYPE livepeer_gateway_route_health_cooldowns_opened_total counter",
     `livepeer_gateway_route_health_cooldowns_opened_total${label} ${metrics.cooldownsOpenedTotal}`,
+    ...Object.entries(metrics.failuresByCategory).flatMap(([category, count]) => [
+      `livepeer_gateway_route_health_failures_total{gateway="${gateway}",category="${category}"} ${count}`,
+    ]),
     "# HELP livepeer_gateway_route_health_tracked_routes Number of currently tracked Layer 3 routes.",
     "# TYPE livepeer_gateway_route_health_tracked_routes gauge",
     `livepeer_gateway_route_health_tracked_routes${label} ${summary.tracked_routes}`,
@@ -217,6 +238,19 @@ function freshState(): RouteState {
     cooldownUntil: 0,
     lastFailureAt: null,
     lastFailureReason: null,
+    lastFailureCategory: null,
     lastSuccessAt: null,
+  };
+}
+
+function freshCategoryCounts(): Record<V2FailureCategory, number> {
+  return {
+    caller: 0,
+    capacity: 0,
+    payment: 0,
+    backend: 0,
+    protocol: 0,
+    recovery: 0,
+    evidence: 0,
   };
 }

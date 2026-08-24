@@ -9,6 +9,7 @@ export * from "./locHttpTransport.js";
 export * from "./locClient.js";
 export * from "./paidJobClient.js";
 export * from "./paidSessionClient.js";
+export * from "./v2Outcome.js";
 export * from "./payment.js";
 export * from "./payerDaemonClient.js";
 export * from "./routeHealth.js";

@@ -15,6 +15,7 @@ import { PaidSessionClientError } from "../engine/interfaces/index.js";
 import type { JsonValue } from "../engine/types/index.js";
 import { HEADER } from "./headers.js";
 import { routeBindingFor } from "./locClient.js";
+import { classifyV2Failure } from "./v2Outcome.js";
 
 const PROTOCOL = "paid-session/v1";
 const grantWire = z.object({
@@ -373,8 +374,9 @@ async function jsonRequest<T extends z.ZodType>(
 
 async function parseResponse<T extends z.ZodType>(response: Response, schema: T): Promise<z.infer<T>> {
   if (!response.ok) {
-    throw new PaidSessionClientError(response.headers.get(HEADER.ERROR) ?? "paid_session_broker_refused", {
-      retryable: response.status >= 500,
+    const code = response.headers.get(HEADER.ERROR) ?? "paid_session_broker_refused";
+    throw new PaidSessionClientError(code, {
+      retryable: classifyV2Failure(code, response.status).retryable,
     });
   }
   try {

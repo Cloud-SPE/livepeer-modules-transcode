@@ -4,14 +4,10 @@ import {
   type LocRequest,
   type LocTransport,
 } from "../engine/interfaces/index.js";
+import { classifyV2Failure } from "./v2Outcome.js";
 
 const MAX_RESPONSE_CHARS = 1_048_576;
 const REMOTE_CODE = /^[A-Za-z0-9_.:-]{1,128}$/;
-const RETRYABLE_REMOTE_CODES = new Set([
-  "idempotency_in_progress",
-  "idempotency_outcome_unknown",
-  "daemon_unavailable",
-]);
 
 const errorEnvelope = z.object({
   error: z
@@ -50,13 +46,7 @@ function remoteCode(body: unknown): string | undefined {
 }
 
 function isRetryable(status: number, code: string | undefined): boolean {
-  return (
-    status === 408 ||
-    status === 425 ||
-    status === 429 ||
-    status >= 500 ||
-    (code !== undefined && RETRYABLE_REMOTE_CODES.has(code.toLowerCase()))
-  );
+  return classifyV2Failure(code ?? "", status).retryable;
 }
 
 function safeJson(text: string): unknown {

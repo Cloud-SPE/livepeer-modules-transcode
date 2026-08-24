@@ -61,6 +61,43 @@ test("non-retryable failures do not count toward threshold", () => {
   assert.equal(snap.coolingDown, false);
 });
 
+test("route health distinguishes failure categories without poisoning routes for recovery or caller outcomes", () => {
+  const tracker = new RouteHealthTracker({ failureThreshold: 1, cooldownMs: 60_000 });
+  const c = candidate("https://broker.example.com");
+  tracker.record(c, {
+    ok: false,
+    retryable: true,
+    category: "recovery",
+    penalizeRoute: false,
+  }, "accounting_pending");
+  tracker.record(c, {
+    ok: false,
+    retryable: false,
+    category: "caller",
+    penalizeRoute: false,
+  }, "request_id_reuse");
+  const snap = tracker.inspect()[0]!;
+  assert.equal(snap.consecutiveFailures, 0);
+  assert.equal(snap.coolingDown, false);
+  assert.equal(snap.lastFailureCategory, "caller");
+  assert.equal(tracker.inspectMetrics().failuresByCategory.recovery, 1);
+  assert.equal(tracker.inspectMetrics().failuresByCategory.caller, 1);
+});
+
+test("backend and capacity failures retain category and open cooldowns", () => {
+  const tracker = new RouteHealthTracker({ failureThreshold: 1, cooldownMs: 60_000 });
+  const c = candidate("https://broker.example.com");
+  tracker.record(c, {
+    ok: false,
+    retryable: true,
+    category: "capacity",
+    penalizeRoute: true,
+  }, "capacity_exhausted");
+  assert.equal(tracker.inspect()[0]?.lastFailureCategory, "capacity");
+  assert.equal(tracker.inspect()[0]?.coolingDown, true);
+  assert.equal(tracker.inspectMetrics().failuresByCategory.capacity, 1);
+});
+
 test("rankCandidates puts ready brokers ahead of cooling ones", () => {
   const tracker = new RouteHealthTracker({ failureThreshold: 1, cooldownMs: 60_000 });
   const hot = candidate("https://hot.example.com");
@@ -94,4 +131,5 @@ test("renderRouteHealthMetrics emits Prometheus-shaped lines for the configured 
   assert.match(out, /livepeer_gateway_route_health_attempts_total\{gateway="transcode-gateway"\} 1/);
   assert.match(out, /livepeer_gateway_route_health_successes_total\{gateway="transcode-gateway"\} 1/);
   assert.match(out, /livepeer_gateway_route_health_tracked_routes\{gateway="transcode-gateway"\} 1/);
+  assert.match(out, /livepeer_gateway_route_health_failures_total\{gateway="transcode-gateway",category="payment"\} 0/);
 });
