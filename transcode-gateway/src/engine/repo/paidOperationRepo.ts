@@ -52,8 +52,9 @@ export interface PaidOperationRepo {
   byIdForApiKey(id: string, apiKeyId: string): Promise<PaidOperation | null>;
   byRequestId(requestId: string): Promise<PaidOperation | null>;
   byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
-  recoverable(now: Date, limit: number): Promise<PaidOperation[]>;
+  byBrokerSessionId(brokerSessionId: string): Promise<PaidOperation | null>;
   claimRecoverable(
+    kind: PaidOperation["kind"],
     owner: string,
     now: Date,
     leaseExpiresAt: Date,

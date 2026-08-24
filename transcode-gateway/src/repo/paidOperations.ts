@@ -342,24 +342,20 @@ export function createPaidOperationRepo(
       return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
-    async recoverable(now, limit) {
-      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
-        throw new Error(
-          "recovery batch limit must be an integer from 1 to 1000",
-        );
-      }
+    async byBrokerSessionId(brokerSessionId) {
       const result = await pool.query<Row>(
         `SELECT ${SELECT_COLUMNS} FROM media.paid_operations
-         WHERE terminal_at IS NULL AND (next_retry_at IS NULL OR next_retry_at <= $1)
-         ORDER BY updated_at ASC LIMIT $2`,
-        [now, limit],
+         WHERE broker_session_id = $1 AND operation_kind = 'session'
+         ORDER BY rotation_generation DESC LIMIT 1`,
+        [brokerSessionId],
       );
-      return result.rows.map(rowToOperation);
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
-    async claimRecoverable(owner, now, leaseExpiresAt, limit) {
+    async claimRecoverable(kind, owner, now, leaseExpiresAt, limit) {
       validateClaim({ owner, version: "0", leaseExpiresAt });
       if (
+        (kind !== "job" && kind !== "session") ||
         !Number.isSafeInteger(limit) ||
         limit < 1 ||
         limit > 1_000 ||
@@ -368,20 +364,20 @@ export function createPaidOperationRepo(
         throw new Error("recovery claim inputs are invalid");
       }
       const result = await pool.query<Row>(
-        `WITH candidates AS (
+				`WITH candidates AS (
 				   SELECT id FROM media.paid_operations
-				   WHERE terminal_at IS NULL
-				     AND (next_retry_at IS NULL OR next_retry_at <= $2)
-				     AND (recovery_lease_expires_at IS NULL OR recovery_lease_expires_at <= $2)
+				   WHERE operation_kind = $1 AND terminal_at IS NULL
+				     AND (next_retry_at IS NULL OR next_retry_at <= $3)
+				     AND (recovery_lease_expires_at IS NULL OR recovery_lease_expires_at <= $3)
 				   ORDER BY updated_at ASC
-				   FOR UPDATE SKIP LOCKED LIMIT $4
+				   FOR UPDATE SKIP LOCKED LIMIT $5
 				 )
 				 UPDATE media.paid_operations AS operation
-				 SET recovery_owner = $1, recovery_lease_expires_at = $3,
+				 SET recovery_owner = $2, recovery_lease_expires_at = $4,
 				     lifecycle_version = lifecycle_version + 1, updated_at = NOW()
 				 FROM candidates WHERE operation.id = candidates.id
 				 RETURNING operation.*`,
-        [owner, now, leaseExpiresAt, limit],
+        [kind, owner, now, leaseExpiresAt, limit],
       );
       return result.rows.map(rowToOperation);
     },

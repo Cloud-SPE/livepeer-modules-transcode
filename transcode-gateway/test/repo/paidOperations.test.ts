@@ -143,37 +143,41 @@ test("paid operation recovery is restart-safe and customer reads are owner-scope
   );
   const now = new Date("2026-08-22T12:00:00Z");
 
-  assert.deepEqual(await repo.recoverable(now, 50), []);
-  assert.match(calls[0]!.sql, /terminal_at IS NULL/);
-  assert.match(calls[0]!.sql, /next_retry_at IS NULL OR next_retry_at <= \$1/);
-  assert.deepEqual(calls[0]!.params, [now, 50]);
-  await assert.rejects(() => repo.recoverable(now, 0));
-
   assert.equal(await repo.byIdForApiKey("op-1", "api-key-1"), null);
-  assert.match(calls[1]!.sql, /id = \$1 AND api_key_id = \$2/);
-  assert.deepEqual(calls[1]!.params, ["op-1", "api-key-1"]);
+  assert.match(calls[0]!.sql, /id = \$1 AND api_key_id = \$2/);
+  assert.deepEqual(calls[0]!.params, ["op-1", "api-key-1"]);
 
   const leaseExpiresAt = new Date("2026-08-22T12:01:00Z");
   assert.deepEqual(
-    await repo.claimRecoverable("gateway-1", now, leaseExpiresAt, 25),
+    await repo.claimRecoverable("session", "gateway-1", now, leaseExpiresAt, 25),
     [],
   );
-  assert.match(calls[2]!.sql, /FOR UPDATE SKIP LOCKED/);
+  assert.match(calls[1]!.sql, /operation_kind = \$1/);
+  assert.match(calls[1]!.sql, /FOR UPDATE SKIP LOCKED/);
   assert.match(
-    calls[2]!.sql,
-    /recovery_lease_expires_at IS NULL OR recovery_lease_expires_at <= \$2/,
+    calls[1]!.sql,
+    /recovery_lease_expires_at IS NULL OR recovery_lease_expires_at <= \$3/,
   );
-  assert.match(calls[2]!.sql, /lifecycle_version = lifecycle_version \+ 1/);
-  assert.deepEqual(calls[2]!.params, ["gateway-1", now, leaseExpiresAt, 25]);
+  assert.match(calls[1]!.sql, /lifecycle_version = lifecycle_version \+ 1/);
+  assert.deepEqual(calls[1]!.params, [
+    "session",
+    "gateway-1",
+    now,
+    leaseExpiresAt,
+    25,
+  ]);
+  await assert.rejects(() =>
+    repo.claimRecoverable("session", "gateway-1", now, leaseExpiresAt, 0),
+  );
 
   const claim = { owner: "gateway-1", version: "7", leaseExpiresAt };
   assert.equal(
     await repo.recordProgress("op-1", claim, { status: "active" }),
     null,
   );
-  assert.match(calls[3]!.sql, /recovery_owner = \$3/);
-  assert.match(calls[3]!.sql, /lifecycle_version = \$4/);
-  assert.match(calls[3]!.sql, /recovery_lease_expires_at = \$5/);
+  assert.match(calls[2]!.sql, /recovery_owner = \$3/);
+  assert.match(calls[2]!.sql, /lifecycle_version = \$4/);
+  assert.match(calls[2]!.sql, /recovery_lease_expires_at = \$5/);
   await assert.rejects(() =>
     repo.recordProgress(
       "op-1",
