@@ -328,3 +328,75 @@ test("paid VOD terminal state is fenced and applied in one product transaction",
   assert.equal(calls[7]?.sql, "COMMIT");
   assert.equal(released, true);
 });
+
+test("paid VOD terminal rejects a stale lease before product writes", async () => {
+  const calls: string[] = [];
+  const client = {
+    async query(sql: string) {
+      calls.push(sql);
+      return result([]);
+    },
+    release() {},
+  };
+  const repo = createPaidOperationRepo(
+    { async connect() { return client; } } as unknown as DbPool,
+    createOperationSecretCipher("test-key", randomBytes(32)),
+  );
+  const recorded = await repo.recordVodTerminal("operation-1", terminalClaim(), terminalValue());
+  assert.equal(recorded, false);
+  assert.deepEqual(calls.map(sqlKind), ["begin", "operation", "rollback"]);
+});
+
+test("paid VOD terminal rolls back every state change when a product write fails", async () => {
+  const calls: string[] = [];
+  const client = {
+    async query(sql: string) {
+      calls.push(sql);
+      if (sql.includes("UPDATE media.paid_operations")) return result([{ id: "operation-1" }]);
+      if (sql.includes("UPDATE media.renditions")) return result([]);
+      return result([]);
+    },
+    release() {},
+  };
+  const repo = createPaidOperationRepo(
+    { async connect() { return client; } } as unknown as DbPool,
+    createOperationSecretCipher("test-key", randomBytes(32)),
+  );
+  await assert.rejects(
+    () => repo.recordVodTerminal("operation-1", terminalClaim(), terminalValue()),
+    /terminal rendition identity mismatch/,
+  );
+  assert.deepEqual(calls.map(sqlKind), ["begin", "operation", "rendition", "rollback"]);
+});
+
+function terminalClaim() {
+  return {
+    owner: "gateway-1",
+    version: "7",
+    leaseExpiresAt: new Date("2030-01-01T00:01:00Z"),
+  };
+}
+
+function terminalValue(): Parameters<ReturnType<typeof createPaidOperationRepo>["recordVodTerminal"]>[2] {
+  return {
+    assetId: "asset-1",
+    encodingJobId: "job-1",
+    playbackId: "playback-1",
+    apiKeyId: "api-key-1",
+    locOperationId: "loc-operation-1",
+    brokerJobId: "broker-job-1",
+    brokerRequestId: "broker-request-1",
+    claimedUnits: "42",
+    settlementSequence: "0",
+    evidence: { httpStatus: 200, responseSha256: "a".repeat(64), workUnit: "video-frame-megapixel", workUnits: "42" },
+    terminalAt: new Date("2026-08-24T00:00:00Z"),
+    renditions: [{ renditionId: "rendition-1", storageKey: "vod/asset-1/stream.mp4", durationSeconds: 10 }],
+  };
+}
+
+function sqlKind(sql: string): string {
+  if (sql === "BEGIN" || sql === "ROLLBACK" || sql === "COMMIT") return sql.toLowerCase();
+  if (sql.includes("paid_operations")) return "operation";
+  if (sql.includes("renditions")) return "rendition";
+  return "other";
+}
