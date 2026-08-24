@@ -101,3 +101,8 @@ errors.
 VOD probes the presigned source locally with `ffprobe` before opening its one
 ABR paid job. `VOD_FFPROBE_BIN` defaults to `ffprobe` and
 `VOD_SOURCE_PROBE_TIMEOUT_MS` defaults to 30 seconds.
+Unknown VOD outcomes are reclaimed under a database lease and replayed with
+the encrypted original request. The recovery interval, lease, and retry delay
+default to 5 seconds, 60 seconds, and 2 seconds respectively and are controlled
+by `VOD_RECOVERY_INTERVAL_MS`, `VOD_RECOVERY_LEASE_MS`, and
+`VOD_RECOVERY_RETRY_MS`.

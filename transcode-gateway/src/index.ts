@@ -33,6 +33,7 @@ import { createLiveStreamRepo } from "./repo/liveStreams.js";
 import { createPlaybackIdRepo } from "./repo/playbackIds.js";
 import { createPaidOperationRepo } from "./repo/paidOperations.js";
 import { createSourceProbe } from "./runtime/sourceProbe.js";
+import { recoverPaidAbrOperations } from "./engine/service/paidAbrRecovery.js";
 import { createRtmpListener, type RtmpListenerHandle } from "./runtime/rtmp/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -174,6 +175,37 @@ async function main(): Promise<void> {
     engineLogger: consoleLogger,
   });
 
+  let vodRecoveryTimer: NodeJS.Timeout | null = null;
+  if (paidJobClient && paidOperationRepo) {
+    let recovering = false;
+    const recoverVod = async () => {
+      if (recovering) return;
+      recovering = true;
+      try {
+        await recoverPaidAbrOperations({
+          assetRepo,
+          jobRepo,
+          renditionRepo,
+          paidOperationRepo,
+          paidJobClient,
+          owner: recoveryOwner,
+          leaseMs: config.VOD_RECOVERY_LEASE_MS,
+          retryMs: config.VOD_RECOVERY_RETRY_MS,
+          logger: consoleLogger,
+        });
+      } catch (error) {
+        consoleLogger.error("orchestrator.vod_recovery_scan_failed", {
+          error: error instanceof Error ? error.message : "unknown",
+        });
+      } finally {
+        recovering = false;
+      }
+    };
+    void recoverVod();
+    vodRecoveryTimer = setInterval(() => void recoverVod(), config.VOD_RECOVERY_INTERVAL_MS);
+    vodRecoveryTimer.unref();
+  }
+
   // Gateway RTMP listener (plan 0007). Opt-in via
   // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL. Disabled by default — plan-0006
   // behavior preserved when env unset.
@@ -200,6 +232,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "shutdown.starting");
     rateLimiter.stop();
+    if (vodRecoveryTimer) clearInterval(vodRecoveryTimer);
     if (rtmpHandle) await rtmpHandle.stop();
     await app.close();
     if (resolverHandle) await resolverHandle.close();

@@ -51,6 +51,9 @@ const envSchema = z.object({
   VOD_PLAYBACK_URL_TTL_SEC: z.coerce.number().int().positive().default(3600),
   VOD_SOURCE_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   VOD_FFPROBE_BIN: z.string().min(1).default("ffprobe"),
+  VOD_RECOVERY_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+  VOD_RECOVERY_LEASE_MS: z.coerce.number().int().positive().default(60_000),
+  VOD_RECOVERY_RETRY_MS: z.coerce.number().int().positive().default(2_000),
 
   // Gateway RTMP listener (plan 0007). All optional; when
   // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL is unset the listener does not bind

@@ -156,7 +156,7 @@ export function registerVod(app: FastifyInstance, deps: VodDeps): void {
       paidJobClient: deps.paidJobClient,
       logger: deps.logger,
       owner: deps.recoveryOwner,
-      recoveryLeaseMs: deps.config.LIVEPEER_LOC_TIMEOUT_MS * 4,
+      recoveryLeaseMs: deps.config.VOD_RECOVERY_LEASE_MS,
     }, {
       asset: { ...asset, encodingTier: parsed.data.encoding_tier },
       route,
