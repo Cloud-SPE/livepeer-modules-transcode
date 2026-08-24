@@ -28,6 +28,12 @@ type CallbackDispatcherV1 struct {
 	client *http.Client
 }
 
+type CallbackWorkerV1 struct {
+	store      *EncryptedFileSessionStoreV1
+	dispatcher *CallbackDispatcherV1
+	interval   time.Duration
+}
+
 func NewCallbackDispatcherV1(store *EncryptedFileSessionStoreV1, transport http.RoundTripper, timeout time.Duration) (*CallbackDispatcherV1, error) {
 	if store == nil || timeout <= 0 {
 		return nil, errors.New("session store and positive callback timeout are required")
@@ -43,6 +49,68 @@ func NewCallbackDispatcherV1(store *EncryptedFileSessionStoreV1, transport http.
 		},
 	}
 	return &CallbackDispatcherV1{store: store, client: client}, nil
+}
+
+func NewCallbackWorkerV1(store *EncryptedFileSessionStoreV1, dispatcher *CallbackDispatcherV1, interval time.Duration) (*CallbackWorkerV1, error) {
+	if store == nil || dispatcher == nil || dispatcher.store != store || interval <= 0 {
+		return nil, errors.New("callback worker dependencies are invalid")
+	}
+	return &CallbackWorkerV1{store: store, dispatcher: dispatcher, interval: interval}, nil
+}
+
+func (w *CallbackWorkerV1) Run(ctx context.Context) error {
+	for {
+		if err := w.SweepOnce(ctx); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		timer := time.NewTimer(w.interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+}
+
+// SweepOnce gives every recoverable session one bounded opportunity to drain
+// the outbox snapshot observed at the start of the sweep. Callback failures
+// preserve the head for a later identical retry. Terminal secrets are erased
+// only after the durable final acknowledgement, including after a crash in
+// the acknowledgement-to-erasure window.
+func (w *CallbackWorkerV1) SweepOnce(ctx context.Context) error {
+	records, err := w.store.Recoverable()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		for range len(record.PendingEvents) {
+			delivered, err := w.dispatcher.DeliverNext(ctx, record.BrokerSessionID)
+			if err != nil {
+				var deliveryError *CallbackDeliveryErrorV1
+				if errors.As(err, &deliveryError) {
+					break
+				}
+				return err
+			}
+			if !delivered {
+				break
+			}
+		}
+		current, secrets, err := w.store.Load(record.BrokerSessionID)
+		if err != nil {
+			return err
+		}
+		if current.State != "active" && len(current.PendingEvents) == 0 && secrets != nil {
+			if err := w.store.ClearTerminalSecrets(record.BrokerSessionID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeliverNext posts at most one durable event. A successful broker response

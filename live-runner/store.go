@@ -459,7 +459,7 @@ func (s *EncryptedFileSessionStoreV1) Recoverable() ([]SessionRecordV1, error) {
 		if err != nil {
 			return nil, err
 		}
-		if record.State == "active" || len(record.PendingEvents) != 0 {
+		if record.State == "active" || len(record.PendingEvents) != 0 || record.WrappedKeyCiphertext != "" {
 			records = append(records, cloneSessionRecordV1(record))
 		}
 	}
