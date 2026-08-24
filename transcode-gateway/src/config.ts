@@ -49,6 +49,8 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: z.string().optional(),
   VOD_UPLOAD_URL_TTL_SEC: z.coerce.number().int().positive().default(3600),
   VOD_PLAYBACK_URL_TTL_SEC: z.coerce.number().int().positive().default(3600),
+  VOD_SOURCE_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  VOD_FFPROBE_BIN: z.string().min(1).default("ffprobe"),
 
   // Gateway RTMP listener (plan 0007). All optional; when
   // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL is unset the listener does not bind

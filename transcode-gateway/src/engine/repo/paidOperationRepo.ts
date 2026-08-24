@@ -29,6 +29,7 @@ export interface PaidOperationClaim {
 
 export interface PaidOperationProgress {
   status: string;
+  requestId?: string;
   locOperationId?: string;
   brokerJobId?: string;
   brokerSessionId?: string;
@@ -89,6 +90,28 @@ export interface PaidOperationRepo {
       settlementSequence: string;
       evidence: PaidTerminalEvidence;
       terminalAt: Date;
+    },
+  ): Promise<boolean>;
+  recordVodTerminal(
+    id: string,
+    claim: PaidOperationClaim,
+    value: {
+      assetId: string;
+      encodingJobId: string;
+      playbackId: string;
+      apiKeyId: string;
+      locOperationId: string;
+      brokerJobId: string;
+      brokerRequestId: string;
+      claimedUnits: string;
+      settlementSequence: string;
+      evidence: PaidTerminalEvidence;
+      terminalAt: Date;
+      renditions: Array<{
+        renditionId: string;
+        storageKey: string;
+        durationSeconds: number;
+      }>;
     },
   ): Promise<boolean>;
   putSecrets(

@@ -4,6 +4,8 @@ export interface StorageProvider {
   putSignedUploadUrl(opts: {
     assetId: string;
     kind: StoragePathKind;
+    codec?: string;
+    resolution?: string;
     filename: string;
     contentType: string;
     expiresInSec: number;

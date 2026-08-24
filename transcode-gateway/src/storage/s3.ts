@@ -78,6 +78,8 @@ export function createS3StorageProvider(config: S3StorageConfig): StorageProvide
       const storageKey = pathFor({
         assetId: opts.assetId,
         kind: opts.kind,
+        codec: opts.codec,
+        resolution: opts.resolution,
         filename: opts.filename,
       });
       const cmd = new PutObjectCommand({

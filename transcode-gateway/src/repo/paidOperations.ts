@@ -426,6 +426,7 @@ export function createPaidOperationRepo(
       ];
       const params: unknown[] = [id, value.status];
       const fields: Array<[string, unknown]> = [
+        ["request_id", value.requestId],
         ["loc_operation_id", value.locOperationId],
         ["broker_job_id", value.brokerJobId],
         ["broker_session_id", value.brokerSessionId],
@@ -509,6 +510,82 @@ export function createPaidOperationRepo(
         ],
       );
       return (result.rowCount ?? 0) > 0;
+    },
+
+    async recordVodTerminal(id, claim, value) {
+      validateClaim(claim);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const terminal = await client.query<{ id: string }>(
+          `UPDATE media.paid_operations SET status = 'settled', claimed_units = $2,
+             settlement_sequence = $3, terminal_evidence = $4, terminal_at = $5,
+             loc_operation_id = $10, broker_job_id = $11, request_id = $12,
+             next_retry_at = NULL, last_error_code = NULL, updated_at = NOW(),
+             lifecycle_version = lifecycle_version + 1,
+             recovery_owner = NULL, recovery_lease_expires_at = NULL
+           WHERE id = $1 AND asset_id = $6 AND recovery_owner = $7
+             AND lifecycle_version = $8 AND recovery_lease_expires_at = $9
+             AND recovery_lease_expires_at > NOW() AND terminal_at IS NULL
+           RETURNING id`,
+          [
+            id,
+            value.claimedUnits,
+            value.settlementSequence,
+            value.evidence,
+            value.terminalAt,
+            value.assetId,
+            claim.owner,
+            claim.version,
+            claim.leaseExpiresAt,
+            value.locOperationId,
+            value.brokerJobId,
+            value.brokerRequestId,
+          ],
+        );
+        if (terminal.rowCount === 0) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+        for (const rendition of value.renditions) {
+          const updated = await client.query(
+            `UPDATE media.renditions SET status = 'completed', storage_key = $3,
+               duration_sec = $4, completed_at = $5
+             WHERE id = $1 AND asset_id = $2 AND status IN ('queued', 'running')`,
+            [rendition.renditionId, value.assetId, rendition.storageKey, rendition.durationSeconds, value.terminalAt],
+          );
+          if (updated.rowCount !== 1) throw new Error("terminal rendition identity mismatch");
+        }
+        const completedJob = await client.query(
+          `UPDATE media.encoding_jobs SET status = 'completed', completed_at = $3
+           WHERE id = $1 AND asset_id = $2`,
+          [value.encodingJobId, value.assetId, value.terminalAt],
+        );
+        if (completedJob.rowCount !== 1) throw new Error("terminal encoding job identity mismatch");
+        const readyAsset = await client.query(
+          `UPDATE media.assets SET status = 'ready', ready_at = $2 WHERE id = $1`,
+          [value.assetId, value.terminalAt],
+        );
+        if (readyAsset.rowCount !== 1) throw new Error("terminal asset identity mismatch");
+        await client.query(
+          `INSERT INTO media.playback_ids
+             (id, api_key_id, asset_id, live_stream_id, policy, token_required)
+           SELECT $1, $2, $3, NULL, 'public', false
+           WHERE NOT EXISTS (SELECT 1 FROM media.playback_ids WHERE asset_id = $3)`,
+          [value.playbackId, value.apiKeyId, value.assetId],
+        );
+        await client.query(
+          `DELETE FROM media.paid_operation_secrets WHERE operation_id = $1`,
+          [id],
+        );
+        await client.query("COMMIT");
+        return true;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async putSecrets(id, claim, value: PaidOperationSecrets) {

@@ -275,3 +275,56 @@ test("paid live operation and encrypted open intent are created in one transacti
     .join(" ");
   assert.doesNotMatch(serializedParams, /private-key/);
 });
+
+test("paid VOD terminal state is fenced and applied in one product transaction", async () => {
+  const calls: Array<{ sql: string; params?: unknown[] }> = [];
+  let released = false;
+  const client = {
+    async query(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      if (sql.includes("UPDATE media.paid_operations")) return result([{ id: "operation-1" }]);
+      if (sql.includes("UPDATE media.renditions")) return result([{ id: "rendition-1" }]);
+      if (sql.includes("UPDATE media.encoding_jobs")) return result([{ id: "job-1" }]);
+      if (sql.includes("UPDATE media.assets")) return result([{ id: "asset-1" }]);
+      return result([]);
+    },
+    release() { released = true; },
+  };
+  const pool = { async connect() { return client; } } as unknown as DbPool;
+  const repo = createPaidOperationRepo(
+    pool,
+    createOperationSecretCipher("test-key", randomBytes(32)),
+  );
+  const leaseExpiresAt = new Date("2030-01-01T00:01:00Z");
+  const terminalAt = new Date("2026-08-24T00:00:00Z");
+
+  assert.equal(await repo.recordVodTerminal("operation-1", {
+    owner: "gateway-1",
+    version: "7",
+    leaseExpiresAt,
+  }, {
+    assetId: "asset-1",
+    encodingJobId: "job-1",
+    playbackId: "playback-1",
+    apiKeyId: "api-key-1",
+    locOperationId: "loc-operation-1",
+    brokerJobId: "broker-job-1",
+    brokerRequestId: "broker-request-1",
+    claimedUnits: "42",
+    settlementSequence: "0",
+    evidence: { httpStatus: 200, responseSha256: "a".repeat(64), workUnit: "video-frame-megapixel", workUnits: "42" },
+    terminalAt,
+    renditions: [{ renditionId: "rendition-1", storageKey: "vod/asset-1/stream.mp4", durationSeconds: 10 }],
+  }), true);
+
+  assert.equal(calls[0]?.sql, "BEGIN");
+  assert.match(calls[1]!.sql, /recovery_owner = \$7/);
+  assert.equal(calls[1]!.params?.[11], "broker-request-1");
+  assert.match(calls[2]!.sql, /UPDATE media\.renditions/);
+  assert.match(calls[3]!.sql, /UPDATE media\.encoding_jobs/);
+  assert.match(calls[4]!.sql, /UPDATE media\.assets/);
+  assert.match(calls[5]!.sql, /INSERT INTO media\.playback_ids/);
+  assert.match(calls[6]!.sql, /DELETE FROM media\.paid_operation_secrets/);
+  assert.equal(calls[7]?.sql, "COMMIT");
+  assert.equal(released, true);
+});

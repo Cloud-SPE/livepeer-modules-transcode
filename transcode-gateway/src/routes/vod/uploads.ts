@@ -127,7 +127,9 @@ export function registerVodUploads(app: FastifyInstance, deps: UploadsDeps): voi
       // pointing at the storage_key so the orchestrator can find it.
       // (The orchestrator's probe step builds a signed download URL from
       // storage.pathFor() if source_url isn't already an http/s3 URL.)
-      await deps.assetRepo.updateStatus(upload.assetId, "preparing");
+      await deps.assetRepo.updateStatus(upload.assetId, "preparing", {
+        sourceUrl: upload.storageKey,
+      });
     }
 
     return { asset_id: upload.assetId ?? null, upload_id: upload.id, status: "completed" };

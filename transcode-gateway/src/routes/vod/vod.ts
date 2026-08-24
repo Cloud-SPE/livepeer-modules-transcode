@@ -1,30 +1,30 @@
-import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Config } from "../../config.js";
 import type { DbPool } from "../../db/pool.js";
-import type { Logger, StorageProvider, WorkerClient, WorkerResolver } from "../../engine/interfaces/index.js";
+import type { Logger, PaidJobClient, SourceProbe, StorageProvider, WorkerResolver } from "../../engine/interfaces/index.js";
 import type {
   AssetRepo,
   EncodingJobRepo,
   PlaybackIdRepo,
+  PaidOperationRepo,
   RenditionRepo,
 } from "../../engine/repo/index.js";
-import { defaultEncodingLadder } from "../../engine/config/encodingLadder.js";
-import { probeAndSchedule } from "../../engine/service/jobOrchestrator.js";
-import { buildVodSelectionHints } from "../../livepeer/selectionPolicy.js";
+import { runPaidAbrAsset } from "../../engine/service/paidAbrOrchestrator.js";
 import { makeUserApiKeyAuth } from "../../middleware/userApiKeyAuth.js";
 
-// VOD routes (plan 0005 §3.6). Submit calls probeAndSchedule fire-and-forget
-// (single-instance v0). All asset reads are scoped by api_key_id to prevent
-// cross-tenant enumeration.
+// VOD routes. Submit dispatches one complete ABR ladder through paid-job/v1.
+// All asset reads are scoped by api_key_id to prevent cross-tenant enumeration.
 
 export interface VodDeps {
   pool: DbPool;
   config: Config;
   storage: StorageProvider | null;
   workerResolver: WorkerResolver;
-  workerClient: WorkerClient;
+  paidJobClient: PaidJobClient | null;
+  paidOperationRepo: PaidOperationRepo | null;
+  sourceProbe: SourceProbe;
+  recoveryOwner: string;
   assetRepo: AssetRepo;
   jobRepo: EncodingJobRepo;
   renditionRepo: RenditionRepo;
@@ -46,25 +46,6 @@ const listQuery = z.object({
   cursor: z.string().optional(),
   include_deleted: z.coerce.boolean().optional().default(false),
 });
-
-function newPlaybackId(): string {
-  return `pb_${randomBytes(12).toString("hex")}`;
-}
-
-async function createPlaybackIdForAsset(
-  deps: Pick<VodDeps, "playbackIdRepo">,
-  asset: { id: string; apiKeyId: string },
-): Promise<void> {
-  const existing = await deps.playbackIdRepo.byAsset(asset.id);
-  if (existing.length > 0) return;
-  await deps.playbackIdRepo.insert({
-    id: newPlaybackId(),
-    apiKeyId: asset.apiKeyId,
-    assetId: asset.id,
-    policy: "public",
-    tokenRequired: false,
-  });
-}
 
 function serializeAsset(asset: {
   id: string;
@@ -108,8 +89,6 @@ function serializeAsset(asset: {
 
 export function registerVod(app: FastifyInstance, deps: VodDeps): void {
   const auth = makeUserApiKeyAuth({ pool: deps.pool, config: deps.config });
-  const ladder = defaultEncodingLadder();
-
   // POST /v1/vod/submit
   app.post("/v1/vod/submit", { preHandler: auth }, async (req, reply) => {
     const parsed = submitBody.safeParse(req.body);
@@ -119,13 +98,20 @@ export function registerVod(app: FastifyInstance, deps: VodDeps): void {
     }
 
     const apiKey = req.apiKey!;
+    if (!deps.storage || !deps.paidJobClient || !deps.paidOperationRepo) {
+      reply.code(503).send({
+        status: "error",
+        error: "paid_job_not_configured",
+        message: "VOD requires S3, LOC, and an operation-secrets wrapping key",
+      });
+      return;
+    }
     const asset = await deps.assetRepo.byId(parsed.data.asset_id);
     if (!asset || asset.deletedAt || asset.apiKeyId !== apiKey.id) {
       reply.code(404).send({ status: "error", message: "Asset not found." });
       return;
     }
 
-    const hints = buildVodSelectionHints({ encodingTier: parsed.data.encoding_tier });
     const offering = parsed.data.offering ?? deps.config.LIVEPEER_VOD_OFFERING_DEFAULT;
 
     const route = await deps.workerResolver.selectWorker({
@@ -141,6 +127,18 @@ export function registerVod(app: FastifyInstance, deps: VodDeps): void {
       });
       return;
     }
+    if (
+      route.protocol !== "paid-job/v1" ||
+      !route.job?.transports.includes("stream") ||
+      route.workUnit !== "video-frame-megapixel"
+    ) {
+      reply.code(503).send({
+        status: "error",
+        error: "video_transcode_route_incompatible",
+        message: "the selected route does not implement the required paid-job/v1 ABR contract",
+      });
+      return;
+    }
 
     await deps.assetRepo.updateStatus(asset.id, "queued", {
       encodingTier: parsed.data.encoding_tier,
@@ -148,34 +146,26 @@ export function registerVod(app: FastifyInstance, deps: VodDeps): void {
     });
 
     // Fire-and-forget orchestrator. Logger captures any background failures.
-    void probeAndSchedule({
-      asset: { ...asset, encodingTier: parsed.data.encoding_tier },
+    void runPaidAbrAsset({
       assetRepo: deps.assetRepo,
       jobRepo: deps.jobRepo,
       renditionRepo: deps.renditionRepo,
-      storage: deps.storage as StorageProvider,
-      workerResolver: deps.workerResolver,
-      workerClient: deps.workerClient,
-      ladder,
+      paidOperationRepo: deps.paidOperationRepo,
+      storage: deps.storage,
+      sourceProbe: deps.sourceProbe,
+      paidJobClient: deps.paidJobClient,
       logger: deps.logger,
-      apiKeyId: apiKey.id,
-      callerTier: parsed.data.encoding_tier,
-      workerOffering: route.offering,
-      onAssetReady: async (assetId) => {
-        await createPlaybackIdForAsset(deps, { id: assetId, apiKeyId: apiKey.id });
-      },
+      owner: deps.recoveryOwner,
+      recoveryLeaseMs: deps.config.LIVEPEER_LOC_TIMEOUT_MS * 4,
+    }, {
+      asset: { ...asset, encodingTier: parsed.data.encoding_tier },
+      route,
     }).catch((err) => {
       deps.logger?.error("vod.submit.background_failed", {
         asset_id: asset.id,
         error: err instanceof Error ? err.message : String(err),
       });
     });
-
-    // Used to silence "hints unused when supportFilter is not threaded".
-    // selectionPolicy hints feed into a future route-selector call once
-    // the engine's WorkerResolver is parameterized; for now the resolver
-    // selects without hints. See plan 0005 §3.6 step 4.
-    void hints;
 
     reply.code(202).send({
       asset_id: asset.id,

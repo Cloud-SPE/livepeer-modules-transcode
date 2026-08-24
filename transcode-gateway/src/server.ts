@@ -4,13 +4,14 @@ import type { Config } from "./config.js";
 import type { DbPool } from "./db/pool.js";
 import type { EmailClient } from "./email/client.js";
 import type { RateLimiter } from "./auth/rateLimit.js";
-import type { Logger, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { Logger, PaidJobClient, SourceProbe, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
 import type {
   AssetRepo,
   EncodingJobRepo,
   PlaybackIdRepo,
   RenditionRepo,
   UploadRepo,
+  PaidOperationRepo,
 } from "./engine/repo/index.js";
 import { registerRequestLogger } from "./middleware/requestLogger.js";
 import { registerHealth } from "./routes/health.js";
@@ -34,6 +35,10 @@ export interface ServerDeps {
   storage: StorageProvider | null;
   workerResolver: WorkerResolver;
   workerClient: WorkerClient;
+  paidJobClient: PaidJobClient | null;
+  paidOperationRepo: PaidOperationRepo | null;
+  sourceProbe: SourceProbe;
+  recoveryOwner: string;
   routeSelector: VideoRouteSelector | null;
   liveSessions: LiveSessionDirectory;
   assetRepo: AssetRepo;
@@ -80,7 +85,10 @@ export async function createServer(deps: ServerDeps): Promise<FastifyInstance> {
     config: deps.config,
     storage: deps.storage,
     workerResolver: deps.workerResolver,
-    workerClient: deps.workerClient,
+    paidJobClient: deps.paidJobClient,
+    paidOperationRepo: deps.paidOperationRepo,
+    sourceProbe: deps.sourceProbe,
+    recoveryOwner: deps.recoveryOwner,
     assetRepo: deps.assetRepo,
     jobRepo: deps.jobRepo,
     renditionRepo: deps.renditionRepo,

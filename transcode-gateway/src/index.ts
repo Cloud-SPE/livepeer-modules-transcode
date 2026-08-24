@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { createPool } from "./db/pool.js";
@@ -6,7 +7,8 @@ import { runMigrations } from "./db/migrate.js";
 import { createRateLimiter } from "./auth/rateLimit.js";
 import { createEmailClient } from "./email/client.js";
 import { createServer } from "./server.js";
-import type { StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { PaidJobClient, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { PaidOperationRepo } from "./engine/repo/index.js";
 import {
   createStubWorkerClient,
   createStubWorkerResolver,
@@ -14,6 +16,11 @@ import {
   createHttpWorkerClient,
   createResolverWorkerResolver,
   createLiveSessionDirectory,
+  createLocClient,
+  createLocHttpTransport,
+  createOperationSecretCipher,
+  createPaidJobClient,
+  decodeWrappingKey,
   type PayerDaemonClient,
   type VideoRouteSelector,
 } from "./livepeer/index.js";
@@ -24,6 +31,8 @@ import { createRenditionRepo } from "./repo/renditions.js";
 import { createEncodingJobRepo } from "./repo/encodingJobs.js";
 import { createLiveStreamRepo } from "./repo/liveStreams.js";
 import { createPlaybackIdRepo } from "./repo/playbackIds.js";
+import { createPaidOperationRepo } from "./repo/paidOperations.js";
+import { createSourceProbe } from "./runtime/sourceProbe.js";
 import { createRtmpListener, type RtmpListenerHandle } from "./runtime/rtmp/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -118,6 +127,29 @@ async function main(): Promise<void> {
   const liveStreamRepo = createLiveStreamRepo(pool);
   const playbackIdRepo = createPlaybackIdRepo(pool);
   const liveSessions = createLiveSessionDirectory();
+  const sourceProbe = createSourceProbe({
+    ffprobeBin: config.VOD_FFPROBE_BIN,
+    timeoutMs: config.VOD_SOURCE_PROBE_TIMEOUT_MS,
+  });
+  const recoveryOwner = `gateway:${process.pid}:${randomUUID()}`;
+  let paidJobClient: PaidJobClient | null = null;
+  let paidOperationRepo: PaidOperationRepo | null = null;
+  if (config.LIVEPEER_LOC_URL && config.LIVEPEER_LOC_API_KEY) {
+    const loc = createLocClient(createLocHttpTransport({
+      baseUrl: config.LIVEPEER_LOC_URL,
+      apiKey: config.LIVEPEER_LOC_API_KEY,
+      clientId: config.LIVEPEER_LOC_CLIENT_ID,
+      timeoutMs: config.LIVEPEER_LOC_TIMEOUT_MS,
+    }));
+    paidJobClient = createPaidJobClient(loc);
+    if (config.LIVEPEER_OPERATION_SECRETS_KEK) {
+      const cipher = createOperationSecretCipher(
+        config.LIVEPEER_OPERATION_SECRETS_KEY_ID,
+        decodeWrappingKey(config.LIVEPEER_OPERATION_SECRETS_KEK),
+      );
+      paidOperationRepo = createPaidOperationRepo(pool, cipher);
+    }
+  }
 
   const app = await createServer({
     config,
@@ -127,6 +159,10 @@ async function main(): Promise<void> {
     storage,
     workerResolver,
     workerClient,
+    paidJobClient,
+    paidOperationRepo,
+    sourceProbe,
+    recoveryOwner,
     routeSelector,
     liveSessions,
     assetRepo,
