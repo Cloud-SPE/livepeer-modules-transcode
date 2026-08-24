@@ -3,12 +3,144 @@ package liverunner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
+	if os.Getenv("LIVE_RUNNER_CONTAINER_TEST") != "1" {
+		t.Skip("set LIVE_RUNNER_CONTAINER_TEST=1 to exercise real MediaMTX HLS")
+	}
+	for _, binary := range []string{"docker", "ffmpeg"} {
+		if _, err := exec.LookPath(binary); err != nil {
+			t.Skip(binary + " is not installed")
+		}
+	}
+	store, _, response, _ := mediaTestSessionV1(t)
+	internalRoot := "0123456789abcdef0123456789abcdef"
+	authorizer := MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: internalRoot}
+	var authMu sync.Mutex
+	var authRequests []MediaMTXAuthRequestV1
+	auth := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var value MediaMTXAuthRequestV1
+		if err := json.NewDecoder(request.Body).Decode(&value); err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		authMu.Lock()
+		authRequests = append(authRequests, value)
+		authMu.Unlock()
+		if !authorizer.Authorize(value) {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer auth.Close()
+	rtmpPort, hlsPort, apiPort, metricsPort := freeTCPPortV1(t), freeTCPPortV1(t), freeTCPPortV1(t), freeTCPPortV1(t)
+	config := DefaultMediaMTXConfigV1(auth.URL)
+	config.RTMPAddress = fmt.Sprintf("127.0.0.1:%d", rtmpPort)
+	config.HLSAddress = fmt.Sprintf("127.0.0.1:%d", hlsPort)
+	config.APIAddress = fmt.Sprintf("127.0.0.1:%d", apiPort)
+	config.MetricsAddress = fmt.Sprintf("127.0.0.1:%d", metricsPort)
+	body, err := RenderMediaMTXConfigV1(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "mediamtx.yml")
+	if err := os.WriteFile(configPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	containerName := fmt.Sprintf("live-runner-hls-real-%d", os.Getpid())
+	cleanupRouter := func() { _ = exec.Command("docker", "rm", "-f", containerName).Run() }
+	cleanupRouter()
+	defer cleanupRouter()
+	router := exec.Command("docker", "run", "--rm", "--network", "host", "--name", containerName, "-v", configPath+":/mediamtx.yml:ro", MediaMTXImageV1)
+	router.Stdout, router.Stderr = io.Discard, io.Discard
+	if err := router.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cleanupRouter(); _ = router.Wait() }()
+	waitForHTTPV1(t, fmt.Sprintf("http://127.0.0.1:%d/v3/paths/list", apiPort), 5*time.Second)
+
+	internalToken := InternalMediaTokenV1(internalRoot, response.RunnerSessionID)
+	publishURL := fmt.Sprintf("rtmp://127.0.0.1:%d/renditions/%s/720p?token=%s", rtmpPort, response.RunnerSessionID, internalToken)
+	publisher := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=44100", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-force_key_frames", "expr:gte(t,n_forced*1)", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "flv", publishURL)
+	publisher.Stdout, publisher.Stderr = io.Discard, io.Discard
+	if err := publisher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = publisher.Process.Kill(); _ = publisher.Wait() }()
+	routerClient, err := NewMediaRouterClientV1(fmt.Sprintf("http://127.0.0.1:%d", apiPort), nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderPath, _ := RenditionMediaPathV1(response.RunnerSessionID, "720p")
+	publishContext, cancelPublish := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelPublish()
+	if _, err := routerClient.WaitForRTMPPublisher(publishContext, renderPath, 20*time.Millisecond); err != nil {
+		t.Fatalf("real rendition publisher did not come online: %v", err)
+	}
+	jar, _ := cookiejar.New(nil)
+	directClient := &http.Client{Timeout: 10 * time.Second, Jar: jar}
+	directResponse, directErr := directClient.Get(fmt.Sprintf("http://127.0.0.1:%d/%s/index.m3u8", hlsPort, renderPath))
+	if directErr != nil {
+		t.Fatalf("direct MediaMTX HLS request failed: %v", directErr)
+	}
+	directResponse.Body.Close()
+	if directResponse.StatusCode != http.StatusOK {
+		t.Fatalf("direct MediaMTX HLS status=%d", directResponse.StatusCode)
+	}
+
+	handler, err := NewHLSHandlerV1(store, testLivePresetsV1(), fmt.Sprintf("http://127.0.0.1:%d", hlsPort), nil, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	var playlist *httptest.ResponseRecorder
+	for time.Now().Before(deadline) {
+		playlist = hlsRequestV1(t, handler, response.RunnerSessionID, "720p/index.m3u8", "")
+		if playlist.Code == http.StatusOK && strings.Contains(playlist.Body.String(), "video1_stream.m3u8") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if playlist == nil || playlist.Code != http.StatusOK || !strings.Contains(playlist.Body.String(), "video1_stream.m3u8") {
+		t.Fatalf("real LL-HLS playlist status=%d body=%q", playlist.Code, playlist.Body.String())
+	}
+	parts := hlsRequestV1(t, handler, response.RunnerSessionID, "720p/video1_stream.m3u8", "")
+	if parts.Code != http.StatusOK || !strings.Contains(parts.Body.String(), "#EXT-X-PART") {
+		authMu.Lock()
+		safeAuth := make([]string, 0, len(authRequests))
+		for _, value := range authRequests {
+			safeAuth = append(safeAuth, value.Protocol+":"+value.Action+":"+value.Path)
+		}
+		authMu.Unlock()
+		handler.mu.RLock()
+		cookieNames := make([]string, 0, len(handler.cookies[response.RunnerSessionID]))
+		for _, cookie := range handler.cookies[response.RunnerSessionID] {
+			cookieNames = append(cookieNames, cookie.Name+":"+cookie.Path)
+		}
+		handler.mu.RUnlock()
+		t.Fatalf("real LL-HLS parts=%d %q auth=%v cookies=%v", parts.Code, parts.Body.String(), safeAuth, cookieNames)
+	}
+	master := hlsRequestV1(t, handler, response.RunnerSessionID, "master.m3u8", "")
+	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") {
+		t.Fatalf("real HLS master=%d %q", master.Code, master.Body.String())
+	}
+	cleanupRouter()
+}
 
 func TestHLSHandlerServesMasterAndStrictRenditionAssets(t *testing.T) {
 	var upstreamRequest *http.Request

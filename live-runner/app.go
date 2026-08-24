@@ -14,26 +14,27 @@ import (
 )
 
 type LiveRunnerConfigV1 struct {
-	ListenAddress   string
-	StateDirectory  string
-	MasterKey       []byte
-	BrokerToken     string
-	InternalToken   string
-	PublicRTMPURL   string
-	PublicHLSBase   string
-	PublicAPIBase   string
-	PresetsFile     string
-	MediaMTXBinary  string
-	MediaMTXConfig  string
-	MediaMTX        MediaMTXConfigV1
-	RouterRTMPBase  string
-	MaxConcurrent   int
-	StartupTimeout  time.Duration
-	ShutdownTimeout time.Duration
-	RouterPoll      time.Duration
-	RequestTimeout  time.Duration
-	GrantTTL        time.Duration
-	StreamKeyTTL    time.Duration
+	ListenAddress    string
+	StateDirectory   string
+	MasterKey        []byte
+	BrokerToken      string
+	InternalToken    string
+	PublicRTMPURL    string
+	PublicHLSBase    string
+	PublicAPIBase    string
+	PresetsFile      string
+	MediaMTXBinary   string
+	MediaMTXConfig   string
+	MediaMTX         MediaMTXConfigV1
+	RouterRTMPBase   string
+	MaxConcurrent    int
+	StartupTimeout   time.Duration
+	ShutdownTimeout  time.Duration
+	RouterPoll       time.Duration
+	RequestTimeout   time.Duration
+	HLSHeaderTimeout time.Duration
+	GrantTTL         time.Duration
+	StreamKeyTTL     time.Duration
 }
 
 func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, error) {
@@ -103,6 +104,7 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 		RouterRTMPBase: valueOrV1(getenv("LIVE_RUNNER_ROUTER_RTMP_BASE"), "rtmp://127.0.0.1:1935"),
 		MaxConcurrent:  maxConcurrent, StartupTimeout: 30 * time.Second, ShutdownTimeout: 30 * time.Second,
 		RouterPoll: 100 * time.Millisecond, RequestTimeout: 2 * time.Second, GrantTTL: time.Hour, StreamKeyTTL: 10 * time.Minute,
+		HLSHeaderTimeout: 15 * time.Second,
 	}
 	config.MediaMTXConfig = config.StateDirectory + "/mediamtx.yml"
 	config.MediaMTX = DefaultMediaMTXConfigV1(valueOrV1(getenv("LIVE_RUNNER_MEDIAMTX_AUTH_URL"), "http://127.0.0.1:8080/internal/mediamtx/auth"))
@@ -153,7 +155,7 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err := RecoverLiveSessionsV1(ctx, store, runtime, time.Now); err != nil {
 		return err
 	}
-	hls, err := NewHLSHandlerV1(store, presets, "http://"+config.MediaMTX.HLSAddress, nil, config.RequestTimeout)
+	hls, err := NewHLSHandlerV1(store, presets, "http://"+config.MediaMTX.HLSAddress, nil, config.HLSHeaderTimeout)
 	if err != nil {
 		return err
 	}

@@ -68,8 +68,10 @@ The advertised public HLS route synthesizes one deterministic master playlist
 from the session's durable output profile. Rendition playlists, parts,
 initialization fragments, and segments are streamed from loopback MediaMTX
 through an allowlisted same-origin proxy. It forwards no customer headers or
-cookies, follows no redirects, and marks every response `no-store`; stopping
-and terminal sessions are unavailable immediately.
+cookies, permits only MediaMTX's exact same-path internal cookie handshake,
+follows no other redirects, and marks every response `no-store`; stopping and
+terminal sessions are unavailable immediately. The MediaMTX session cookie
+never crosses the public runner boundary.
 
 ## Runner surface
 

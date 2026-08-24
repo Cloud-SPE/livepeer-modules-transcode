@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	transcode "github.com/Cloud-SPE/livepeer-modules-transcode/transcode-core"
@@ -21,6 +22,8 @@ type HLSHandlerV1 struct {
 	presets map[string]transcode.ABRPreset
 	baseURL string
 	client  *http.Client
+	mu      sync.RWMutex
+	cookies map[string][]*http.Cookie
 }
 
 func NewHLSHandlerV1(store *EncryptedFileSessionStoreV1, presets []transcode.ABRPreset, upstream string, transport http.RoundTripper, timeout time.Duration) (*HLSHandlerV1, error) {
@@ -38,10 +41,13 @@ func NewHLSHandlerV1(store *EncryptedFileSessionStoreV1, presets []transcode.ABR
 		byName[strings.ToLower(preset.Name)] = preset
 	}
 	if transport == nil {
-		transport = http.DefaultTransport
+		base := http.DefaultTransport.(*http.Transport).Clone()
+		base.ResponseHeaderTimeout = timeout
+		base.DisableCompression = true
+		transport = base
 	}
-	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), client: &http.Client{
-		Transport: transport, Timeout: timeout,
+	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), cookies: make(map[string][]*http.Cookie), client: &http.Client{
+		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}, nil
 }
@@ -72,7 +78,7 @@ func (h *HLSHandlerV1) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		writeRunnerErrorV1(writer, http.StatusNotFound, "asset_not_found")
 		return
 	}
-	h.proxyAsset(writer, request, renderPath)
+	h.proxyAsset(writer, request, record.RunnerSessionID, renderPath)
 }
 
 func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Request, preset transcode.ABRPreset) {
@@ -98,7 +104,7 @@ func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Req
 	}
 }
 
-func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Request, mediaPath string) {
+func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Request, runnerID, mediaPath string) {
 	upstream, err := http.NewRequestWithContext(request.Context(), request.Method, h.baseURL+"/"+mediaPath, nil)
 	if err != nil {
 		writeRunnerErrorV1(writer, http.StatusBadGateway, "media_unavailable")
@@ -108,6 +114,7 @@ func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Requ
 	if value := request.Header.Get("Range"); value != "" {
 		upstream.Header.Set("Range", value)
 	}
+	h.addSessionCookies(runnerID, upstream)
 	response, err := h.client.Do(upstream)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -116,12 +123,14 @@ func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Requ
 		writeRunnerErrorV1(writer, http.StatusBadGateway, "media_unavailable")
 		return
 	}
-	defer response.Body.Close()
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		writeRunnerErrorV1(writer, http.StatusBadGateway, "media_unavailable")
-		return
+		response, err = h.followMediaMTXCookieCheck(request.Context(), runnerID, upstream, response)
+		if err != nil {
+			writeRunnerErrorV1(writer, http.StatusBadGateway, "media_unavailable")
+			return
+		}
 	}
+	defer response.Body.Close()
 	for _, name := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
 		if value := response.Header.Get(name); value != "" {
 			writer.Header().Set(name, value)
@@ -132,6 +141,73 @@ func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Requ
 	if request.Method == http.MethodGet {
 		_, _ = io.Copy(writer, response.Body)
 	}
+}
+
+func (h *HLSHandlerV1) followMediaMTXCookieCheck(ctx context.Context, runnerID string, original *http.Request, redirect *http.Response) (*http.Response, error) {
+	defer redirect.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(redirect.Body, 4096))
+	location, err := redirect.Location()
+	if err != nil || location.Scheme != original.URL.Scheme || location.Host != original.URL.Host || location.Path != original.URL.Path {
+		return nil, errors.New("untrusted HLS redirect")
+	}
+	query := location.Query()
+	if query.Get("cookieCheck") != "1" || len(query["cookieCheck"]) != 1 {
+		return nil, errors.New("untrusted HLS redirect")
+	}
+	query.Del("cookieCheck")
+	if query.Encode() != original.URL.Query().Encode() || len(redirect.Cookies()) == 0 {
+		return nil, errors.New("untrusted HLS redirect")
+	}
+	follow, err := http.NewRequestWithContext(ctx, original.Method, location.String(), nil)
+	if err != nil {
+		return nil, errors.New("HLS cookie check request failed")
+	}
+	follow.Header.Set("Range", original.Header.Get("Range"))
+	for _, cookie := range redirect.Cookies() {
+		follow.AddCookie(cookie)
+	}
+	h.storeSessionCookies(runnerID, redirect.Cookies())
+	response, err := h.client.Do(follow)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		response.Body.Close()
+		return nil, errors.New("repeated HLS redirect")
+	}
+	h.storeSessionCookies(runnerID, response.Cookies())
+	return response, nil
+}
+
+func (h *HLSHandlerV1) addSessionCookies(runnerID string, request *http.Request) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, cookie := range h.cookies[runnerID] {
+		copy := *cookie
+		request.AddCookie(&copy)
+	}
+}
+
+func (h *HLSHandlerV1) storeSessionCookies(runnerID string, cookies []*http.Cookie) {
+	if len(cookies) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	byName := make(map[string]*http.Cookie, len(h.cookies[runnerID])+len(cookies))
+	for _, cookie := range h.cookies[runnerID] {
+		copy := *cookie
+		byName[cookie.Name] = &copy
+	}
+	for _, cookie := range cookies {
+		copy := *cookie
+		byName[cookie.Name] = &copy
+	}
+	merged := make([]*http.Cookie, 0, len(byName))
+	for _, cookie := range byName {
+		merged = append(merged, cookie)
+	}
+	h.cookies[runnerID] = merged
 }
 
 func renditionAssetPathV1(runnerID string, preset transcode.ABRPreset, asset string) (string, bool) {
