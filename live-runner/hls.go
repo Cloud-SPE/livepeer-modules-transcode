@@ -69,6 +69,11 @@ func (h *HLSHandlerV1) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	asset := request.PathValue("asset")
+	if rendition := request.PathValue("rendition"); rendition != "" {
+		asset = rendition + "/" + asset
+	} else if asset == "" && strings.HasSuffix(request.URL.Path, "/master.m3u8") {
+		asset = "master.m3u8"
+	}
 	if asset == "master.m3u8" {
 		h.serveMaster(writer, request, preset)
 		return

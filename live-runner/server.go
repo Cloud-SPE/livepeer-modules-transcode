@@ -125,9 +125,13 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 	mux.Handle("POST /v1/sessions", s.brokerAuthV1(http.HandlerFunc(s.handleCreateV1)))
 	mux.Handle("GET /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleStatusV1)))
 	mux.HandleFunc("GET /v1/public/sessions/{id}/status", s.handleStatusV1)
+	mux.HandleFunc("HEAD /v1/public/sessions/{id}/status", func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Allow", "GET")
+		writeRunnerErrorV1(writer, http.StatusMethodNotAllowed, "method_not_allowed")
+	})
 	if s.HLS != nil {
-		mux.Handle("GET /v1/public/sessions/{id}/{asset...}", s.HLS)
-		mux.Handle("HEAD /v1/public/sessions/{id}/{asset...}", s.HLS)
+		mux.Handle("GET /v1/public/sessions/{id}/master.m3u8", s.HLS)
+		mux.Handle("GET /v1/public/sessions/{id}/{rendition}/{asset}", s.HLS)
 	}
 	mux.Handle("DELETE /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleTerminateV1)))
 	mux.HandleFunc("POST /v1/sessions/{id}/stream-keys", s.handleStreamKeyV1)

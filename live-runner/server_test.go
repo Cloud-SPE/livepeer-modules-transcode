@@ -308,6 +308,29 @@ func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
 	}
 }
 
+func TestLiveRunnerProductionMuxSeparatesStatusAndHLSHeadRoutes(t *testing.T) {
+	server := testLiveRunnerServerV1(t, &fakeLiveRuntimeV1{})
+	type routedRequest struct{ method, id, rendition, asset string }
+	var routed []routedRequest
+	server.HLS = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		routed = append(routed, routedRequest{request.Method, request.PathValue("id"), request.PathValue("rendition"), request.PathValue("asset")})
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler, err := server.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := runnerRequestV1(t, handler, http.MethodGet, "/v1/public/sessions/runner_mux/master.m3u8", nil, "")
+	asset := runnerRequestV1(t, handler, http.MethodHead, "/v1/public/sessions/runner_mux/720p/index.m3u8", nil, "")
+	statusHead := runnerRequestV1(t, handler, http.MethodHead, "/v1/public/sessions/runner_mux/status", nil, "")
+	if master.Code != http.StatusNoContent || asset.Code != http.StatusNoContent || statusHead.Code != http.StatusMethodNotAllowed || statusHead.Header().Get("Allow") != "GET" {
+		t.Fatalf("master=%d asset=%d status HEAD=%d allow=%q", master.Code, asset.Code, statusHead.Code, statusHead.Header().Get("Allow"))
+	}
+	if len(routed) != 2 || routed[0] != (routedRequest{http.MethodGet, "runner_mux", "", ""}) || routed[1] != (routedRequest{http.MethodHead, "runner_mux", "720p", "index.m3u8"}) {
+		t.Fatalf("HLS routes=%+v", routed)
+	}
+}
+
 func testLiveRunnerHandlerV1(t *testing.T) (http.Handler, *EncryptedFileSessionStoreV1, *fakeLiveRuntimeV1) {
 	t.Helper()
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x66}, 32))
