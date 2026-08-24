@@ -343,6 +343,49 @@ func (s *EncryptedFileSessionStoreV1) RecordFinalizedSegments(brokerSessionID st
 	return emitted, s.saveLocked(record)
 }
 
+func (s *EncryptedFileSessionStoreV1) RecordHeartbeat(brokerSessionID string, eventTime time.Time, minimumInterval time.Duration) (bool, error) {
+	if eventTime.IsZero() || minimumInterval <= 0 {
+		return false, errors.New("heartbeat time and interval are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, _, err := s.loadLocked(brokerSessionID)
+	if err != nil {
+		return false, err
+	}
+	if record.State != "active" || record.Stopping {
+		return false, ErrSessionTerminalV1
+	}
+	if record.LastSequence == 0 {
+		return false, errors.New("session start must be recorded before heartbeat")
+	}
+	if record.LastEventAt != "" {
+		last, err := time.Parse(time.RFC3339Nano, record.LastEventAt)
+		if err != nil {
+			return false, errors.New("durable event time is invalid")
+		}
+		if eventTime.Before(last.Add(minimumInterval)) {
+			return false, nil
+		}
+	}
+	if record.LastSequence == ^uint64(0) {
+		return false, errors.New("event sequence overflow")
+	}
+	sequence := record.LastSequence + 1
+	event := RunnerEventV1{
+		EventID: record.RunnerSessionID + ":" + strconv.FormatUint(sequence, 10), Sequence: sequence,
+		EventType: "session.heartbeat", EventTime: eventTime.UTC().Format(time.RFC3339Nano), State: "active",
+		Usage: &UsageV1{Unit: WorkUnitV1, Total: record.UsageTotal}, Details: json.RawMessage(`{}`),
+	}
+	if err := ValidateEventV1(event); err != nil {
+		return false, err
+	}
+	record.LastSequence = sequence
+	record.LastEventAt = event.EventTime
+	record.PendingEvents = append(record.PendingEvents, event)
+	return true, s.saveLocked(record)
+}
+
 func (s *EncryptedFileSessionStoreV1) BeginTermination(brokerSessionID, reason string) (SessionRecordV1, bool, error) {
 	if !validCloseReasonV1(reason) {
 		return SessionRecordV1{}, false, errors.New("termination reason is invalid")

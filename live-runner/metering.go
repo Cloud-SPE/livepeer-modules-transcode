@@ -2,10 +2,14 @@ package liverunner
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
+	"net/http"
+	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const maxMediaPlaylistBytesV1 = 1 << 20
@@ -116,4 +120,126 @@ func parseHLSMicrosecondsV1(raw string) (uint64, error) {
 		return 0, errors.New("HLS segment duration is invalid")
 	}
 	return duration, nil
+}
+
+type LiveOutputMeterV1 struct {
+	store             *EncryptedFileSessionStoreV1
+	hls               *HLSHandlerV1
+	pollInterval      time.Duration
+	heartbeatInterval time.Duration
+	now               func() time.Time
+}
+
+func NewLiveOutputMeterV1(store *EncryptedFileSessionStoreV1, hls *HLSHandlerV1, pollInterval, heartbeatInterval time.Duration) (*LiveOutputMeterV1, error) {
+	if store == nil || hls == nil || pollInterval <= 0 || heartbeatInterval <= 0 || pollInterval > heartbeatInterval {
+		return nil, errors.New("live output meter dependencies are invalid")
+	}
+	return &LiveOutputMeterV1{store: store, hls: hls, pollInterval: pollInterval, heartbeatInterval: heartbeatInterval, now: time.Now}, nil
+}
+
+// Run polls the one rendition named by the immutable session parameters. A
+// bad or unavailable playlist is non-billable input: the meter keeps liveness
+// heartbeats flowing and retries without changing the segment cursor.
+func (m *LiveOutputMeterV1) Run(ctx context.Context, record SessionRecordV1, secrets SessionSecretsV1) {
+	renderPath, err := RenditionMediaPathV1(record.RunnerSessionID, secrets.CreateRequest.SessionParams.MeteringRendition)
+	if err != nil {
+		return
+	}
+	m.poll(ctx, record, renderPath)
+	ticker := time.NewTicker(m.pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.poll(ctx, record, renderPath)
+		}
+	}
+}
+
+func (m *LiveOutputMeterV1) poll(ctx context.Context, record SessionRecordV1, renderPath string) {
+	segments, err := m.finalizedSegments(ctx, record.RunnerSessionID, renderPath)
+	now := m.now()
+	if err == nil {
+		if _, err = m.store.RecordFinalizedSegments(record.BrokerSessionID, segments, now); errors.Is(err, ErrSessionTerminalV1) {
+			return
+		}
+	}
+	_, _ = m.store.RecordHeartbeat(record.BrokerSessionID, now, m.heartbeatInterval)
+}
+
+func (m *LiveOutputMeterV1) finalizedSegments(ctx context.Context, runnerID, renderPath string) ([]FinalizedHLSSegmentV1, error) {
+	master, err := m.fetchPlaylist(ctx, runnerID, renderPath+"/index.m3u8")
+	if err != nil {
+		return nil, err
+	}
+	mediaURI, err := mediaPlaylistURIV1(master)
+	if err != nil {
+		return nil, err
+	}
+	media, err := m.fetchPlaylist(ctx, runnerID, renderPath+"/"+mediaURI)
+	if err != nil {
+		return nil, err
+	}
+	return ParseFinalizedHLSSegmentsV1(strings.NewReader(media))
+}
+
+func (m *LiveOutputMeterV1) fetchPlaylist(ctx context.Context, runnerID, mediaPath string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, m.hls.baseURL+"/"+mediaPath, nil)
+	if err != nil {
+		return "", errors.New("HLS meter request failed")
+	}
+	m.hls.addSessionCookies(runnerID, request)
+	response, err := m.hls.client.Do(request)
+	if err != nil {
+		return "", errors.New("HLS meter request failed")
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		response, err = m.hls.followMediaMTXCookieCheck(ctx, runnerID, request, response)
+		if err != nil {
+			return "", err
+		}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return "", errors.New("HLS meter playlist is unavailable")
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxMediaPlaylistBytesV1+1))
+	if err != nil || len(body) > maxMediaPlaylistBytesV1 {
+		return "", errors.New("HLS meter playlist is invalid")
+	}
+	return string(body), nil
+}
+
+func mediaPlaylistURIV1(master string) (string, error) {
+	scanner := bufio.NewScanner(strings.NewReader(master))
+	lineNumber := 0
+	wantURI := false
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		if lineNumber == 1 {
+			line = strings.TrimPrefix(line, "\ufeff")
+			if line != "#EXTM3U" {
+				return "", errors.New("HLS master playlist header is invalid")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
+			wantURI = true
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if wantURI && path.Base(line) == line && strings.HasSuffix(line, ".m3u8") && len(line) <= 255 {
+			return line, nil
+		}
+		if wantURI {
+			return "", errors.New("HLS media playlist URI is invalid")
+		}
+	}
+	return "", errors.New("HLS master playlist has no media playlist")
 }

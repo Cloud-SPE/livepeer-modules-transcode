@@ -1,8 +1,14 @@
 package liverunner
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseFinalizedHLSSegmentsIgnoresPartsAndAggregatesExactDurations(t *testing.T) {
@@ -46,5 +52,46 @@ func TestParseFinalizedHLSSegmentsRejectsMalformedOrAmbiguousInput(t *testing.T)
 		if segments, err := ParseFinalizedHLSSegmentsV1(strings.NewReader(playlist)); err == nil {
 			t.Fatalf("accepted malformed playlist %q as %+v", playlist, segments)
 		}
+	}
+}
+
+func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Cookie") != "hls_auth=ok" {
+			http.SetCookie(writer, &http.Cookie{Name: "hls_auth", Value: "ok"})
+			http.Redirect(writer, request, server.URL+request.URL.Path+"?cookieCheck=1", http.StatusFound)
+			return
+		}
+		switch request.URL.Path {
+		case "/renditions/runner_meter_001/720p/index.m3u8":
+			_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvideo1_stream.m3u8\n")
+		case "/renditions/runner_meter_001/720p/video1_stream.m3u8":
+			_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-PART:DURATION=0.2,URI=part.mp4\n#EXTINF:1.0,\nsegment.mp4\n")
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x5f}, 32))
+	record, _ := createRuntimeSessionV1(t, store, "sess_meter_001", "runner_meter_001")
+	if err := store.Advance(record.BrokerSessionID, testEventV1(record.RunnerSessionID, 1, "session.started", "active", 0, "")); err != nil {
+		t.Fatal(err)
+	}
+	hls, err := NewHLSHandlerV1(store, testLivePresetsV1(), server.URL, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meter, err := NewLiveOutputMeterV1(store, hls, time.Millisecond, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meter.now = func() time.Time { return time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC) }
+	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
+	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
+	persisted, _, err := store.Load(record.BrokerSessionID)
+	if err != nil || persisted.UsageTotal != 1 || persisted.LastSequence != 2 || len(persisted.MeteredSegmentSHA256) != 1 {
+		t.Fatalf("metered record=%+v err=%v", persisted, err)
 	}
 }

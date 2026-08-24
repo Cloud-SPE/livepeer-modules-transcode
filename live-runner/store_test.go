@@ -186,6 +186,29 @@ func TestEncryptedStoreMetersFinalizedSegmentsExactlyOnceAcrossRestart(t *testin
 	}
 }
 
+func TestEncryptedStoreHeartbeatUsesDurableEventCadence(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x60}, 32))
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	started := testEventV1(response.RunnerSessionID, 1, "session.started", "active", 0, "")
+	if err := store.Advance(request.SessionID, started); err != nil {
+		t.Fatal(err)
+	}
+	startedAt, _ := time.Parse(time.RFC3339Nano, started.EventTime)
+	if emitted, err := store.RecordHeartbeat(request.SessionID, startedAt.Add(4*time.Second), 5*time.Second); err != nil || emitted {
+		t.Fatalf("early heartbeat emitted=%v err=%v", emitted, err)
+	}
+	if emitted, err := store.RecordHeartbeat(request.SessionID, startedAt.Add(5*time.Second), 5*time.Second); err != nil || !emitted {
+		t.Fatalf("due heartbeat emitted=%v err=%v", emitted, err)
+	}
+	record, _, err := store.Load(request.SessionID)
+	if err != nil || record.LastSequence != 2 || len(record.PendingEvents) != 2 || record.PendingEvents[1].EventType != "session.heartbeat" || record.PendingEvents[1].Usage == nil || record.PendingEvents[1].Usage.Total != 0 {
+		t.Fatalf("heartbeat record=%+v err=%v", record, err)
+	}
+}
+
 func TestEncryptedStoreRejectsTamperedState(t *testing.T) {
 	dir := t.TempDir()
 	store := newTestStoreV1(t, dir, bytes.Repeat([]byte{0x6e}, 32))
