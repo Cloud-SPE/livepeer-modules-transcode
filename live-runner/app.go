@@ -153,11 +153,15 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err := RecoverLiveSessionsV1(ctx, store, runtime, time.Now); err != nil {
 		return err
 	}
+	hls, err := NewHLSHandlerV1(store, presets, "http://"+config.MediaMTX.HLSAddress, nil, config.RequestTimeout)
+	if err != nil {
+		return err
+	}
 	factory := RunnerResponseFactoryV1{PublicRTMPURL: config.PublicRTMPURL, PublicHLSBase: config.PublicHLSBase, PublicAPIBase: config.PublicAPIBase, GrantTTL: config.GrantTTL}
 	if err := factory.Validate(); err != nil {
 		return err
 	}
-	serverDefinition := &LiveRunnerServerV1{Store: store, Runtime: runtime, Factory: factory, BrokerToken: config.BrokerToken, KeyTTL: config.StreamKeyTTL, Ready: supervisor.Ready}
+	serverDefinition := &LiveRunnerServerV1{Store: store, Runtime: runtime, Factory: factory, BrokerToken: config.BrokerToken, KeyTTL: config.StreamKeyTTL, Ready: supervisor.Ready, HLS: hls}
 	handler, err := serverDefinition.Handler(MediaMTXAuthorizerV1{Sessions: store, InternalTokenRoot: config.InternalToken})
 	if err != nil {
 		return err

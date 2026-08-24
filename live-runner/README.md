@@ -64,6 +64,13 @@ publishes the selected ladder back to the private rendition paths. Publisher
 disconnects or transient launch failures return to the watch loop; runner
 termination and process shutdown cancel and join the FFmpeg process.
 
+The advertised public HLS route synthesizes one deterministic master playlist
+from the session's durable output profile. Rendition playlists, parts,
+initialization fragments, and segments are streamed from loopback MediaMTX
+through an allowlisted same-origin proxy. It forwards no customer headers or
+cookies, follows no redirects, and marks every response `no-store`; stopping
+and terminal sessions are unavailable immediately.
+
 ## Runner surface
 
 Paths are operator-configured in Modules; these are this runner's declared

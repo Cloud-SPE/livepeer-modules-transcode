@@ -112,6 +112,7 @@ type LiveRunnerServerV1 struct {
 	Now         func() time.Time
 	Random      func(int) ([]byte, error)
 	Ready       func() bool
+	HLS         http.Handler
 	locksMu     sync.Mutex
 	locks       map[string]*sync.Mutex
 }
@@ -124,6 +125,10 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 	mux.Handle("POST /v1/sessions", s.brokerAuthV1(http.HandlerFunc(s.handleCreateV1)))
 	mux.Handle("GET /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleStatusV1)))
 	mux.HandleFunc("GET /v1/public/sessions/{id}/status", s.handleStatusV1)
+	if s.HLS != nil {
+		mux.Handle("GET /v1/public/sessions/{id}/{asset...}", s.HLS)
+		mux.Handle("HEAD /v1/public/sessions/{id}/{asset...}", s.HLS)
+	}
 	mux.Handle("DELETE /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleTerminateV1)))
 	mux.HandleFunc("POST /v1/sessions/{id}/stream-keys", s.handleStreamKeyV1)
 	mux.HandleFunc("GET /v1/describe", s.handleDescribeV1)
