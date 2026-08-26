@@ -1,9 +1,8 @@
 # Live pipeline (RTMP + LL-HLS)
 
-This document defines the Modules v2 target. Live is session work, not a long
-job: the gateway uses `paid-session/v1` and the capability-owned
-`rtmp-hls/v1` descriptor. The current v0 open/close path is removed at the
-coordinated cutover.
+This document defines the implemented Modules v2 live pipeline. Live is
+session work, not a long job: the gateway uses `paid-session/v1` and the
+capability-owned `rtmp-hls/v1` descriptor. There is no legacy open/close path.
 
 ## Customer surface
 

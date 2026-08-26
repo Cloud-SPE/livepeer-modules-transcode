@@ -1,8 +1,8 @@
 # Transcode pipeline (VOD)
 
-This document defines the Modules v2 target. The currently shipped gateway
-still dispatches legacy per-job mode requests; plan 0018 replaces that path
-without backward compatibility.
+This document defines the implemented Modules v2 VOD pipeline. The gateway
+dispatches one recoverable `paid-job/v1` ABR exchange through LOC and contains
+no legacy per-rendition payment path.
 
 ## Customer surface
 

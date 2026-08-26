@@ -16,11 +16,11 @@ each component's `AGENTS.md` and `README.md` only.
 | [dependencies.md](./dependencies.md) | active | Required LOC, broker, resolver, storage, database, and email boundaries |
 | [frontend-dom-and-css-invariants.md](./frontend-dom-and-css-invariants.md) | active | Lit, light DOM, semantic HTML, no inline CSS, styling only from checked-in CSS files |
 
-Stubs (to be written as the porting roadmap surfaces them):
+Related operational contracts:
 
 | Doc | Status | What it will cover |
 |---|---|---|
-| `operator-runbook.md` | stub | Deployment, env-var matrix, smoke procedure, GPU passthrough recipes |
+| [Modules v2 operations](../runbooks/modules-v2-operations.md) | active | Environment, monitoring, recovery, deployment, and rollback |
 | `data-model.md` | stub | `media.*` schema + `auth.*` schema reference (canonicalized once migrations land) |
 | `error-taxonomy.md` | stub | HTTP error shape + `Livepeer-Error` header values used by gateway |
 

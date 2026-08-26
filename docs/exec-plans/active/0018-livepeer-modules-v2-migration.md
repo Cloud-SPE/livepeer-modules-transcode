@@ -2,7 +2,7 @@
 plan: 0018
 title: Breaking migration to Livepeer Modules v2
 status: active
-phase: implementation
+phase: release-validation
 opened: 2026-08-22
 owner: livepeer-modules-transcode
 tracker: Beads epic lmt-65a
@@ -23,9 +23,9 @@ ambiguous open compensation, usage scraping, and volatile live-session state.
 Modules v2 replaces that seam with idempotent `paid-job/v1` and
 `paid-session/v1`; LOC becomes the gateway's payment and settlement boundary.
 
-This is a retrofit, not a compatibility project. The final release deletes
-the old wire path. During implementation, references to v0 in source describe
-work still to remove and do not define an alternate supported deployment.
+This is a retrofit, not a compatibility project. The old wire path has been
+deleted. The plan remains active for upstream readiness evidence, the joint
+release matrix, and coordinated deployment/rollback acceptance.
 
 ## Locked product contracts
 
@@ -66,11 +66,9 @@ are navigation, not a second task list.
 | `lmt-65a.4` | Live session runner/descriptor, private-key relay, bounded funding, recovery, and integration |
 | `lmt-65a.5` | Cross-repo release matrix, deletion of v0, security/quality gates, deployment, and rollback drill |
 
-Implementation should move from shared persistence and the LOC boundary into
-the job/session clients, then into product-specific orchestration. Unit and
-contract tests precede destructive removal of the v0 path. The old path is
-deleted only after both new products pass integrated tests, but it is never
-offered as runtime fallback.
+The repository-local slices through v2 orchestration, recovery, status
+surfaces, and destructive legacy removal have landed. Beads now gates the
+remaining real-process and release work.
 
 ## External release gates
 

@@ -38,7 +38,7 @@ LOC. Brokers dispatch FFmpeg work to the Go runners.
 ## Load-bearing boundaries
 
 - **Breaking cutover.** No v0 dual stack or fallback. `/v1/cap`, legacy mode
-  headers/adapters, and direct payer-daemon code are deleted before release.
+  headers/adapters, and direct payer-daemon code have been deleted.
 - **LOC-only payment seam.** LOC owns payment headers, funding, claims,
   settlement, and recovery. Product pricing remains a separate concern.
 - **Resolver-only discovery.** No static broker URL.
@@ -49,10 +49,10 @@ LOC. Brokers dispatch FFmpeg work to the Go runners.
 
 ## Migration state
 
-The initial v0 port has shipped, and its implementation remains in this
-branch while plan 0018 is active. The documents under `docs/design-docs/`
-define the replacement architecture; they do not claim the source migration
-is complete. Beads epic `lmt-65a` is the authoritative status graph.
+The local gateway and runners implement the v2 architecture. Plan 0018 stays
+active while the immutable Modules/LOC release evidence, real-process matrix,
+deployment, and rollback gates remain outstanding. Beads epic `lmt-65a` is
+the authoritative status graph.
 
 Customer pricing/Stripe, projects, webhooks, and live-to-VOD recording remain
 out of scope. LOC network settlement does not introduce those product

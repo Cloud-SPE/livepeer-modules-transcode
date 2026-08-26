@@ -1,9 +1,8 @@
 # Architecture overview
 
-This is the target architecture for the breaking Livepeer Modules v2
-cutover. The current gateway still contains v0 mode adapters and a direct
-payer-daemon client while plan 0018 is active; those are migration inputs,
-not supported compatibility paths.
+This is the implemented architecture for the breaking Livepeer Modules v2
+cutover. The gateway contains no legacy mode adapter or direct payer client;
+remaining plan 0018 work is release evidence and coordinated deployment.
 
 ## Shape in one sentence
 

@@ -34,7 +34,13 @@ services:
       LOG_LEVEL: info
       ALLOWED_ORIGINS: "*"
       # RESEND_API_KEY unset — emails logged, not sent
-      # RTMP relay opt-in (plan 0007). Uncomment to enable:
+      # Modules v2 requires a resolver socket, LOC URL/key, and an external
+      # 32-byte wrapping key. Keep real secrets outside checked-in compose:
+      # LIVEPEER_RESOLVER_SOCKET: /run/livepeer/resolver.sock
+      # LIVEPEER_LOC_URL: http://loc:8080
+      # LIVEPEER_LOC_API_KEY: supplied-by-secret-manager
+      # LIVEPEER_OPERATION_SECRETS_KEK: supplied-by-secret-manager
+      # RTMP relay opt-in. Uncomment to enable:
       # LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL: rtmp://localhost:1935/live
       # RTMP_LISTEN_PORT: "1935"
     ports:

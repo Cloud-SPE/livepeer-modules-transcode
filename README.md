@@ -23,7 +23,7 @@ A single deployable product:
   (`transcode-core/`) and a multi-stage codec base image
   (`codecs-builder/`).
 - A Node integration smoke harness (`transcode-tester/`).
-- Three zero-build Lit web-component frontends — a waitlist signup
+- Three Vite-built Lit web-component frontends — a waitlist signup
   site (`site/`), an authenticated user portal (`portal/`), and an
   operator admin dashboard (`admin/`) — modeled after Blue Claw
   Network's onboarding flow (waitlist → admin approval → emailed API
@@ -47,13 +47,15 @@ for the peer-service inventory see
 
 ## Status
 
-**Initial port complete; breaking Livepeer Modules v2 migration active.** All
-gateway, runner, frontend, and smoke-harness components in the original
-roadmap have shipped. The completed roadmap is
+**Modules v2 implementation complete; coordinated release gates active.** The
+gateway, runners, recovery paths, v2 status surfaces, and legacy-code deletion
+have landed. Production release still waits on the pinned Modules/LOC
+evidence, real-process matrix, deployment, and rollback gates tracked by
+Beads epic `lmt-65a`. The completed initial roadmap is
 [`docs/exec-plans/completed/0001-initial-port-roadmap.md`](./docs/exec-plans/completed/0001-initial-port-roadmap.md).
-Current work is tracked in Beads epic `lmt-65a` and explained by
+The breaking release is explained by
 [`plan 0018`](./docs/exec-plans/active/0018-livepeer-modules-v2-migration.md).
-The present branch is not a v2-compatible release until that plan completes.
+The present branch must not be deployed as a mixed-version release.
 
 ## Setup (fresh clone)
 
@@ -116,6 +118,8 @@ This repo follows the agent-first harness pattern documented in
 ├── .tool-versions / .nvmrc / .npmrc
 ├── docs/                  # All design / plan / reference docs (single root)
 │   ├── design-docs/       # start at index.md
+│   ├── api/               # OpenAPI contracts
+│   ├── runbooks/          # deployment and recovery procedures
 │   ├── exec-plans/        # active/, completed/, tech-debt-tracker.md
 │   ├── product-specs/     # cross-cutting feature specs (TBD)
 │   ├── generated/         # machine-produced reference (dep graphs, SBOMs)

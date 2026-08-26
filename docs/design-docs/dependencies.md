@@ -1,8 +1,8 @@
 # Dependencies
 
-The Modules v2 target boundary. Peer services live outside this repository
-and must form one compatible release set. The current direct payer-daemon
-client is legacy migration code and is removed by plan 0018.
+The Modules v2 boundary. Peer services live outside this repository and must
+form one compatible release set. The gateway has no direct payer-daemon
+client; LOC is the exclusive network-payment boundary.
 
 ## Required external services
 
@@ -68,11 +68,10 @@ safe local email sink; raw secrets must not be written to production logs.
 
 ## Key TypeScript dependencies
 
-- Fastify, Postgres/Drizzle, Redis, AWS S3 SDK, RTMP runtime, RxJS, Zod,
-  Resend, and the LOC TypeScript SDK.
+- Fastify, Postgres/Drizzle, AWS S3 SDK, RTMP runtime, Zod, and the local
+  strict LOC HTTP adapter.
 - Resolver protobuf/gRPC support remains for `service-registry-daemon`.
-- Direct payer-daemon protobufs and client libraries are removed once LOC is
-  integrated, unless another resolver RPC still requires the same runtime.
+- No direct payer-daemon protobuf or client library is shipped.
 
 ## Deliberately excluded
 

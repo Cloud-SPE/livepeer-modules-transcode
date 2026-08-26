@@ -9,9 +9,9 @@ emailed API key + portal login) and — as later plans land — the
 
 ## Status
 
-**Initial port complete; Modules v2 migration in progress.** The component
-ships the auth, VOD, live, playback, resolver, payment, and operator surfaces
-from completed plans 0002–0017. Representative customer/auth routes include:
+**Modules v2 implementation complete; release validation in progress.** The
+component ships auth, VOD/live paid protocols, durable recovery, playback,
+resolver/LOC, and operator surfaces. Representative routes include:
 
 - `POST   /api/v1/health`
 - `POST   /api/v1/waitlist` — public waitlist signup
@@ -27,6 +27,7 @@ from completed plans 0002–0017. Representative customer/auth routes include:
 - `POST   /api/v1/admin/waitlist/reject` — batch reject
 - `DELETE /api/v1/admin/waitlist/:id` — delete
 - `GET    /api/v1/admin/stats` — dashboard stats
+- `GET    /api/v1/admin/operations` — safe v2 lifecycle diagnostics
 
 The full historical component sequence is in the
 [`completed initial-port roadmap`](../docs/exec-plans/completed/0001-initial-port-roadmap.md).
@@ -36,7 +37,7 @@ in [`../docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md`](..
 Selected routes preserve `paid-job/v1` / `paid-session/v1` axes, work-unit
 estimators, quote fingerprints, price denominators, and overlapping delegated
 settlement keys. Unsupported protocols, ABR transports, and live descriptor
-schemas are rejected during route selection, before payment minting or session
+schemas are rejected during route selection, before LOC funding or session
 open.
 
 Migrations `0003_paid_operations_v2.sql` and
@@ -49,9 +50,9 @@ mutation and secret read. Runner credentials, exact open intent, grants, and
 session parameters live only in a separate envelope-encrypted table and are
 deleted atomically when an operation becomes terminal. The
 `PaidSessionStore` is the process boundary for claiming and advancing that
-state; startup reconciliation is completed by the later live-winddown work.
-The v2 clients are not wired yet; Beads epic `lmt-65a` tracks that remaining
-cutover work.
+state. Startup reconciliation replays incomplete opens/key issuance, repairs
+active playback/relay state, and resumes authoritative status or winddown.
+Beads epic `lmt-65a` tracks external evidence and release acceptance.
 
 ## Build + run
 

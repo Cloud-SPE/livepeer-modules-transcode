@@ -73,19 +73,12 @@ Class naming: kebab-case, component-scoped by prefix
 (`portal-`, `admin-`, `lmt-`). Example: `.portal-key-display`,
 `.admin-waitlist-row`.
 
-## 5. No build step in v0
+## 5. Vite builds plain Lit modules
 
-All three sites are zero-build: HTML loads ES modules directly from
-`esm.sh` via an importmap, Lit is loaded from CDN, components are
-written as ES modules that browsers run natively. The dev server only
-serves static files and proxies `/api/*`.
-
-**Why:** No webpack / vite config to maintain, no build cache to
-debug, no source-map drift between dev and prod. Lit-on-CDN is the
-simplest viable stack for the small frontends this module needs.
-
-If a frontend genuinely needs bundling later (e.g. for a large
-playground UI), that's a deliberate exec-plan, not a casual addition.
+All three sites use Vite for development and production bundling. Components
+remain plain JavaScript ES modules with Lit as the only UI runtime. Each
+package must pass `pnpm build`; frontend logic with lifecycle consequences
+also carries Node-native unit tests where it can be kept DOM-independent.
 
 ## 6. Accessibility floor
 

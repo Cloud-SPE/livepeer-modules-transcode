@@ -4,42 +4,18 @@ Current state of work in this repo, plus pointers to active plans.
 
 ## Current state
 
-**Docs scaffold + auth + engine + wire + VOD + live HTTP surface complete.**
-The repo contains:
+**Local Modules v2 development is complete; release acceptance remains.**
+The gateway now uses resolver-selected routes and LOC exclusively. One VOD
+ladder is one durable streaming `paid-job/v1` exchange; live RTMP is one
+recoverable `paid-session/v1` session with separate customer and runner
+credentials, bounded refills, rotation/rebind, authoritative reconciliation,
+and settlement-safe winddown. Public/admin lifecycle surfaces and OpenAPI are
+shipped. The legacy mode, direct payer, compatibility proto, and mock stack
+have been deleted.
 
-- The agent-first harness scaffold per plan 0001.
-- A bootable `transcode-gateway/` Fastify service with the Blueclaw-shaped
-  auth surface per plan 0002.
-- The TS engine + `media.*` schema + concrete drizzle repos per plan 0003.
-- The wire layer (capability map, headers, payment minting via
-  payer-daemon UDS, resolver-aware route selector against
-  `service-registry-daemon`, vendored protos, real worker client +
-  resolver-backed worker resolver) per plan 0004.
-- The VOD route surface per plan 0005: presigned-S3-PUT upload (no tus),
-  API-key-bearer middleware, `POST /v1/uploads`,
-  `POST /v1/uploads/:id/complete`, `POST /v1/vod/submit` (fire-and-forget
-  `probeAndSchedule`), `GET /v1/vod/:asset_id`, `GET /v1/videos/assets`,
-  `GET /v1/videos/assets/:id`, `DELETE /v1/videos/assets/:id`. S3
-  storage provider, VOD selection-policy hints, ABR ladder selector.
-- The live HTTP surface per
-  [`docs/exec-plans/completed/0006-live-pipeline-port.md`](./docs/exec-plans/completed/0006-live-pipeline-port.md):
-  `POST /v1/live/streams` (session-open via broker), `GET /v1/live/streams/:id`,
-  `POST /v1/live/streams/:id/end`, `GET /_hls/*` (strict-proxy to broker),
-  `GET /v1/playback/:id` extended to serve live too. `liveSessionDirectory`,
-  `rtmpAdapter`, live half of `selectionPolicy`, plus the gateway RTMP
-  listener shipped by plan 0007.
-- The daemon alignment follow-up per plan 0017: current resolver
-  `SelectMany`, current payer-daemon gRPC `CreatePayment`, vendored
-  payment protos, route quote metadata threaded through the gateway,
-  payment + wire integration tests, and a daemon-backed `e2e` smoke
-  variant with contract-level mock resolver / payer / broker services.
-
-The initial component port is complete, including the three frontends,
-runner integration harness, and compose-stack end-to-end smoke. The next
-major change is the intentionally breaking migration from the v0 broker
-mode taxonomy to `paid-job/v1` for VOD and `paid-session/v1` for live.
-That work and its external release gates are tracked in Beads epic
-`lmt-65a`.
+The remaining frontier is the immutable upstream readiness evidence, joint
+real-process matrix, repository-wide release gates, and coordinated deploy /
+whole-release rollback drill tracked in Beads epic `lmt-65a`.
 
 ## Active plans
 
@@ -82,9 +58,9 @@ The historical sequence is recorded in
 | 0 | Docs + workspace scaffold | (root) + `docs/` | ✅ shipped |
 | 1 | Auth (waitlist + sessions + API keys) ported from Blueclaw shape | `transcode-gateway/src/auth/` | ✅ shipped (plan 0002) |
 | 2 | Engine + types + interfaces + dispatch (no live, no VOD route handlers yet) | `transcode-gateway/src/engine/` | ✅ shipped (plan 0003) |
-| 3 | Wire layer (capability map, headers, payment, resolver routing) | `transcode-gateway/src/livepeer/` | ✅ shipped (plan 0004) |
+| 3 | Historical wire layer port, later replaced by the v2 LOC boundary | `transcode-gateway/src/livepeer/` | ✅ superseded by plan 0018 |
 | 4 | VOD pipeline routes (`/v1/uploads`, `/v1/vod/*`, `/v1/videos/assets`, `/v1/playback/:id`) | `transcode-gateway/src/routes/` | ✅ shipped (plan 0005) |
-| 5a | Live HTTP surface (`/v1/live/streams`, `/_hls/*` proxy, adapter, session directory) | `transcode-gateway/src/routes/live/` + `src/livepeer/` | ✅ shipped (plan 0006) |
+| 5a | Live HTTP surface (`/v1/live/streams`, `/_hls/*` proxy, session directory) | `transcode-gateway/src/routes/live/` + `src/livepeer/` | ✅ shipped (plan 0006; v2-retrofitted) |
 | 5b | Gateway-side RTMP listener with per-stream broker routing (RTMP-parsing lib) | `transcode-gateway/src/runtime/rtmp/` | ✅ shipped (plan 0007) |
 | 6 | `transcode-core` Go library port | `transcode-core/` | ✅ shipped (plan 0008) |
 | 7 | `transcode-runner` Go binary port | `transcode-runner/` | ✅ shipped (plan 0009) |

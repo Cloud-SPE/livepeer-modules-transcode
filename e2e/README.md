@@ -36,7 +36,7 @@ Exits 0 on success; loud failure messages otherwise.
 
 The smoke deliberately stays at "the gateway degrades correctly without
 them." Modules v2 and LOC conformance are exercised by the cross-repository
-release matrix, not by the removed v0 direct-payer mock stack.
+release matrix, not by the removed legacy direct-payer mock stack.
 
 ## License
 
