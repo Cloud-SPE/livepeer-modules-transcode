@@ -45,6 +45,7 @@ export class AdminApp extends LitElement {
           <nav class="admin-nav">
             <a href="#dashboard" class=${this._isActive("dashboard")}>Dashboard</a>
             <a href="#signups"   class=${this._isActive("signups")}>Signups</a>
+            <a href="#operations" class=${this._isActive("operations")}>Operations</a>
             <lmt-theme-toggle></lmt-theme-toggle>
             <button type="button" class="secondary" @click=${() => this._logout()}>Sign out</button>
           </nav>
@@ -57,6 +58,7 @@ export class AdminApp extends LitElement {
     switch (this.view) {
       case "dashboard": return html`<admin-dashboard></admin-dashboard>`;
       case "signups":   return html`<admin-signups></admin-signups>`;
+      case "operations": return html`<admin-operations></admin-operations>`;
       default:          return html`<section class="admin-main"><p class="muted">Unknown view.</p></section>`;
     }
   }

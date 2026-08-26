@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: Livepeer Modules Transcode API
+  version: 2.0.0
+  description: Breaking paid-job/v1 and paid-session/v1 status surface.
+paths:
+  /v1/videos/assets/{id}:
+    get:
+      summary: Get an API-key-owned VOD asset and its paid job status
+      security: [{ ProductApiKey: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Asset detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssetDetail" }
+  /v1/live/streams/{id}:
+    get:
+      summary: Get an API-key-owned live stream and its paid session status
+      security: [{ ProductApiKey: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Live stream detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LiveStreamDetail" }
+  /api/v1/admin/operations:
+    get:
+      summary: List safe paid-operation diagnostics
+      security: [{ AdminToken: [] }]
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [job, session] } }
+        - { name: status, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: Most recently updated operations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminPaidOperationStatus" }
+components:
+  securitySchemes:
+    ProductApiKey: { type: http, scheme: bearer }
+    AdminToken: { type: http, scheme: bearer }
+  schemas:
+    PaidOperationStatus:
+      type: object
+      required: [operation_id, protocol, state, request_id, work_unit, funded_units, warnings, recovered, retry_count]
+      properties:
+        operation_id: { type: string }
+        protocol: { type: string, enum: [paid-job/v1, paid-session/v1] }
+        state: { type: string }
+        request_id: { type: string }
+        work_unit: { type: string }
+        funded_units: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        claimed_units: { type: [string, "null"], pattern: "^(0|[1-9][0-9]*)$" }
+        balance_units: { type: [string, "null"], pattern: "^(0|[1-9][0-9]*)$" }
+        lease_expires_at: { type: [string, "null"], format: date-time }
+        warnings:
+          type: array
+          items: { type: string, enum: [refill_will_be_refused, funded_balance_exhausted, lease_expired] }
+        recovered: { type: boolean }
+        retry_count: { type: integer, minimum: 0 }
+        next_retry_at: { type: [string, "null"], format: date-time }
+        error_code: { type: [string, "null"] }
+        relay_status: { type: [string, "null"] }
+        delivered_units: { type: [string, "null"], pattern: "^(0|[1-9][0-9]*)$" }
+        winddown_reason: { type: [string, "null"] }
+        terminal_at: { type: [string, "null"], format: date-time }
+    AdminPaidOperationStatus:
+      allOf:
+        - { $ref: "#/components/schemas/PaidOperationStatus" }
+        - type: object
+          required: [kind, capability, offering, rotation_generation, settlement_sequence, created_at, updated_at]
+          properties:
+            kind: { type: string, enum: [job, session] }
+            asset_id: { type: [string, "null"] }
+            live_stream_id: { type: [string, "null"] }
+            loc_operation_id: { type: [string, "null"] }
+            broker_job_id: { type: [string, "null"] }
+            broker_session_id: { type: [string, "null"] }
+            capability: { type: string }
+            offering: { type: string }
+            transport: { type: [string, "null"], enum: [unary, stream, multipart, null] }
+            quote_id: { type: string }
+            quote_version: { type: string }
+            route_fingerprint: { type: string }
+            rotation_generation: { type: integer, minimum: 0 }
+            settlement_sequence: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    AssetDetail:
+      type: object
+      required: [asset_id, api_key_id, status, paid_operation, renditions, jobs]
+      properties:
+        asset_id: { type: string }
+        api_key_id: { type: string }
+        status: { type: string }
+        paid_operation:
+          anyOf: [{ $ref: "#/components/schemas/PaidOperationStatus" }, { type: "null" }]
+        renditions: { type: array, items: { type: object } }
+        jobs: { type: array, items: { type: object } }
+      additionalProperties: true
+    LiveStreamDetail:
+      type: object
+      required: [stream_id, api_key_id, name, status, paid_operation, created_at]
+      properties:
+        stream_id: { type: string }
+        api_key_id: { type: string }
+        name: { type: string }
+        status: { type: string }
+        paid_operation:
+          anyOf: [{ $ref: "#/components/schemas/PaidOperationStatus" }, { type: "null" }]
+        created_at: { type: string, format: date-time }
+      additionalProperties: true

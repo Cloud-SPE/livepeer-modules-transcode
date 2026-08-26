@@ -60,5 +60,6 @@ Inherited from the repo root + [frontend-dom-and-css-invariants.md](../docs/desi
 ## Skipped from Blueclaw
 
 - `portal-playground.js` (1626 LOC chat playground) — no inference here.
-- `portal-usage.js` (176 LOC usage stats) — no billing in v0.
+- `portal-usage.js` (176 LOC historical aggregate usage view) — durable
+  per-operation v2 usage is shown on asset and live detail instead.
 - `lib/history-db.js` — Dexie-backed playground history; not used.

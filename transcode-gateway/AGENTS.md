@@ -106,7 +106,6 @@ land under plan 0005.
 - The other components in this repo (Go runners, frontends) sit beside
   this one as top-level subfolders; each will have its own
   `AGENTS.md` once it lands per its port plan.
-- The `capability-broker`, `payment-daemon`, and
-  `service-registry-daemon` peer services live in
-  `livepeer-network-modules` — see
+- The Modules v2 capability broker and `service-registry-daemon` live in
+  `livepeer-network-modules`; LOC owns the payer boundary — see
   [`../docs/design-docs/dependencies.md`](../docs/design-docs/dependencies.md).

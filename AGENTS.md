@@ -27,6 +27,7 @@ load-bearing decisions.
 | What invariants must any change uphold? | [`docs/design-docs/core-beliefs.md`](./docs/design-docs/core-beliefs.md) |
 | What's the proposed architecture at a glance? | [`docs/design-docs/architecture-overview.md`](./docs/design-docs/architecture-overview.md) |
 | What must the module do? | [`docs/design-docs/requirements.md`](./docs/design-docs/requirements.md) |
+| What is the public/admin v2 API contract? | [`docs/api/openapi.yaml`](./docs/api/openapi.yaml) |
 | How does the VOD pipeline work? | [`docs/design-docs/transcode-pipeline.md`](./docs/design-docs/transcode-pipeline.md) |
 | How does the live RTMP / LL-HLS pipeline work? | [`docs/design-docs/live-pipeline.md`](./docs/design-docs/live-pipeline.md) |
 | How does auth work (waitlist → API key → session)? | [`docs/design-docs/auth-model.md`](./docs/design-docs/auth-model.md) |

@@ -2,6 +2,28 @@ import { getSession, getApiKey, clearAll, setSession, setApiKey, setProfile } fr
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
+/**
+ * @typedef {Object} PaidOperationStatus
+ * @property {string} operation_id
+ * @property {'paid-job/v1'|'paid-session/v1'} protocol
+ * @property {string} state
+ * @property {string} request_id
+ * @property {string} work_unit
+ * @property {string} funded_units
+ * @property {string|null} claimed_units
+ * @property {string|null} balance_units
+ * @property {string|null} lease_expires_at
+ * @property {string[]} warnings
+ * @property {boolean} recovered
+ * @property {number} retry_count
+ * @property {string|null} next_retry_at
+ * @property {string|null} error_code
+ * @property {string|null} relay_status
+ * @property {string|null} delivered_units
+ * @property {string|null} winddown_reason
+ * @property {string|null} terminal_at
+ */
+
 async function fetchJson(path, init) {
   const res = await fetch(`${API_BASE}${path}`, init);
   if (res.status === 401) {

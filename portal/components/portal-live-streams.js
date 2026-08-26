@@ -4,7 +4,7 @@ import { toast } from "./lmt-toast.js";
 
 // Live streams (plan 0006). Lists streams created in this session
 // (sessionStorage-backed; gateway has no list-live-streams endpoint
-// in v0). POST /v1/live/streams creates; POST :id/end ends.
+// in this release). POST /v1/live/streams creates; POST :id/end ends.
 
 const STORE = "lmt-live-streams";
 
@@ -97,7 +97,7 @@ export class PortalLiveStreams extends LitElement {
         <div class="card">
           <h3>Created in this tab (${this.items.length})</h3>
           <p class="muted">
-            Live streams aren't listed server-side in v0 (no list route
+            Live streams aren't listed server-side yet (no list route
             yet). This view holds streams created in this browser tab.
           </p>
           ${this.items.length === 0

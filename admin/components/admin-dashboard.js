@@ -2,7 +2,7 @@ import { LitElement, html, nothing } from "lit";
 import { fetchStats } from "../lib/api.js";
 
 // Modeled on blue-claw-network/web-platform/admin/components/admin-dashboard.js.
-// Plain numbers grid + 30-day daily count list (no chart for v0).
+// Plain numbers grid + 30-day daily count list (no chart dependency).
 
 export class AdminDashboard extends LitElement {
   static properties = {

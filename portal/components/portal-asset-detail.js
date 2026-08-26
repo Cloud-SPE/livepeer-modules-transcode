@@ -1,6 +1,7 @@
 import { LitElement, html, nothing } from "lit";
 import { getAsset, deleteAsset } from "../lib/api.js";
 import { toast } from "./lmt-toast.js";
+import { operationSummary, operationTone, shouldPollOperation } from "../lib/paid-operation-view.js";
 
 // Per-asset view: status + renditions + jobs + playback URL.
 // Calls GET /v1/videos/assets/:id (plan 0005).
@@ -19,20 +20,32 @@ export class PortalAssetDetail extends LitElement {
     this.asset = null;
     this.loading = true;
     this.error = "";
+    this._pollTimer = null;
   }
   async connectedCallback() {
     super.connectedCallback();
     await this._load();
   }
   async _load() {
-    this.loading = true;
+    this.loading = this.asset === null;
     this.error = "";
     try {
       this.asset = await getAsset(this.id);
+      this._schedulePoll();
     } catch (err) {
       this.error = err.message || "Asset not found.";
     } finally {
       this.loading = false;
+    }
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    clearTimeout(this._pollTimer);
+  }
+  _schedulePoll() {
+    clearTimeout(this._pollTimer);
+    if (this.asset?.status === "queued" || shouldPollOperation(this.asset?.paid_operation ?? null)) {
+      this._pollTimer = setTimeout(() => this._load(), 5000);
     }
   }
   async _delete() {
@@ -65,6 +78,17 @@ export class PortalAssetDetail extends LitElement {
             : nothing}
           <p class="muted">Created ${new Date(a.created_at).toLocaleString()}${a.ready_at ? `; ready ${new Date(a.ready_at).toLocaleString()}` : ""}</p>
         </div>
+        ${a.paid_operation ? html`
+          <div class="card" aria-live="polite">
+            <h3>Paid job</h3>
+            <p>Status: <span class="badge ${operationTone(a.paid_operation)}">${a.paid_operation.state}</span></p>
+            <p>${operationSummary(a.paid_operation)}</p>
+            <p>Usage: <strong>${a.paid_operation.claimed_units ?? "pending"}</strong> ${a.paid_operation.work_unit}</p>
+            ${a.paid_operation.warnings.map((warning) => html`<p class="warn">${warning.replaceAll("_", " ")}</p>`)}
+            ${a.paid_operation.error_code ? html`<p class="error">${a.paid_operation.error_code}</p>` : nothing}
+            <p class="muted">Request <code>${a.paid_operation.request_id}</code>${a.paid_operation.recovered ? "; recovered" : ""}</p>
+          </div>
+        ` : nothing}
         <div class="card">
           <h3>Renditions (${a.renditions?.length ?? 0})</h3>
           ${a.renditions?.length
