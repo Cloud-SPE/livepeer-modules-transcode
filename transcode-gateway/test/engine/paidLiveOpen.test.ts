@@ -101,6 +101,7 @@ test("paid live open binds durable identities and encrypted private ingest befor
   assert.match(JSON.stringify(storedSecrets), /private-runner-key/);
   assert.match(JSON.stringify(storedSecrets), /grant-secret/);
   assert.match(JSON.stringify(storedSecrets), /control_handle/);
+  assert.match(JSON.stringify(storedSecrets), /routeIntent/);
   assert.doesNotMatch(JSON.stringify(result), /private-runner-key|grant-secret|broker-credential/);
   assert.equal(result.rtmpPushUrl.startsWith("rtmp://gateway.example/live/live_"), true);
 });

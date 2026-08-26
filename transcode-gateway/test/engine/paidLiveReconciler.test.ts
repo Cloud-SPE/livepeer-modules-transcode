@@ -25,8 +25,8 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
       protocol: "paid-session/v1", capability: "video:live.rtmp", offering: "live-standard",
       requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1",
       workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1",
-      quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "constraint-1",
-      routeFingerprint: "route-1", settlementKey: "settlement-1", raw: {},
+      quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32),
+      routeFingerprint: "02".repeat(32), settlementKey: "settlement-1", raw: {},
     },
     status: "active", locOperationId: "loc-operation-1", brokerSessionId: "broker-session-1",
     fundedUnits: "60", claimedUnits: "50", balanceUnits: "10", willRefuseNextRefill: false,
@@ -35,6 +35,7 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
     recoveryLeaseExpiresAt: new Date("2030-01-01T00:00:00Z"),
     sessionRuntime: {
       publisherMode: "gateway-relay", relayStatus: "active", relayGeneration: 1,
+      runnerHlsUrl: "https://runner.example/hls/master.m3u8",
       lastRunnerSequence: "0", lastRunnerUsage: "0", refillCount: 0,
     },
     retryCount: 0, createdAt: now, updatedAt: now,
@@ -46,10 +47,46 @@ function baseSecrets(refillIntent?: PaidOperationSecrets["refillIntent"]): PaidO
   return {
     loc: { control_handle: handle },
     control: { eventsWs: "wss://broker.example/events" },
-    credentials: { broker_session_credential: "broker-secret" },
+    credentials: {
+      customer_stream_key: "customer-public-key",
+      broker_session_credential: "broker-secret",
+    },
     runnerIngestUrl: "rtmps://runner.example/ingest",
     runnerIngestKey: "runner-secret",
     ...(refillIntent === undefined ? {} : { refillIntent }),
+  };
+}
+
+function openingSecrets(): PaidOperationSecrets {
+  return {
+    openIntent: {
+      gateway_session_id: "live-1",
+      request_id: "stable-open-request",
+      key_request_id: "stable-key-request",
+      descriptor_schema: "rtmp-hls/v1",
+      estimated_runway_units: 60,
+      max_total_units: 3_600,
+    },
+    routeIntent: {
+      worker_url: "https://broker.example",
+      eth_address: `0x${"11".repeat(20)}`,
+      session: {
+        descriptorSchema: "rtmp-hls/v1", attachment: "external",
+        metering: "runner-reported", maxRotations: 3, refill: "extensible",
+        heartbeat: { intervalSeconds: 5, missedThreshold: 3 },
+        lease: { policy: "funding-tracking" },
+      },
+      settlement_keys: [{
+        publicKey: "settlement-1", notBefore: "2026-01-01T00:00:00Z",
+        expiresAt: "2030-01-01T00:00:00Z", introducedInPublicationSeq: "1",
+      }],
+      work_unit_estimator: null,
+    },
+    sessionParams: {
+      schema: "rtmp-hls-session/v1", publisher_mode: "gateway-relay",
+    },
+    loc: { idempotency_key: "stable-open-request", key_request_id: "stable-key-request" },
+    credentials: { customer_stream_key: "customer-public-key" },
   };
 }
 
@@ -129,9 +166,23 @@ function harness(options: {
     maxRefills: 60,
     disconnectGraceMs: 15_000,
     liveSessions: {
-      record() {}, get() { return null; }, getByStreamId() { return null; },
+      record() { calls.push("cache-record"); }, get() { return null; }, getByStreamId() { return null; },
       remove() { calls.push("cache-remove"); },
     },
+    liveStreamRepo: new Proxy({
+      async updateStatus() { calls.push("stream-active"); },
+    }, { get(target, property) {
+      const value = target[property as keyof typeof target];
+      if (value) return value;
+      return async () => { throw new Error(`unexpected live stream call: ${String(property)}`); };
+    } }) as unknown as PaidLiveReconcilerDeps["liveStreamRepo"],
+    playbackIdRepo: new Proxy({
+      async byLiveStream() { return [{ id: "playback-1" }]; },
+    }, { get(target, property) {
+      const value = target[property as keyof typeof target];
+      if (value) return value;
+      return async () => { throw new Error(`unexpected playback call: ${String(property)}`); };
+    } }) as unknown as PaidLiveReconcilerDeps["playbackIdRepo"],
     newRequestId: (() => {
       let id = 0;
       return () => `refill-${++id}`;
@@ -191,6 +242,93 @@ function settledEnd(closeReason = "customer_end") {
     },
   };
 }
+
+function recoveredOpenResult(): Awaited<ReturnType<PaidSessionClient["open"]>> {
+  const session = {
+    descriptorSchema: "rtmp-hls/v1", attachment: "external" as const,
+    metering: "runner-reported" as const, maxRotations: 3, refill: "extensible" as const,
+    heartbeat: { intervalSeconds: 5, missedThreshold: 3 },
+    lease: { policy: "funding-tracking" as const },
+  };
+  return {
+    opened: {
+      operationId: "loc-operation-1", requestId: "broker-open-request",
+      workId: "work-1", brokerUrl: "https://broker.example",
+      protocol: "paid-session/v1", session,
+      routeSnapshot: {
+        schemaVersion: "route-snapshot/v1", brokerUrl: "https://broker.example",
+        ethAddress: `0x${"11".repeat(20)}`, capability: "video:live.rtmp",
+        offering: "live-standard", protocol: "paid-session/v1",
+        workUnit: "output_seconds", pricePerWorkUnitWei: "1", unitsPerPrice: "1",
+        binding: {
+          quoteId: "quote-1", quoteVersion: "1",
+          constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32),
+        },
+        settlementKeys: [], workUnitEstimator: null, job: null, session, extra: {}, raw: {},
+      },
+      paymentEnvelope: "payment", refillEndpoint: "/refill", closeEndpoint: "/close",
+      openedAt: "2026-08-26T12:00:00Z",
+    },
+    gatewaySessionId: "live-1", brokerSessionId: "broker-session-1", workId: "work-1",
+    state: "active", credential: "broker-secret", runtimeSchema: "rtmp-hls/v1",
+    runtimePublic: {
+      rtmp_url: "rtmps://runner.example/ingest",
+      hls_url: "https://runner.example/hls/master.m3u8",
+      key_issue_url: "https://runner.example/v1/keys",
+    },
+    grants: [{
+      id: "grant-1", operations: ["stream-key-issue"], secret: "grant-secret",
+      expiresAt: "2030-01-01T00:00:00Z",
+    }],
+    leaseExpiresAt: "2030-01-01T00:00:00Z",
+    balance: {
+      claimedUnits: 0, debitedUnits: 0, unit: "output_seconds", runwayUnits: 60,
+      runwaySecondsEstimate: 60, status: "ok", willRefuseNextRefill: false,
+    },
+    control: {
+      statusUrl: "https://broker.example/status", topupUrl: "https://broker.example/topup",
+      endUrl: "https://broker.example/end", eventsWs: "wss://broker.example/events",
+    },
+  };
+}
+
+test("startup replays the exact paid open and key identities then repairs activation artifacts", async () => {
+  const opens: string[] = [];
+  const keys: string[] = [];
+  const h = harness({
+    operation: operation({
+      status: "opening",
+      requestId: "pending:stable-open-request",
+      workId: "pending:stable-open-request",
+      brokerSessionId: undefined,
+      locOperationId: undefined,
+    }),
+    secrets: openingSecrets(),
+    client: {
+      async open(input) { opens.push(input.requestId); return recoveredOpenResult(); },
+      async issueStreamKey(input) {
+        keys.push(input.requestId);
+        return { requestId: input.requestId, streamKey: "private-runner-key", expiresAt: "2030-01-01T00:00:00Z" };
+      },
+    },
+  });
+  h.deps.playbackIdRepo.byLiveStream = async () => [];
+  h.deps.playbackIdRepo.insert = async (value) => {
+    h.calls.push("playback-insert");
+    return { ...value, createdAt: now };
+  };
+
+  await reconcilePaidLiveSessions(h.deps);
+
+  assert.deepEqual(opens, ["stable-open-request"]);
+  assert.deepEqual(keys, ["stable-key-request"]);
+  assert.equal(h.operation().status, "active");
+  assert.equal(h.operation().brokerSessionId, "broker-session-1");
+  assert.equal(h.secrets().runnerIngestKey, "private-runner-key");
+  assert.ok(h.calls.includes("stream-active"));
+  assert.ok(h.calls.includes("playback-insert"));
+  assert.ok(h.calls.includes("cache-record"));
+});
 
 test("low balance persists the refill identity before funding and advances lease only after acceptance", async () => {
   const order: string[] = [];

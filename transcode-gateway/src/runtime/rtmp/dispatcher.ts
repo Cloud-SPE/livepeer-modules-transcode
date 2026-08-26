@@ -119,7 +119,14 @@ export function attachDispatcher(nms: NmsHandle, deps: DispatcherDeps): { stop()
     relayStatus: "reconnecting" | "failed",
     reason: string,
   ): Promise<void> => {
-    await persistRelayState(streamId, relayStatus, "reconcile_pending", undefined, new Date().toISOString());
+    const scheduled = await persistRelayState(
+      streamId,
+      relayStatus,
+      "reconcile_pending",
+      undefined,
+      new Date().toISOString(),
+    );
+    if (!scheduled) return;
     await deps.liveStreamRepo.updateStatus(streamId, "reconnecting", { lastSeenAt: new Date() });
     deps.logger?.info("rtmp.relay.reconcile_scheduled", { stream_id: streamId, reason });
   };

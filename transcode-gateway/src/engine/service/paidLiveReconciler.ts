@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import type {
   Logger,
@@ -7,7 +7,8 @@ import type {
   PaidSessionControlHandle,
 } from "../interfaces/index.js";
 import { PaidSessionClientError } from "../interfaces/index.js";
-import type { JsonValue, PaidOperationSecrets } from "../types/index.js";
+import type { JsonValue, PaidOperation, PaidOperationSecrets, SelectedWorkerRoute } from "../types/index.js";
+import type { LiveStreamRepo, PlaybackIdRepo } from "../repo/index.js";
 import type { OwnedPaidSession, PaidSessionStore } from "../../livepeer/paidSessionStore.js";
 import { parsePaidSessionControlEvent } from "../../livepeer/paidSessionClient.js";
 import { newRequestId as createRequestId } from "../../livepeer/requestId.js";
@@ -35,6 +36,46 @@ const storedContextWire = z.object({
 
 type RefillIntent = NonNullable<z.infer<typeof storedContextWire>["refillIntent"]>;
 
+const openingIntentWire = z.object({
+  gateway_session_id: z.string().min(1),
+  request_id: z.string().min(1),
+  key_request_id: z.string().min(1),
+  descriptor_schema: z.string().min(1),
+  estimated_runway_units: z.number().int().positive(),
+  max_total_units: z.number().int().positive(),
+}).passthrough();
+const sessionAxesWire = z.object({
+  descriptorSchema: z.string().min(1),
+  attachment: z.enum(["external", "inband-ws"]),
+  metering: z.enum(["runner-reported", "broker-observed"]),
+  maxRotations: z.number().int().nonnegative(),
+  refill: z.enum(["extensible", "bounded"]),
+  heartbeat: z.object({ intervalSeconds: z.number().int().positive(), missedThreshold: z.number().int().positive() }),
+  lease: z.object({ policy: z.enum(["funding-tracking", "fixed"]), maxSeconds: z.number().int().positive().optional() }),
+  toleranceBandPct: z.number().nonnegative().optional(),
+  runwayIncrementUnits: z.number().int().positive().optional(),
+  sessionParamsSchema: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
+const recoveryRouteWire = z.object({
+  worker_url: z.string().url(),
+  eth_address: z.string().min(1),
+  session: sessionAxesWire,
+  settlement_keys: z.array(z.object({
+    publicKey: z.string().min(1),
+    notBefore: z.string(),
+    expiresAt: z.string(),
+    introducedInPublicationSeq: z.string(),
+  })).min(1),
+  work_unit_estimator: z.unknown().nullable(),
+}).strict();
+const recoveredRuntimeWire = z.object({
+  rtmp_url: z.string().url(),
+  hls_url: z.string().url(),
+  key_issue_url: z.string().url(),
+}).passthrough();
+const initialCredentialsWire = z.object({ customer_stream_key: z.string().min(1) }).passthrough();
+const sessionParamsWire = z.record(z.string(), z.json());
+
 export interface PaidSessionControlSource {
   read(input: {
     eventsWs: string;
@@ -52,6 +93,8 @@ export interface PaidLiveReconcilerDeps {
   maxRefills: number;
   disconnectGraceMs: number;
   liveSessions: LiveSessionDirectory;
+  liveStreamRepo: LiveStreamRepo;
+  playbackIdRepo: PlaybackIdRepo;
   logger?: Logger;
   now?: () => Date;
   newRequestId?: () => string;
@@ -74,7 +117,15 @@ async function reconcileOne(
   try {
     const secrets = await deps.paidSessionStore.readSecrets(owned);
     if (!secrets) return;
-    const context = storedContextWire.parse(secrets);
+    const parsedContext = storedContextWire.safeParse(secrets);
+    if (!parsedContext.success) {
+      if (owned.operation.status === "opening" || owned.operation.status === "issuing_key") {
+        await resumeOpeningSession(deps, owned, secrets);
+        return;
+      }
+      throw new Error("paid session recovery context is unavailable");
+    }
+    const context = parsedContext.data;
     const handle = controlHandle(context.loc.control_handle);
     const brokerSessionId = owned.operation.brokerSessionId;
     const liveStreamId = owned.operation.liveStreamId;
@@ -102,6 +153,7 @@ async function reconcileOne(
       await executeWinddown(deps, owned, handle, context.credentials.broker_session_credential, reason);
       return;
     }
+    await repairLiveArtifacts(deps, owned.operation, secrets);
 
     if (context.refillIntent) {
       await executeRefill(deps, owned, secrets, context.refillIntent, handle, context.credentials.broker_session_credential);
@@ -317,6 +369,165 @@ async function applyAdvisoryEvent(
     });
   }
   return owned;
+}
+
+async function resumeOpeningSession(
+  deps: PaidLiveReconcilerDeps,
+  initial: OwnedPaidSession,
+  secrets: PaidOperationSecrets,
+): Promise<void> {
+  const intent = openingIntentWire.parse(secrets.openIntent);
+  const routeIntent = recoveryRouteWire.parse(secrets.routeIntent);
+  const sessionParams = sessionParamsWire.parse(secrets.sessionParams);
+  const credentials = initialCredentialsWire.parse(secrets.credentials);
+  const liveStreamId = initial.operation.liveStreamId;
+  if (!liveStreamId || intent.gateway_session_id !== liveStreamId) {
+    throw new Error("paid session opening identity drift");
+  }
+  let owned = initial;
+  const opened = await deps.paidSessionClient.open({
+    gatewaySessionId: liveStreamId,
+    requestId: intent.request_id,
+    route: recoveryRoute(initial.operation, routeIntent),
+    descriptorSchema: intent.descriptor_schema,
+    sessionParams,
+    estimatedRunwayUnits: intent.estimated_runway_units,
+    maxTotalUnits: intent.max_total_units,
+  });
+  const runtime = recoveredRuntimeWire.parse(opened.runtimePublic);
+  const grant = opened.grants.length === 1 &&
+    opened.grants[0]?.operations.length === 1 &&
+    opened.grants[0].operations[0] === "stream-key-issue"
+    ? opened.grants[0]
+    : null;
+  if (!grant) throw new Error("recovered paid live grant is invalid");
+  const progressed = await deps.paidSessionStore.recordProgress(owned, {
+    status: "issuing_key",
+    requestId: opened.opened.requestId,
+    locOperationId: opened.opened.operationId,
+    brokerSessionId: opened.brokerSessionId,
+    fundedUnits: String(intent.estimated_runway_units),
+    claimedUnits: String(opened.balance.claimedUnits),
+    balanceUnits: String(opened.balance.runwayUnits ?? 0),
+    willRefuseNextRefill: opened.balance.willRefuseNextRefill,
+    leaseExpiresAt: timestamp(opened.leaseExpiresAt),
+    sessionRuntime: {
+      ...owned.operation.sessionRuntime!,
+      runnerHlsUrl: runtime.hls_url,
+    },
+  });
+  if (!progressed) return;
+  owned = progressed;
+  const issued = await deps.paidSessionClient.issueStreamKey({
+    keyIssueUrl: runtime.key_issue_url,
+    grant,
+    requestId: intent.key_request_id,
+    audience: "gateway-relay",
+  });
+  const recoveredSecrets: PaidOperationSecrets = {
+    ...secrets,
+    grants: opened.grants as unknown as JsonValue,
+    control: opened.control as unknown as JsonValue,
+    loc: {
+      idempotency_key: intent.request_id,
+      key_request_id: intent.key_request_id,
+      control_handle: {
+        operation_id: opened.opened.operationId,
+        broker_url: opened.opened.brokerUrl,
+        descriptor_schema: opened.opened.session.descriptorSchema,
+        work_unit: opened.opened.routeSnapshot.workUnit,
+        max_rotations: opened.opened.session.maxRotations,
+      },
+    },
+    runnerIngestUrl: runtime.rtmp_url,
+    runnerIngestKey: issued.streamKey,
+    credentials: {
+      ...credentials,
+      broker_session_credential: opened.credential,
+    },
+  };
+  if (!await deps.paidSessionStore.putSecrets(owned, recoveredSecrets)) return;
+  const active = await deps.paidSessionStore.recordProgress(owned, {
+    status: "active",
+    sessionRuntime: {
+      ...owned.operation.sessionRuntime!,
+      relayStatus: "pending",
+    },
+  });
+  if (!active) return;
+  await repairLiveArtifacts(deps, active.operation, recoveredSecrets);
+  deps.logger?.info("orchestrator.live_open_recovered", {
+    operation_id: active.operation.id,
+    stream_id: liveStreamId,
+  });
+}
+
+async function repairLiveArtifacts(
+  deps: PaidLiveReconcilerDeps,
+  operation: PaidOperation,
+  secrets: PaidOperationSecrets,
+): Promise<void> {
+  const context = storedContextWire.parse(secrets);
+  const credentials = initialCredentialsWire.parse(secrets.credentials);
+  if (
+    !operation.liveStreamId ||
+    !operation.brokerSessionId ||
+    !operation.sessionRuntime?.runnerHlsUrl ||
+    !secrets.runnerIngestUrl ||
+    !secrets.runnerIngestKey
+  ) throw new Error("paid live activation artifacts are incomplete");
+  if (
+    operation.sessionRuntime.relayStatus !== "reconnecting" &&
+    operation.sessionRuntime.relayStatus !== "failed"
+  ) {
+    await deps.liveStreamRepo.updateStatus(operation.liveStreamId, "active", {
+      sessionId: operation.brokerSessionId,
+      workerUrl: context.loc.control_handle.broker_url,
+      lastSeenAt: new Date(),
+    });
+  }
+  const playback = await deps.playbackIdRepo.byLiveStream(operation.liveStreamId);
+  if (playback.length === 0) {
+    await deps.playbackIdRepo.insert({
+      id: `pb_${randomBytes(12).toString("hex")}`,
+      apiKeyId: operation.apiKeyId,
+      liveStreamId: operation.liveStreamId,
+      policy: "public",
+      tokenRequired: false,
+    });
+  }
+  deps.liveSessions.record({
+    streamId: operation.liveStreamId,
+    sessionId: operation.brokerSessionId,
+    brokerUrl: context.loc.control_handle.broker_url,
+    brokerRtmpUrl: `${secrets.runnerIngestUrl.replace(/\/$/, "")}/${secrets.runnerIngestKey}`,
+    streamKey: credentials.customer_stream_key,
+    hlsPlaybackUrl: operation.sessionRuntime.runnerHlsUrl,
+  });
+}
+
+function recoveryRoute(
+  operation: PaidOperation,
+  value: z.infer<typeof recoveryRouteWire>,
+): SelectedWorkerRoute {
+  return {
+    workerUrl: value.worker_url,
+    ethAddress: value.eth_address,
+    capability: operation.route.capability as SelectedWorkerRoute["capability"],
+    offering: operation.route.offering,
+    pricePerWorkUnitWei: operation.route.pricePerUnitWei,
+    unitsPerPrice: operation.route.unitsPerPrice,
+    workUnit: operation.route.workUnit,
+    protocol: "paid-session/v1",
+    job: null,
+    session: value.session,
+    workUnitEstimator: value.work_unit_estimator as SelectedWorkerRoute["workUnitEstimator"],
+    settlementKeys: value.settlement_keys,
+    quoteId: operation.route.quoteId,
+    quoteVersion: operation.route.quoteVersion,
+    constraintFingerprint: Buffer.from(operation.route.constraintFingerprint, "hex"),
+    routeFingerprint: Buffer.from(operation.route.routeFingerprint, "hex"),
+  };
 }
 
 async function requestWinddown(

@@ -93,6 +93,7 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     },
   }, {
     openIntent: openIntent as JsonValue,
+    routeIntent: recoveryRoute(input.route),
     sessionParams,
     loc: { idempotency_key: requestId, key_request_id: keyRequestId },
     credentials: { customer_stream_key: customerStreamKey },
@@ -136,6 +137,7 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
   });
   const secretsStored = await deps.paidSessionStore.putSecrets(owned, {
     openIntent: openIntent as JsonValue,
+    routeIntent: recoveryRoute(input.route),
     sessionParams,
     grants: opened.grants as unknown as JsonValue,
     control: opened.control as unknown as JsonValue,
@@ -238,4 +240,14 @@ function timestamp(value: string): Date {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new Error("paid live lease is invalid");
   return parsed;
+}
+
+function recoveryRoute(route: SelectedWorkerRoute): JsonValue {
+  return {
+    worker_url: route.workerUrl,
+    eth_address: route.ethAddress,
+    session: route.session as unknown as JsonValue,
+    settlement_keys: route.settlementKeys as unknown as JsonValue,
+    work_unit_estimator: (route.workUnitEstimator ?? null) as unknown as JsonValue,
+  };
 }

@@ -93,6 +93,7 @@ export interface PaidOperationSecrets {
   // Exact LOC and broker open inputs are encrypted so an unknown outcome can
   // be retried byte-for-byte without putting credentials in public columns.
   openIntent?: JsonValue;
+  routeIntent?: JsonValue;
   sessionParams?: JsonValue;
   grants?: JsonValue;
   control?: JsonValue;

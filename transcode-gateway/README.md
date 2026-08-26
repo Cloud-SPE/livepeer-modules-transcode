@@ -124,3 +124,7 @@ Publisher disconnects receive a 15-second reconnect grace by default through
 broker end, and payment winddown remain nonterminal locally until the broker's
 signed settlement is accepted by LOC. Final operation state, stream end,
 playback removal, and secret erasure commit in one database transaction.
+On gateway restart, incomplete opens replay the encrypted original LOC/open
+and runner key request identities exactly. Active sessions rebuild their
+live-stream linkage, playback row when absent, and in-memory HLS route from
+encrypted durable state before normal status reconciliation resumes.

@@ -237,6 +237,8 @@ async function main(): Promise<void> {
           maxRefills: config.LIVEPEER_LIVE_MAX_REFILLS,
           disconnectGraceMs: config.LIVEPEER_LIVE_DISCONNECT_GRACE_MS,
           liveSessions,
+          liveStreamRepo,
+          playbackIdRepo,
           logger: consoleLogger,
         });
       } catch {
