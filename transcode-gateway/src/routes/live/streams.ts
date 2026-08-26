@@ -9,6 +9,7 @@ import type { LiveSessionDirectory } from "../../livepeer/liveSessionDirectory.j
 import type { PaidSessionStore } from "../../livepeer/paidSessionStore.js";
 import { openPaidLiveStream } from "../../engine/service/paidLiveOpen.js";
 import { makeUserApiKeyAuth } from "../../middleware/userApiKeyAuth.js";
+import { customerOperationStatus } from "../paidOperationStatus.js";
 
 // Breaking v2 live surface: the gateway is always public ingest and opens one
 // runner-owned paid-session/v1 session behind its private relay boundary.
@@ -146,12 +147,14 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
     const session = stream.sessionId
       ? deps.liveSessions.get(stream.sessionId)
       : deps.liveSessions.getByStreamId(stream.id);
+    const operation = await deps.paidSessionStore?.byLiveStreamId(stream.id) ?? null;
 
     return {
       stream_id: stream.id,
       api_key_id: stream.apiKeyId,
       name: stream.name ?? stream.id,
       status: publicStatus(stream.status),
+      paid_operation: customerOperationStatus(operation),
       session_id: stream.sessionId ?? null,
       playback_url: session?.hlsPlaybackUrl ?? null,
       created_at: stream.createdAt.toISOString(),

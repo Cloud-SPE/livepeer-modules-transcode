@@ -3,20 +3,23 @@ import { z } from "zod";
 import type { Config } from "../../config.js";
 import type { DbPool } from "../../db/pool.js";
 import type { EmailClient } from "../../email/client.js";
+import type { PaidOperationRepo } from "../../engine/repo/index.js";
 import { makeAdminAuth } from "../../middleware/adminAuth.js";
 import {
   countAll,
   exportRows,
-  listForAdmin,
+  listForAdmin as listWaitlistForAdmin,
   stats,
 } from "../../auth/waitlist.js";
 import { approveBatch, deleteOne, rejectBatch } from "../../auth/approval.js";
 import { apiKeyEmail } from "../../email/templates.js";
+import { adminOperationStatus } from "../paidOperationStatus.js";
 
 interface Deps {
   pool: DbPool;
   config: Config;
   email: EmailClient;
+  paidOperationRepo: PaidOperationRepo | null;
 }
 
 const listQuery = z.object({
@@ -37,6 +40,11 @@ const idsBody = z.object({
 const rejectBody = z.object({ ids: z.array(z.string().uuid()).min(1) });
 
 const idParam = z.object({ id: z.string().uuid() });
+const operationsQuery = z.object({
+  kind: z.enum(["job", "session"]).optional(),
+  status: z.string().trim().min(1).max(64).optional(),
+  limit: z.coerce.number().int().positive().max(200).default(100),
+});
 
 export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
   const admin = makeAdminAuth(deps.config.ADMIN_TOKEN);
@@ -48,7 +56,7 @@ export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
       reply.code(400).send({ status: "error", message: "Invalid query." });
       return;
     }
-    const result = await listForAdmin(deps.pool, {
+    const result = await listWaitlistForAdmin(deps.pool, {
       page: parsed.data.page,
       perPage: parsed.data.per_page,
       sort: parsed.data.sort,
@@ -185,6 +193,24 @@ export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
       this_month: s.thisMonth,
       daily_counts: s.dailyCounts,
     };
+  });
+
+  app.get("/api/v1/admin/operations", { preHandler: admin }, async (req, reply) => {
+    const parsed = operationsQuery.safeParse(req.query);
+    if (!parsed.success) {
+      reply.code(400).send({ status: "error", message: "Invalid query." });
+      return;
+    }
+    if (!deps.paidOperationRepo) {
+      reply.code(503).send({
+        status: "error",
+        error: "paid_operations_not_configured",
+        message: "LOC operation storage is not configured",
+      });
+      return;
+    }
+    const operations = await deps.paidOperationRepo.listForAdmin(parsed.data);
+    return { items: operations.map((operation) => adminOperationStatus(operation)) };
   });
 }
 

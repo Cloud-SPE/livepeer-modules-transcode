@@ -68,7 +68,12 @@ export async function createServer(deps: ServerDeps): Promise<FastifyInstance> {
   registerHealth(app);
   registerPublicAuth(app, deps);
   registerUserAuth(app, { pool: deps.pool, config: deps.config });
-  registerAdminAuth(app, { pool: deps.pool, config: deps.config, email: deps.email });
+  registerAdminAuth(app, {
+    pool: deps.pool,
+    config: deps.config,
+    email: deps.email,
+    paidOperationRepo: deps.paidOperationRepo,
+  });
 
   // VOD surface (plan 0005).
   const vodCommon = {

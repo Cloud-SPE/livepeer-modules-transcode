@@ -12,6 +12,7 @@ import type {
 } from "../../engine/repo/index.js";
 import { runPaidAbrAsset } from "../../engine/service/paidAbrOrchestrator.js";
 import { makeUserApiKeyAuth } from "../../middleware/userApiKeyAuth.js";
+import { customerOperationStatus } from "../paidOperationStatus.js";
 
 // VOD routes. Submit dispatches one complete ABR ladder through paid-job/v1.
 // All asset reads are scoped by api_key_id to prevent cross-tenant enumeration.
@@ -185,8 +186,10 @@ export function registerVod(app: FastifyInstance, deps: VodDeps): void {
     const [playback] = await deps.playbackIdRepo.byAsset(asset.id);
     const renditions = await deps.renditionRepo.byAsset(asset.id);
     const jobs = await deps.jobRepo.byAsset(asset.id);
+    const operation = await deps.paidOperationRepo?.byAssetId(asset.id) ?? null;
     return {
       ...serializeAsset(asset, playback?.id ?? null),
+      paid_operation: customerOperationStatus(operation),
       renditions: renditions.map((r) => ({
         id: r.id,
         resolution: r.resolution,

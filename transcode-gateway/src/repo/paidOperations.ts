@@ -332,6 +332,16 @@ export function createPaidOperationRepo(
       return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
+    async byAssetId(assetId) {
+      const result = await pool.query<Row>(
+        `SELECT ${SELECT_COLUMNS} FROM media.paid_operations
+         WHERE asset_id = $1 AND operation_kind = 'job'
+         ORDER BY created_at DESC LIMIT 1`,
+        [assetId],
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
     async byLiveStreamId(liveStreamId) {
       const result = await pool.query<Row>(
         `SELECT ${SELECT_COLUMNS} FROM media.paid_operations
@@ -350,6 +360,30 @@ export function createPaidOperationRepo(
         [brokerSessionId],
       );
       return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
+    async listForAdmin(options) {
+      if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 200) {
+        throw new Error("paid operation admin list limit is invalid");
+      }
+      const predicates: string[] = [];
+      const params: unknown[] = [];
+      if (options.kind) {
+        params.push(options.kind);
+        predicates.push(`operation_kind = $${params.length}`);
+      }
+      if (options.status) {
+        params.push(options.status);
+        predicates.push(`status = $${params.length}`);
+      }
+      params.push(options.limit);
+      const where = predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
+      const result = await pool.query<Row>(
+        `SELECT ${SELECT_COLUMNS} FROM media.paid_operations ${where}
+         ORDER BY updated_at DESC LIMIT $${params.length}`,
+        params,
+      );
+      return result.rows.map(rowToOperation);
     },
 
     async claimRecoverable(kind, owner, now, leaseExpiresAt, limit) {

@@ -54,8 +54,14 @@ export interface PaidOperationRepo {
   byId(id: string): Promise<PaidOperation | null>;
   byIdForApiKey(id: string, apiKeyId: string): Promise<PaidOperation | null>;
   byRequestId(requestId: string): Promise<PaidOperation | null>;
+  byAssetId(assetId: string): Promise<PaidOperation | null>;
   byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
   byBrokerSessionId(brokerSessionId: string): Promise<PaidOperation | null>;
+  listForAdmin(options: {
+    kind?: PaidOperation["kind"];
+    status?: string;
+    limit: number;
+  }): Promise<PaidOperation[]>;
   claimRecoverable(
     kind: PaidOperation["kind"],
     owner: string,
