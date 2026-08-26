@@ -98,6 +98,11 @@ origin, refuses redirects, requires a caller-owned idempotency key for every
 mutation, and never includes LOC response bodies or credentials in transport
 errors.
 
+The v2 cutover has no direct payer compatibility path. Startup rejects
+`LIVEPEER_PAYER_SOCKET`, `LIVEPEER_PAYER_PROTO_ROOT`,
+`LIVEPEER_FUNDED_VALUE_WEI`, and `LIVEPEER_FACE_VALUE_WEI` when present so a
+stale deployment cannot silently bypass LOC.
+
 VOD probes the presigned source locally with `ffprobe` before opening its one
 ABR paid job. `VOD_FFPROBE_BIN` defaults to `ffprobe` and
 `VOD_SOURCE_PROBE_TIMEOUT_MS` defaults to 30 seconds.

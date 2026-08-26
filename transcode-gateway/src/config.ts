@@ -20,12 +20,8 @@ const envSchema = z.object({
   LIVEPEER_RESOLVER_SOCKET: z.string().optional(),
   LIVEPEER_RESOLVER_PROTO_ROOT: z.string().default("./proto"),
   LIVEPEER_RESOLVER_SNAPSHOT_TTL_MS: z.coerce.number().int().positive().default(15_000),
-  LIVEPEER_PAYER_SOCKET: z.string().optional(),
-  LIVEPEER_PAYER_PROTO_ROOT: z.string().default("./proto"),
   LIVEPEER_ROUTE_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
   LIVEPEER_ROUTE_COOLDOWN_MS: z.coerce.number().int().positive().default(30_000),
-  LIVEPEER_FUNDED_VALUE_WEI: z.string().optional(),
-  LIVEPEER_FACE_VALUE_WEI: z.string().optional(),
   LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("default"),
   LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("live-standard"),
   LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: z.coerce.number().int().positive().default(60),
@@ -98,13 +94,18 @@ const envSchema = z.object({
 
 type ParsedConfig = z.infer<typeof envSchema>;
 
-export type Config = Readonly<
-  Omit<ParsedConfig, "LIVEPEER_FUNDED_VALUE_WEI"> & {
-    LIVEPEER_FUNDED_VALUE_WEI: string;
-  }
->;
+export type Config = Readonly<ParsedConfig>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const removed = [
+    "LIVEPEER_PAYER_SOCKET",
+    "LIVEPEER_PAYER_PROTO_ROOT",
+    "LIVEPEER_FUNDED_VALUE_WEI",
+    "LIVEPEER_FACE_VALUE_WEI",
+  ].filter((key) => env[key] !== undefined);
+  if (removed.length > 0) {
+    throw new Error(`Removed v0 configuration is not supported: ${removed.join(", ")}`);
+  }
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const issues = parsed.error.issues
@@ -112,14 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .join("\n");
     throw new Error(`Invalid environment:\n${issues}`);
   }
-  const fundedValueWei =
-    parsed.data.LIVEPEER_FUNDED_VALUE_WEI ??
-    parsed.data.LIVEPEER_FACE_VALUE_WEI ??
-    "1000000000000000";
-  return Object.freeze({
-    ...parsed.data,
-    LIVEPEER_FUNDED_VALUE_WEI: fundedValueWei,
-  });
+  return Object.freeze(parsed.data);
 }
 
 export function emailEnabled(config: Config): boolean {

@@ -6,7 +6,6 @@
 
 export * from "./storageProvider.js";
 export * from "./workerResolver.js";
-export * from "./workerClient.js";
 export * from "./logger.js";
 export * from "./streamKeyHasher.js";
 export * from "./locTransport.js";

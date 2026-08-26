@@ -70,3 +70,10 @@ test("LOC configuration accepts a complete explicit boundary", () => {
   assert.equal(config.LIVEPEER_LOC_TIMEOUT_MS, 2_500);
   assert.equal(config.LIVEPEER_LOC_CLIENT_ID, "transcode/test");
 });
+
+test("removed direct-payer configuration fails instead of falling back", () => {
+  assert.throws(() => loadConfig({
+    ...required,
+    LIVEPEER_PAYER_SOCKET: "/run/livepeer/payer.sock",
+  }), /Removed v0 configuration is not supported: LIVEPEER_PAYER_SOCKET/);
+});

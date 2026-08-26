@@ -72,10 +72,9 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_FORCE_PATH_STYLE: "true"
 
-      # Wire stubs — no resolver / no payer in the e2e smoke. The smoke
-      # asserts the documented 503 degradation paths.
+      # Resolver stub — no resolver in the e2e smoke. The smoke asserts
+      # the documented 503 degradation paths.
       # LIVEPEER_RESOLVER_SOCKET unset
-      # LIVEPEER_PAYER_SOCKET unset
 
       # Gateway RTMP listener unwired in the e2e smoke (live route
       # returns 503 resolver_not_configured before even consulting it).

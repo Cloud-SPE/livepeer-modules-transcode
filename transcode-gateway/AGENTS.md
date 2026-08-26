@@ -61,16 +61,15 @@ src/
 ├── email/                # Resend client + HTML templates
 ├── engine/               # types, interfaces, repo contracts, service, dispatch, config (plan 0003)
 ├── repo/                 # drizzle-backed concrete media.* repos (plan 0003)
-├── livepeer/             # wire layer: capability map, headers, payment, resolver,
-│                         # routeHealth, real httpWorkerClient + resolverWorkerResolver,
-│                         # stub fallbacks (plan 0004)
+├── livepeer/             # v2 wire layer: LOC job/session clients, resolver,
+│                         # route protocol parsing, selection policy, and recovery
 ├── middleware/           # bearer / admin / user auth, request logger
 └── routes/
     ├── health.ts
     └── auth/             # public + user + admin route handlers
 ```
 
-Plus vendored proto contracts under `proto/livepeer/`:
+Plus the vendored resolver proto contract under `proto/livepeer/`:
 
 - `registry/v1/{types,resolver}.proto` — resolver contract pinned from
   `livepeer-network-modules/proto-contracts/`. The v2 `SelectedRoute`
@@ -78,13 +77,9 @@ Plus vendored proto contracts under `proto/livepeer/`:
   fingerprints, and overlapping delegated settlement keys; job/session
   axes remain losslessly mirrored in `extra_json` and are parsed strictly
   before dispatch.
-- `payments/v1/{types,payer_daemon}.proto` — payer-daemon contract from
-  `livepeer-network-protocol/proto/`
-
 The resolver protos are loaded at runtime by the resolver gRPC client when
-`LIVEPEER_RESOLVER_SOCKET` is set. The payment protos remain as migration
-history while the legacy path exists; the v2 target delegates payer behavior
-to LOC and deletes the direct payer client at cutover.
+`LIVEPEER_RESOLVER_SOCKET` is set. Payment behavior is delegated exclusively
+to LOC; the gateway carries no direct payer client or payment proto.
 
 `runtime/rtmp/` (live RTMP listener) lands under plan 0006. VOD routes
 land under plan 0005.

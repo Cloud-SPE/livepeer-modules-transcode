@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end compose-stack smoke. Brings up postgres + minio + gateway and
-# drives the full auth + VOD + live + HLS-proxy shape. Real broker /
-# resolver / payer-daemon are NOT wired; the smoke asserts the documented
+# drives the full auth + VOD + live + HLS-proxy shape. Real Modules, LOC,
+# and resolver services are NOT wired; the smoke asserts the documented
 # 503 degradation paths (no_video_transcode_route, resolver_not_configured).
 
 set -euo pipefail
@@ -28,9 +28,8 @@ done
 step "confirm wire stubs at boot"
 LOGS=$($COMPOSE logs gateway 2>/dev/null)
 echo "$LOGS" | grep -q "wire.resolver.stub" || fail "expected wire.resolver.stub log"
-echo "$LOGS" | grep -q "wire.payerDaemon.stub" || fail "expected wire.payerDaemon.stub log"
 echo "$LOGS" | grep -q "storage.s3.connected" || fail "expected storage.s3.connected log"
-ok "wire stubs + S3 wired"
+ok "resolver stub + S3 wired"
 
 # ── Auth ──
 step "auth: signup $EMAIL"

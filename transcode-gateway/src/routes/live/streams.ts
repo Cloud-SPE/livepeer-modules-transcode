@@ -6,7 +6,6 @@ import type { DbPool } from "../../db/pool.js";
 import type { Logger, PaidSessionClient, WorkerResolver } from "../../engine/interfaces/index.js";
 import type { LiveStreamRepo, PlaybackIdRepo } from "../../engine/repo/index.js";
 import type { LiveSessionDirectory } from "../../livepeer/liveSessionDirectory.js";
-import type { VideoRouteSelector } from "../../livepeer/routeSelector.js";
 import type { PaidSessionStore } from "../../livepeer/paidSessionStore.js";
 import { openPaidLiveStream } from "../../engine/service/paidLiveOpen.js";
 import { makeUserApiKeyAuth } from "../../middleware/userApiKeyAuth.js";
@@ -17,7 +16,6 @@ import { makeUserApiKeyAuth } from "../../middleware/userApiKeyAuth.js";
 export interface LiveStreamsDeps {
   pool: DbPool;
   config: Config;
-  routeSelector: VideoRouteSelector | null;
   workerResolver: WorkerResolver;
   paidSessionClient: PaidSessionClient | null;
   paidSessionStore: PaidSessionStore | null;
@@ -50,7 +48,6 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
   // POST /v1/live/streams
   app.post("/v1/live/streams", { preHandler: auth }, async (req, reply) => {
     if (
-      !deps.routeSelector ||
       !deps.paidSessionClient ||
       !deps.paidSessionStore ||
       !deps.config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL ||

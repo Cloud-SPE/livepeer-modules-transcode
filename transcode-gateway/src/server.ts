@@ -4,7 +4,7 @@ import type { Config } from "./config.js";
 import type { DbPool } from "./db/pool.js";
 import type { EmailClient } from "./email/client.js";
 import type { RateLimiter } from "./auth/rateLimit.js";
-import type { Logger, PaidJobClient, PaidSessionClient, SourceProbe, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { Logger, PaidJobClient, PaidSessionClient, SourceProbe, StorageProvider, WorkerResolver } from "./engine/interfaces/index.js";
 import type {
   AssetRepo,
   EncodingJobRepo,
@@ -24,7 +24,6 @@ import { registerVodPlayback } from "./routes/vod/playback.js";
 import { registerLiveStreams } from "./routes/live/streams.js";
 import { registerHlsProxy } from "./routes/live/hlsProxy.js";
 import type { LiveSessionDirectory } from "./livepeer/liveSessionDirectory.js";
-import type { VideoRouteSelector } from "./livepeer/routeSelector.js";
 import type { PaidSessionStore } from "./livepeer/paidSessionStore.js";
 import type { LiveStreamRepo } from "./engine/repo/index.js";
 
@@ -35,14 +34,12 @@ export interface ServerDeps {
   rateLimiter: RateLimiter;
   storage: StorageProvider | null;
   workerResolver: WorkerResolver;
-  workerClient: WorkerClient;
   paidJobClient: PaidJobClient | null;
   paidOperationRepo: PaidOperationRepo | null;
   paidSessionClient: PaidSessionClient | null;
   paidSessionStore: PaidSessionStore | null;
   sourceProbe: SourceProbe;
   recoveryOwner: string;
-  routeSelector: VideoRouteSelector | null;
   liveSessions: LiveSessionDirectory;
   assetRepo: AssetRepo;
   uploadRepo: UploadRepo;
@@ -110,7 +107,6 @@ export async function createServer(deps: ServerDeps): Promise<FastifyInstance> {
   registerLiveStreams(app, {
     pool: deps.pool,
     config: deps.config,
-    routeSelector: deps.routeSelector,
     workerResolver: deps.workerResolver,
     paidSessionClient: deps.paidSessionClient,
     paidSessionStore: deps.paidSessionStore,

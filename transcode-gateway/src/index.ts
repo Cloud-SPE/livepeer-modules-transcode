@@ -7,13 +7,10 @@ import { runMigrations } from "./db/migrate.js";
 import { createRateLimiter } from "./auth/rateLimit.js";
 import { createEmailClient } from "./email/client.js";
 import { createServer } from "./server.js";
-import type { PaidJobClient, PaidSessionClient, StorageProvider, WorkerClient, WorkerResolver } from "./engine/interfaces/index.js";
+import type { PaidJobClient, PaidSessionClient, StorageProvider, WorkerResolver } from "./engine/interfaces/index.js";
 import type { PaidOperationRepo } from "./engine/repo/index.js";
 import {
-  createStubWorkerClient,
   createStubWorkerResolver,
-  createUnixSocketPayerDaemonClient,
-  createHttpWorkerClient,
   createResolverWorkerResolver,
   createLiveSessionDirectory,
   createLocClient,
@@ -22,8 +19,6 @@ import {
   createPaidJobClient,
   createPaidSessionClient,
   decodeWrappingKey,
-  type PayerDaemonClient,
-  type VideoRouteSelector,
 } from "./livepeer/index.js";
 import { createS3StorageProvider, loadS3ConfigFromEnv } from "./storage/index.js";
 import { createAssetRepo } from "./repo/assets.js";
@@ -76,27 +71,8 @@ async function main(): Promise<void> {
   const rateLimiter = createRateLimiter();
 
   // Wire layer — real impls when env vars set, stubs otherwise.
-  let payerDaemon: PayerDaemonClient | null = null;
-  let workerClient: WorkerClient = createStubWorkerClient();
   let workerResolver: WorkerResolver = createStubWorkerResolver();
-  let routeSelector: VideoRouteSelector | null = null;
   let resolverHandle: { close(): Promise<void> } | null = null;
-
-  if (config.LIVEPEER_PAYER_SOCKET) {
-    payerDaemon = await createUnixSocketPayerDaemonClient({
-      socketPath: config.LIVEPEER_PAYER_SOCKET,
-      protoRoot: config.LIVEPEER_PAYER_PROTO_ROOT,
-    });
-    workerClient = createHttpWorkerClient({
-      payerDaemon,
-      fundedValueWei: config.LIVEPEER_FUNDED_VALUE_WEI,
-    });
-    consoleLogger.info("wire.payerDaemon.connected", { socket: config.LIVEPEER_PAYER_SOCKET });
-  } else {
-    consoleLogger.info("wire.payerDaemon.stub", {
-      reason: "LIVEPEER_PAYER_SOCKET unset",
-    });
-  }
 
   if (config.LIVEPEER_RESOLVER_SOCKET) {
     const handle = createResolverWorkerResolver({
@@ -107,7 +83,6 @@ async function main(): Promise<void> {
       routeCooldownMs: config.LIVEPEER_ROUTE_COOLDOWN_MS,
     });
     workerResolver = handle.resolver;
-    routeSelector = handle.selector;
     resolverHandle = handle;
     consoleLogger.info("wire.resolver.connected", { socket: config.LIVEPEER_RESOLVER_SOCKET });
   } else {
@@ -171,14 +146,12 @@ async function main(): Promise<void> {
     rateLimiter,
     storage,
     workerResolver,
-    workerClient,
     paidJobClient,
     paidOperationRepo,
     paidSessionClient,
     paidSessionStore,
     sourceProbe,
     recoveryOwner,
-    routeSelector,
     liveSessions,
     assetRepo,
     uploadRepo,
@@ -283,7 +256,6 @@ async function main(): Promise<void> {
     if (rtmpHandle) await rtmpHandle.stop();
     await app.close();
     if (resolverHandle) await resolverHandle.close();
-    if (payerDaemon) await payerDaemon.close();
     await pool.end();
     process.exit(0);
   };
