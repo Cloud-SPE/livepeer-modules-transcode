@@ -112,7 +112,7 @@ export interface PaidSessionStatusResult {
 }
 
 export interface PaidSessionEndRequest {
-  opened: LocOpenSessionResult;
+  opened: PaidSessionControlHandle;
   gatewaySessionId: string;
   brokerSessionId: string;
   credential: string;

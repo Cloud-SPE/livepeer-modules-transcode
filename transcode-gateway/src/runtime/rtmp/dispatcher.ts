@@ -96,6 +96,7 @@ export function attachDispatcher(nms: NmsHandle, deps: DispatcherDeps): { stop()
     relayStatus: PaidSessionRuntimeState["relayStatus"],
     status: string,
     relayGeneration?: number,
+    relayDisconnectedAt?: string,
   ): Promise<boolean> => {
     const owned = await deps.paidSessionStore.claimByLiveStreamId(streamId);
     if (!owned?.operation.sessionRuntime) return false;
@@ -105,6 +106,7 @@ export function attachDispatcher(nms: NmsHandle, deps: DispatcherDeps): { stop()
         ...owned.operation.sessionRuntime,
         relayStatus,
         relayGeneration: relayGeneration ?? owned.operation.sessionRuntime.relayGeneration,
+        relayDisconnectedAt,
       },
     });
     if (!progressed) return false;
@@ -117,7 +119,7 @@ export function attachDispatcher(nms: NmsHandle, deps: DispatcherDeps): { stop()
     relayStatus: "reconnecting" | "failed",
     reason: string,
   ): Promise<void> => {
-    await persistRelayState(streamId, relayStatus, "reconcile_pending");
+    await persistRelayState(streamId, relayStatus, "reconcile_pending", undefined, new Date().toISOString());
     await deps.liveStreamRepo.updateStatus(streamId, "reconnecting", { lastSeenAt: new Date() });
     deps.logger?.info("rtmp.relay.reconcile_scheduled", { stream_id: streamId, reason });
   };

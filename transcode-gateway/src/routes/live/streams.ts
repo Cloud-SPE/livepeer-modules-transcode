@@ -182,16 +182,24 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
         ended_at: stream.endedAt.toISOString(),
       };
     }
-    const endedAt = new Date();
-    await deps.liveStreamRepo.updateStatus(stream.id, "ended", {
-      lastSeenAt: endedAt,
-      endedAt,
-    });
-    if (stream.sessionId) deps.liveSessions.remove(stream.sessionId);
+    if (!deps.paidSessionStore) {
+      reply.code(503).send({ status: "error", error: "paid_session_not_configured" });
+      return;
+    }
+    const operation = await deps.paidSessionStore.requestWinddown(stream.id, "customer_end");
+    if (!operation) {
+      reply.code(409).send({
+        status: "error",
+        error: "paid_session_winddown_unavailable",
+        message: "the paid session has no recoverable winddown state",
+      });
+      return;
+    }
+    reply.code(202);
     return {
       stream_id: stream.id,
-      status: "ended",
-      ended_at: endedAt.toISOString(),
+      status: "ending",
+      ended_at: null,
     };
   });
 }

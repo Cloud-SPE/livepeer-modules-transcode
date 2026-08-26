@@ -69,6 +69,10 @@ export interface PaidOperationRepo {
     now: Date,
     leaseExpiresAt: Date,
   ): Promise<PaidOperation | null>;
+  requestSessionWinddown(
+    liveStreamId: string,
+    reason: string,
+  ): Promise<PaidOperation | null>;
   renewClaim(
     id: string,
     claim: PaidOperationClaim,
@@ -94,6 +98,17 @@ export interface PaidOperationRepo {
     claim: PaidOperationClaim,
     value: {
       status: string;
+      claimedUnits: string;
+      settlementSequence: string;
+      evidence: PaidTerminalEvidence;
+      terminalAt: Date;
+    },
+  ): Promise<boolean>;
+  recordLiveTerminal(
+    id: string,
+    claim: PaidOperationClaim,
+    value: {
+      liveStreamId: string;
       claimedUnits: string;
       settlementSequence: string;
       evidence: PaidTerminalEvidence;

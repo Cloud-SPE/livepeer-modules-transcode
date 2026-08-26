@@ -21,6 +21,7 @@ test("LOC configuration is disabled only when URL and API key are both absent", 
   assert.equal(config.LIVEPEER_LIVE_MAX_REFILLS, 60);
   assert.equal(config.LIVEPEER_LIVE_RECONCILE_INTERVAL_MS, 5_000);
   assert.equal(config.LIVEPEER_LIVE_CONTROL_WINDOW_MS, 250);
+  assert.equal(config.LIVEPEER_LIVE_DISCONNECT_GRACE_MS, 15_000);
 });
 
 test("live refill threshold must leave positive initial runway", () => {

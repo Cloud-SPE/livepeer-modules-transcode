@@ -301,7 +301,7 @@ export function createPaidSessionClient(
         lookup.wire.session_id !== input.brokerSessionId ||
         lookup.wire.gateway_session_id !== input.gatewaySessionId ||
         lookup.wire.work_id !== body.work_id ||
-        lookup.wire.unit !== input.opened.routeSnapshot.workUnit ||
+        lookup.wire.unit !== controlWorkUnit(input.opened) ||
         lookup.wire.claimed_units !== lookup.wire.debited_units ||
         lookup.wire.state !== "closed"
       ) throw invalidEvidence();
@@ -324,12 +324,23 @@ export function createPaidSessionClient(
           { retryable: false },
         );
       }
-      const accounting = await loc.closeSession({
-        operationId: input.opened.operationId,
-        actualUnits,
-        outcome,
-        settlement: lookup.envelope,
-      });
+      let accounting;
+      try {
+        accounting = await loc.closeSession({
+          operationId: input.opened.operationId,
+          actualUnits,
+          outcome,
+          settlement: lookup.envelope,
+        });
+      } catch (error) {
+        if (error instanceof LocTransportError) {
+          throw new PaidSessionClientError(error.remoteCode ?? error.code, {
+            retryable: error.retryable,
+            cause: error,
+          });
+        }
+        throw error;
+      }
       if (accounting.workId !== lookup.wire.work_id) throw invalidEvidence();
       return {
         brokerSessionId: body.session_id,
@@ -374,7 +385,7 @@ export function parsePaidSessionControlEvent(value: unknown) {
 
 async function settlementLookup(
   fetchImpl: typeof globalThis.fetch,
-  opened: LocOpenSessionResult,
+  opened: { brokerUrl: string },
   gatewaySessionId: string,
   header: string | null,
 ) {

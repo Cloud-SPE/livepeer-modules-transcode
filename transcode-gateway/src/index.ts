@@ -235,6 +235,8 @@ async function main(): Promise<void> {
           refillThresholdUnits: config.LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS,
           maxTotalUnits: config.LIVEPEER_LIVE_MAX_TOTAL_UNITS,
           maxRefills: config.LIVEPEER_LIVE_MAX_REFILLS,
+          disconnectGraceMs: config.LIVEPEER_LIVE_DISCONNECT_GRACE_MS,
+          liveSessions,
           logger: consoleLogger,
         });
       } catch {

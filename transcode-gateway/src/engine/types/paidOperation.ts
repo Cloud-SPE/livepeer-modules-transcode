@@ -75,6 +75,8 @@ export interface PaidSessionRuntimeState {
   controlCursor?: string;
   refillCount?: number;
   lastHttpReconcileAt?: string;
+  relayDisconnectedAt?: string;
+  winddownReason?: string;
 }
 
 export interface PaidTerminalEvidence {
@@ -84,6 +86,7 @@ export interface PaidTerminalEvidence {
   workUnits: string;
   protocolError?: string;
   claimSignature?: string;
+  closeReason?: string;
 }
 
 export interface PaidOperationSecrets {

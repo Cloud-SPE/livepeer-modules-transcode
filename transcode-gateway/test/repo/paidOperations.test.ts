@@ -346,6 +346,66 @@ test("paid VOD terminal state is fenced and applied in one product transaction",
   assert.equal(released, true);
 });
 
+test("live winddown request fences any active owner without declaring terminal state", async () => {
+  const calls: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool = {
+    async query(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return result([]);
+    },
+  } as unknown as DbPool;
+  const repo = createPaidOperationRepo(
+    pool,
+    createOperationSecretCipher("test-key", randomBytes(32)),
+  );
+
+  assert.equal(await repo.requestSessionWinddown("live-1", "customer_end"), null);
+  assert.match(calls[0]!.sql, /status = 'winddown_requested'/);
+  assert.match(calls[0]!.sql, /lifecycle_version = lifecycle_version \+ 1/);
+  assert.match(calls[0]!.sql, /recovery_owner = NULL/);
+  assert.doesNotMatch(calls[0]!.sql, /terminal_at\s*=/);
+  assert.deepEqual(calls[0]!.params, ["live-1", "customer_end"]);
+});
+
+test("paid live terminal atomically settles operation stream playback and secrets", async () => {
+  const calls: string[] = [];
+  const client = {
+    async query(sql: string) {
+      calls.push(sql);
+      if (sql.includes("UPDATE media.paid_operations")) return result([{ id: "operation-1" }]);
+      if (sql.includes("UPDATE media.live_streams")) return result([{ id: "live-1" }]);
+      return result([]);
+    },
+    release() {},
+  };
+  const repo = createPaidOperationRepo(
+    { async connect() { return client; } } as unknown as DbPool,
+    createOperationSecretCipher("test-key", randomBytes(32)),
+  );
+
+  assert.equal(await repo.recordLiveTerminal("operation-1", terminalClaim(), {
+    liveStreamId: "live-1",
+    claimedUnits: "55",
+    settlementSequence: "2",
+    evidence: {
+      httpStatus: 200,
+      responseSha256: "a".repeat(64),
+      workUnit: "output_seconds",
+      workUnits: "55",
+      closeReason: "customer_end",
+    },
+    terminalAt: new Date("2026-08-26T12:00:00Z"),
+  }), true);
+  assert.deepEqual(calls.map((sql) => {
+    if (sql === "BEGIN" || sql === "COMMIT") return sql.toLowerCase();
+    if (sql.includes("paid_operations")) return "operation";
+    if (sql.includes("live_streams")) return "stream";
+    if (sql.includes("playback_ids")) return "playback";
+    if (sql.includes("paid_operation_secrets")) return "secrets";
+    return "other";
+  }), ["begin", "operation", "stream", "playback", "secrets", "commit"]);
+});
+
 test("paid VOD terminal rejects a stale lease before product writes", async () => {
   const calls: string[] = [];
   const client = {

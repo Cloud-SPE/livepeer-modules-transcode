@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   Logger,
@@ -10,6 +11,7 @@ import type { JsonValue, PaidOperationSecrets } from "../types/index.js";
 import type { OwnedPaidSession, PaidSessionStore } from "../../livepeer/paidSessionStore.js";
 import { parsePaidSessionControlEvent } from "../../livepeer/paidSessionClient.js";
 import { newRequestId as createRequestId } from "../../livepeer/requestId.js";
+import type { LiveSessionDirectory } from "../../livepeer/liveSessionDirectory.js";
 
 const storedContextWire = z.object({
   loc: z.object({
@@ -48,6 +50,8 @@ export interface PaidLiveReconcilerDeps {
   refillThresholdUnits: number;
   maxTotalUnits: number;
   maxRefills: number;
+  disconnectGraceMs: number;
+  liveSessions: LiveSessionDirectory;
   logger?: Logger;
   now?: () => Date;
   newRequestId?: () => string;
@@ -78,6 +82,27 @@ async function reconcileOne(
       throw new Error("paid session recovery identity is incomplete");
     }
 
+    const clock = deps.now ?? (() => new Date());
+    const now = clock();
+    const runtimeAtStart = owned.operation.sessionRuntime!;
+    const disconnectExpired = runtimeAtStart.relayDisconnectedAt !== undefined &&
+      timestamp(runtimeAtStart.relayDisconnectedAt).getTime() + deps.disconnectGraceMs <= now.getTime();
+    const leaseExpired = owned.operation.leaseExpiresAt !== undefined &&
+      owned.operation.leaseExpiresAt.getTime() <= now.getTime();
+    if (
+      owned.operation.status === "winddown_requested" ||
+      owned.operation.status === "winddown_pending" ||
+      owned.operation.status === "winddown_retry" ||
+      disconnectExpired ||
+      leaseExpired
+    ) {
+      const reason = runtimeAtStart.winddownReason ??
+        (leaseExpired ? "lease_exhausted" : runtimeAtStart.relayStatus === "failed" ? "relay_failure" :
+          disconnectExpired ? "publisher_disconnect" : "broker_ended");
+      await executeWinddown(deps, owned, handle, context.credentials.broker_session_credential, reason);
+      return;
+    }
+
     if (context.refillIntent) {
       await executeRefill(deps, owned, secrets, context.refillIntent, handle, context.credentials.broker_session_credential);
       return;
@@ -95,6 +120,16 @@ async function reconcileOne(
         for (const frame of frames) {
           const next = await applyAdvisoryEvent(deps, owned, parsePaidSessionControlEvent(frame));
           if (next) owned = next;
+        }
+        if (owned.operation.status === "winddown_pending") {
+          await executeWinddown(
+            deps,
+            owned,
+            handle,
+            context.credentials.broker_session_credential,
+            owned.operation.sessionRuntime?.winddownReason ?? "broker_ended",
+          );
+          return;
         }
       } catch {
         deps.logger?.warn("orchestrator.live_control_unavailable", { operation_id: owned.operation.id });
@@ -116,17 +151,29 @@ async function reconcileOne(
       ? decimalUnits(owned.operation.fundedUnits)
       : status.balance.debitedUnits + status.balance.runwayUnits;
     const progressed = await deps.paidSessionStore.recordProgress(owned, {
-      status: status.state === "closed" ? "winddown_pending" : "active",
+      status: status.state === "closed"
+        ? "winddown_pending"
+        : runtime.relayDisconnectedAt ? "reconcile_pending" : "active",
       fundedUnits: String(authoritativeFunded),
       claimedUnits: String(status.claimedUnits),
       balanceUnits: String(authoritativeRunway),
       willRefuseNextRefill: status.balance.willRefuseNextRefill,
       leaseExpiresAt: timestamp(status.leaseExpiresAt),
-      sessionRuntime: { ...runtime, lastHttpReconcileAt: (deps.now ?? (() => new Date()))().toISOString() },
+      sessionRuntime: { ...runtime, lastHttpReconcileAt: clock().toISOString() },
     });
     if (!progressed) return;
     owned = progressed;
-    if (status.state === "closed") return;
+    if (status.state === "closed") {
+      await executeWinddown(
+        deps,
+        owned,
+        handle,
+        context.credentials.broker_session_credential,
+        status.closeReason ?? "broker_ended",
+      );
+      return;
+    }
+    if (runtime.relayDisconnectedAt) return;
 
     const runway = status.balance.runwayUnits;
     const needsRefill = status.balance.status !== "ok" || (runway !== null && runway <= deps.refillThresholdUnits);
@@ -264,7 +311,10 @@ async function applyAdvisoryEvent(
     });
   }
   if (event.type === "session.ended") {
-    return deps.paidSessionStore.recordProgress(owned, { status: "winddown_pending" });
+    return deps.paidSessionStore.recordProgress(owned, {
+      status: "winddown_pending",
+      sessionRuntime: { ...runtime, winddownReason: event.closeReason },
+    });
   }
   return owned;
 }
@@ -277,11 +327,71 @@ async function requestWinddown(
   await deps.paidSessionStore.recordProgress(owned, {
     status: "winddown_requested",
     willRefuseNextRefill: true,
+    sessionRuntime: {
+      ...owned.operation.sessionRuntime!,
+      winddownReason: reason,
+    },
   });
   deps.logger?.warn("orchestrator.live_winddown_requested", {
     operation_id: owned.operation.id,
     reason,
   });
+}
+
+async function executeWinddown(
+  deps: PaidLiveReconcilerDeps,
+  owned: OwnedPaidSession,
+  handle: PaidSessionControlHandle,
+  credential: string,
+  reason: string,
+): Promise<void> {
+  const liveStreamId = owned.operation.liveStreamId!;
+  const brokerSessionId = owned.operation.brokerSessionId!;
+  try {
+    const result = await deps.paidSessionClient.end({
+      opened: handle,
+      gatewaySessionId: liveStreamId,
+      brokerSessionId,
+      credential,
+      reason,
+    });
+    const recorded = await deps.paidSessionStore.recordLiveTerminal(owned, {
+      liveStreamId,
+      claimedUnits: String(result.actualUnits),
+      settlementSequence: String(result.settlementSequence),
+      evidence: {
+        httpStatus: 200,
+        responseSha256: createHash("sha256")
+          .update(JSON.stringify(result.envelope))
+          .digest("hex"),
+        workUnit: owned.operation.route.workUnit,
+        workUnits: String(result.actualUnits),
+        claimSignature: result.envelope.signature.value,
+        closeReason: result.closeReason || reason,
+      },
+      terminalAt: (deps.now ?? (() => new Date()))(),
+    });
+    if (!recorded) return;
+    deps.liveSessions.remove(brokerSessionId);
+    deps.logger?.info("orchestrator.live_settled", {
+      operation_id: owned.operation.id,
+      stream_id: liveStreamId,
+      reason: result.closeReason || reason,
+    });
+  } catch (error) {
+    const typed = error instanceof PaidSessionClientError ? error : null;
+    await deps.paidSessionStore.recordProgress(owned, {
+      status: typed?.retryable === false ? "winddown_failed" : "winddown_retry",
+      sessionRuntime: {
+        ...owned.operation.sessionRuntime!,
+        winddownReason: reason,
+      },
+    });
+    deps.logger?.error("orchestrator.live_winddown_failed", {
+      operation_id: owned.operation.id,
+      code: typed?.code ?? "winddown_failed",
+    });
+  }
 }
 
 function controlHandle(value: z.infer<typeof storedContextWire>["loc"]["control_handle"]): PaidSessionControlHandle {

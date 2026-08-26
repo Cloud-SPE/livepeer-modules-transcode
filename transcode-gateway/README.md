@@ -119,3 +119,8 @@ requests a refill at 15 remaining units, and permits at most 60 accepted
 refills. Operators can set `LIVEPEER_LIVE_RECONCILE_INTERVAL_MS`,
 `LIVEPEER_LIVE_CONTROL_WINDOW_MS`, `LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS`, and
 `LIVEPEER_LIVE_MAX_REFILLS`; the total-unit ceiling remains authoritative.
+Publisher disconnects receive a 15-second reconnect grace by default through
+`LIVEPEER_LIVE_DISCONNECT_GRACE_MS`. Customer end, grace expiry, lease expiry,
+broker end, and payment winddown remain nonterminal locally until the broker's
+signed settlement is accepted by LOC. Final operation state, stream end,
+playback removal, and secret erasure commit in one database transaction.

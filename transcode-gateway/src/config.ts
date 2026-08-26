@@ -34,6 +34,7 @@ const envSchema = z.object({
   LIVEPEER_LIVE_MAX_REFILLS: z.coerce.number().int().positive().default(60),
   LIVEPEER_LIVE_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(250).default(5_000),
   LIVEPEER_LIVE_CONTROL_WINDOW_MS: z.coerce.number().int().min(10).max(10_000).default(250),
+  LIVEPEER_LIVE_DISCONNECT_GRACE_MS: z.coerce.number().int().min(1_000).default(15_000),
   LIVEPEER_SESSION_RECOVERY_LEASE_MS: z.coerce.number().int().min(1_000).default(60_000),
   // Required by v2 live paths before they may persist session credentials.
   // Canonical base64 for a 32-byte wrapping key held outside Postgres.

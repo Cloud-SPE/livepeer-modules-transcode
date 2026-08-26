@@ -90,6 +90,22 @@ function harness(options: {
       };
       return owned();
     },
+    async recordLiveTerminal(_value: OwnedPaidSession, terminal: {
+      claimedUnits: string; settlementSequence: string; evidence: PaidOperation["terminalEvidence"]; terminalAt: Date;
+    }) {
+      calls.push("terminal");
+      version += 1;
+      currentOperation = {
+        ...currentOperation,
+        status: "settled",
+        claimedUnits: terminal.claimedUnits,
+        settlementSequence: terminal.settlementSequence,
+        terminalEvidence: terminal.evidence,
+        terminalAt: terminal.terminalAt,
+        lifecycleVersion: String(version),
+      };
+      return true;
+    },
     async release() { calls.push("release"); return true; },
   } as Partial<PaidSessionStore>, {
     get(target, property) {
@@ -111,6 +127,11 @@ function harness(options: {
     refillThresholdUnits: 15,
     maxTotalUnits: 3_600,
     maxRefills: 60,
+    disconnectGraceMs: 15_000,
+    liveSessions: {
+      record() {}, get() { return null; }, getByStreamId() { return null; },
+      remove() { calls.push("cache-remove"); },
+    },
     newRequestId: (() => {
       let id = 0;
       return () => `refill-${++id}`;
@@ -147,6 +168,26 @@ function acceptedRefill(workId = "work-1") {
     balance: {
       claimedUnits: 50, debitedUnits: 50, unit: "output_seconds", runwayUnits: 70,
       runwaySecondsEstimate: 70, status: "ok" as const, willRefuseNextRefill: false,
+    },
+  };
+}
+
+function settledEnd(closeReason = "customer_end") {
+  return {
+    brokerSessionId: "broker-session-1", workId: "work-1", state: "closed",
+    closeReason, settlementSequence: 2, actualUnits: 55, outcome: "EXACT",
+    envelope: {
+      payload: { actual_units: "55" },
+      signature: {
+        algorithm: "secp256k1" as const,
+        canonicalization: "jcs" as const,
+        value: `0x${"44".repeat(65)}`,
+      },
+    },
+    accounting: {
+      operationId: "loc-operation-1", workId: "work-1", actualUnits: 55,
+      billedValueWei: 55, refundWei: 5, outcome: "EXACT",
+      closedAt: "2026-08-26T12:04:00Z",
     },
   };
 }
@@ -276,4 +317,78 @@ test("control WebSocket loss never suppresses authoritative HTTP polling", async
 
   assert.equal(statusCalls, 1);
   assert.ok(h.calls.includes("progress:active"));
+});
+
+test("durable customer winddown becomes terminal only after broker settlement and LOC close", async () => {
+  const h = harness({
+    operation: operation({
+      status: "winddown_requested",
+      sessionRuntime: {
+        ...operation().sessionRuntime!,
+        winddownReason: "customer_end",
+      },
+    }),
+    client: { async end(input) {
+      assert.equal(input.reason, "customer_end");
+      return settledEnd();
+    } },
+  });
+
+  await reconcilePaidLiveSessions(h.deps);
+
+  assert.equal(h.operation().status, "settled");
+  assert.equal(h.operation().terminalEvidence?.closeReason, "customer_end");
+  assert.deepEqual(h.calls.filter((value) => value === "terminal" || value === "cache-remove"), [
+    "terminal", "cache-remove",
+  ]);
+});
+
+test("unresolved winddown stays nonterminal and restart retries the same authoritative end", async () => {
+  let attempts = 0;
+  const h = harness({
+    operation: operation({
+      status: "winddown_requested",
+      sessionRuntime: { ...operation().sessionRuntime!, winddownReason: "lease_exhausted" },
+    }),
+    client: { async end() {
+      attempts += 1;
+      throw new PaidSessionClientError("accounting_pending", { retryable: true });
+    } },
+  });
+
+  await reconcilePaidLiveSessions(h.deps);
+  assert.equal(h.operation().status, "winddown_retry");
+  assert.equal(h.operation().terminalAt, undefined);
+  await reconcilePaidLiveSessions(h.deps);
+  assert.equal(attempts, 2);
+  assert.equal(h.operation().terminalAt, undefined);
+});
+
+test("publisher reconnect grace polls authoritatively before ending the existing session", async () => {
+  let endCalls = 0;
+  const disconnected = operation({
+    status: "reconcile_pending",
+    sessionRuntime: {
+      ...operation().sessionRuntime!,
+      relayStatus: "reconnecting",
+      relayDisconnectedAt: "2026-08-26T11:59:55Z",
+    },
+  });
+  const h = harness({
+    operation: disconnected,
+    client: {
+      async status() { return { ...lowStatus(), balance: { ...lowStatus().balance, status: "ok", runwayUnits: 50 } }; },
+      async end() { endCalls += 1; return settledEnd("publisher_disconnect"); },
+    },
+  });
+  h.deps.now = () => new Date("2026-08-26T12:00:00Z");
+
+  await reconcilePaidLiveSessions(h.deps);
+  assert.equal(endCalls, 0);
+  assert.equal(h.operation().status, "reconcile_pending");
+
+  h.deps.now = () => new Date("2026-08-26T12:00:20Z");
+  await reconcilePaidLiveSessions(h.deps);
+  assert.equal(endCalls, 1);
+  assert.equal(h.operation().status, "settled");
 });

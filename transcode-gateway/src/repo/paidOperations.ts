@@ -406,6 +406,30 @@ export function createPaidOperationRepo(
       return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
     },
 
+    async requestSessionWinddown(liveStreamId, reason) {
+      if (!liveStreamId || !/^[a-z][a-z0-9_]{2,63}$/.test(reason)) {
+        throw new Error("paid session winddown request is invalid");
+      }
+      const result = await pool.query<Row>(
+        `UPDATE media.paid_operations
+         SET status = 'winddown_requested',
+             session_runtime = session_runtime || jsonb_build_object('winddownReason', $2::text),
+             lifecycle_version = lifecycle_version + 1,
+             recovery_owner = NULL, recovery_lease_expires_at = NULL,
+             updated_at = NOW()
+         WHERE id = (
+           SELECT id FROM media.paid_operations
+           WHERE live_stream_id = $1 AND operation_kind = 'session'
+             AND terminal_at IS NULL
+           ORDER BY rotation_generation DESC LIMIT 1
+           FOR UPDATE
+         )
+         RETURNING ${SELECT_COLUMNS}`,
+        [liveStreamId, reason],
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
     async renewClaim(id, claim, leaseExpiresAt) {
       validateClaim(claim);
       if (
@@ -536,6 +560,64 @@ export function createPaidOperationRepo(
         ],
       );
       return (result.rowCount ?? 0) > 0;
+    },
+
+    async recordLiveTerminal(id, claim, value) {
+      validateClaim(claim);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const terminal = await client.query<{ id: string }>(
+          `UPDATE media.paid_operations
+           SET status = 'settled', claimed_units = $2, settlement_sequence = $3,
+               terminal_evidence = $4, terminal_at = $5,
+               next_retry_at = NULL, last_error_code = NULL, updated_at = NOW(),
+               lifecycle_version = lifecycle_version + 1,
+               recovery_owner = NULL, recovery_lease_expires_at = NULL
+           WHERE id = $1 AND live_stream_id = $6 AND operation_kind = 'session'
+             AND recovery_owner = $7 AND lifecycle_version = $8
+             AND recovery_lease_expires_at = $9
+             AND recovery_lease_expires_at > NOW() AND terminal_at IS NULL
+           RETURNING id`,
+          [
+            id,
+            value.claimedUnits,
+            value.settlementSequence,
+            value.evidence,
+            value.terminalAt,
+            value.liveStreamId,
+            claim.owner,
+            claim.version,
+            claim.leaseExpiresAt,
+          ],
+        );
+        if (terminal.rowCount === 0) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+        const stream = await client.query(
+          `UPDATE media.live_streams
+           SET status = 'ended', last_seen_at = $2, ended_at = $2
+           WHERE id = $1 AND ended_at IS NULL`,
+          [value.liveStreamId, value.terminalAt],
+        );
+        if (stream.rowCount !== 1) throw new Error("live terminal stream identity mismatch");
+        await client.query(
+          `DELETE FROM media.playback_ids WHERE live_stream_id = $1`,
+          [value.liveStreamId],
+        );
+        await client.query(
+          `DELETE FROM media.paid_operation_secrets WHERE operation_id = $1`,
+          [id],
+        );
+        await client.query("COMMIT");
+        return true;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async recordVodTerminal(id, claim, value) {

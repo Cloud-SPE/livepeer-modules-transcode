@@ -25,6 +25,7 @@ export interface PaidSessionStore {
   claimByLiveStreamId(liveStreamId: string, now?: Date): Promise<OwnedPaidSession | null>;
   byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
   byBrokerSessionId(brokerSessionId: string): Promise<PaidOperation | null>;
+  requestWinddown(liveStreamId: string, reason: string): Promise<PaidOperation | null>;
   readSecrets(value: OwnedPaidSession): Promise<PaidOperationSecrets | null>;
   putSecrets(value: OwnedPaidSession, secrets: PaidOperationSecrets): Promise<boolean>;
   recordProgress(
@@ -35,6 +36,16 @@ export interface PaidSessionStore {
     value: OwnedPaidSession,
     terminal: {
       status: string;
+      claimedUnits: string;
+      settlementSequence: string;
+      evidence: PaidTerminalEvidence;
+      terminalAt: Date;
+    },
+  ): Promise<boolean>;
+  recordLiveTerminal(
+    value: OwnedPaidSession,
+    terminal: {
+      liveStreamId: string;
       claimedUnits: string;
       settlementSequence: string;
       evidence: PaidTerminalEvidence;
@@ -141,6 +152,10 @@ export function createPaidSessionStore(
       return options.repo.byBrokerSessionId(brokerSessionId);
     },
 
+    requestWinddown(liveStreamId, reason) {
+      return options.repo.requestSessionWinddown(liveStreamId, reason);
+    },
+
     readSecrets(value) {
       return options.repo.readSecrets(value.operation.id, value.claim);
     },
@@ -160,6 +175,14 @@ export function createPaidSessionStore(
 
     recordTerminal(value, terminal) {
       return options.repo.recordTerminal(
+        value.operation.id,
+        value.claim,
+        terminal,
+      );
+    },
+
+    recordLiveTerminal(value, terminal) {
+      return options.repo.recordLiveTerminal(
         value.operation.id,
         value.claim,
         terminal,
