@@ -22,6 +22,7 @@ export interface PaidSessionStore {
     now?: Date,
   ): Promise<OwnedPaidSession>;
   claimRecoverable(limit: number, now?: Date): Promise<OwnedPaidSession[]>;
+  claimByLiveStreamId(liveStreamId: string, now?: Date): Promise<OwnedPaidSession | null>;
   byLiveStreamId(liveStreamId: string): Promise<PaidOperation | null>;
   byBrokerSessionId(brokerSessionId: string): Promise<PaidOperation | null>;
   readSecrets(value: OwnedPaidSession): Promise<PaidOperationSecrets | null>;
@@ -120,6 +121,16 @@ export function createPaidSessionStore(
         limit,
       );
       return operations.map((operation) => owned(operation, options.owner));
+    },
+
+    async claimByLiveStreamId(liveStreamId, now = clock()) {
+      const operation = await options.repo.claimSessionByLiveStreamId(
+        liveStreamId,
+        options.owner,
+        now,
+        leaseAfter(now),
+      );
+      return operation ? owned(operation, options.owner) : null;
     },
 
     byLiveStreamId(liveStreamId) {

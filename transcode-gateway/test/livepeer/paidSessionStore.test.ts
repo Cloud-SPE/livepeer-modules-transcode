@@ -128,6 +128,26 @@ test("paid session recovery claims only session operations", async () => {
   ]);
 });
 
+test("paid session relay claims one specific live stream", async () => {
+  let captured: unknown[] | undefined;
+  const repo = repoWith({
+    async claimSessionByLiveStreamId(...args) {
+      captured = args;
+      return claimedSession("8");
+    },
+  });
+  const store = createPaidSessionStore({
+    repo,
+    owner: "gateway-a",
+    leaseDurationMs: 60_000,
+  });
+
+  const result = await store.claimByLiveStreamId("live_001", now);
+
+  assert.equal(result?.claim.version, "8");
+  assert.deepEqual(captured, ["live_001", "gateway-a", now, leaseExpiresAt]);
+});
+
 test("secret reads always pass the current database fence", async () => {
   let captured: unknown[] | undefined;
   const repo = repoWith({

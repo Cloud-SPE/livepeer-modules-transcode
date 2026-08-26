@@ -1,14 +1,14 @@
 import type { Config } from "../../config.js";
 import type { Logger } from "../../engine/interfaces/index.js";
 import type { LiveStreamRepo } from "../../engine/repo/index.js";
-import type { LiveSessionDirectory } from "../../livepeer/liveSessionDirectory.js";
+import type { PaidSessionStore } from "../../livepeer/paidSessionStore.js";
 import { createRtmpServer } from "./server.js";
 import { attachDispatcher } from "./dispatcher.js";
 
 export interface RtmpListenerDeps {
   config: Config;
   liveStreamRepo: LiveStreamRepo;
-  liveSessions: LiveSessionDirectory;
+  paidSessionStore: PaidSessionStore;
   logger?: Logger;
 }
 
@@ -25,7 +25,7 @@ export function createRtmpListener(deps: RtmpListenerDeps): RtmpListenerHandle {
   const dispatcher = attachDispatcher(server, {
     config: deps.config,
     liveStreamRepo: deps.liveStreamRepo,
-    liveSessions: deps.liveSessions,
+    paidSessionStore: deps.paidSessionStore,
     ...(deps.logger !== undefined ? { logger: deps.logger } : {}),
   });
   return {

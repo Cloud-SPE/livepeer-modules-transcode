@@ -222,11 +222,11 @@ async function main(): Promise<void> {
   // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL. Disabled by default — plan-0006
   // behavior preserved when env unset.
   let rtmpHandle: RtmpListenerHandle | null = null;
-  if (config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL && config.RTMP_RELAY_ENABLED) {
+  if (config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL && config.RTMP_RELAY_ENABLED && paidSessionStore) {
     rtmpHandle = createRtmpListener({
       config,
       liveStreamRepo,
-      liveSessions,
+      paidSessionStore,
       logger: consoleLogger,
     });
     consoleLogger.info("rtmp.listener.started", {
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
   } else {
     consoleLogger.info("rtmp.listener.disabled", {
       reason: config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL
-        ? "RTMP_RELAY_ENABLED=false"
+        ? paidSessionStore ? "RTMP_RELAY_ENABLED=false" : "paid session store unavailable"
         : "LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL unset",
     });
   }

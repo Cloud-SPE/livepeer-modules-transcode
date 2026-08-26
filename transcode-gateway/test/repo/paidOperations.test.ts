@@ -170,14 +170,23 @@ test("paid operation recovery is restart-safe and customer reads are owner-scope
     repo.claimRecoverable("session", "gateway-1", now, leaseExpiresAt, 0),
   );
 
+  assert.equal(
+    await repo.claimSessionByLiveStreamId("live-1", "gateway-1", now, leaseExpiresAt),
+    null,
+  );
+  assert.match(calls[2]!.sql, /live_stream_id = \$1 AND operation_kind = 'session'/);
+  assert.match(calls[2]!.sql, /recovery_owner = \$2 OR recovery_lease_expires_at IS NULL/);
+  assert.match(calls[2]!.sql, /FOR UPDATE SKIP LOCKED/);
+  assert.deepEqual(calls[2]!.params, ["live-1", "gateway-1", now, leaseExpiresAt]);
+
   const claim = { owner: "gateway-1", version: "7", leaseExpiresAt };
   assert.equal(
     await repo.recordProgress("op-1", claim, { status: "active" }),
     null,
   );
-  assert.match(calls[2]!.sql, /recovery_owner = \$3/);
-  assert.match(calls[2]!.sql, /lifecycle_version = \$4/);
-  assert.match(calls[2]!.sql, /recovery_lease_expires_at = \$5/);
+  assert.match(calls[3]!.sql, /recovery_owner = \$3/);
+  assert.match(calls[3]!.sql, /lifecycle_version = \$4/);
+  assert.match(calls[3]!.sql, /recovery_lease_expires_at = \$5/);
   await assert.rejects(() =>
     repo.recordProgress(
       "op-1",

@@ -382,6 +382,30 @@ export function createPaidOperationRepo(
       return result.rows.map(rowToOperation);
     },
 
+    async claimSessionByLiveStreamId(liveStreamId, owner, now, leaseExpiresAt) {
+      validateClaim({ owner, version: "0", leaseExpiresAt });
+      if (!liveStreamId || leaseExpiresAt <= now) {
+        throw new Error("paid session claim inputs are invalid");
+      }
+      const result = await pool.query<Row>(
+        `UPDATE media.paid_operations
+         SET recovery_owner = $2, recovery_lease_expires_at = $4,
+             lifecycle_version = lifecycle_version + 1, updated_at = NOW()
+         WHERE id = (
+           SELECT id FROM media.paid_operations
+           WHERE live_stream_id = $1 AND operation_kind = 'session'
+             AND terminal_at IS NULL
+             AND (recovery_owner = $2 OR recovery_lease_expires_at IS NULL
+               OR recovery_lease_expires_at <= $3)
+           ORDER BY rotation_generation DESC LIMIT 1
+           FOR UPDATE SKIP LOCKED
+         )
+         RETURNING ${SELECT_COLUMNS}`,
+        [liveStreamId, owner, now, leaseExpiresAt],
+      );
+      return result.rowCount === 0 ? null : rowToOperation(result.rows[0]!);
+    },
+
     async renewClaim(id, claim, leaseExpiresAt) {
       validateClaim(claim);
       if (

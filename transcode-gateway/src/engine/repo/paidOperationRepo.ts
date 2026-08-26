@@ -61,6 +61,12 @@ export interface PaidOperationRepo {
     leaseExpiresAt: Date,
     limit: number,
   ): Promise<PaidOperation[]>;
+  claimSessionByLiveStreamId(
+    liveStreamId: string,
+    owner: string,
+    now: Date,
+    leaseExpiresAt: Date,
+  ): Promise<PaidOperation | null>;
   renewClaim(
     id: string,
     claim: PaidOperationClaim,
