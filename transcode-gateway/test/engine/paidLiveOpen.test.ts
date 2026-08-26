@@ -36,7 +36,13 @@ test("paid live open binds durable identities and encrypted private ingest befor
     async open() {
       events.push("session-opened");
       return {
-        opened: { operationId: "loc-operation-1", requestId: "broker-request-1" },
+        opened: {
+          operationId: "loc-operation-1",
+          requestId: "broker-request-1",
+          brokerUrl: "https://broker.example",
+          session: { descriptorSchema: "rtmp-hls/v1", maxRotations: 3 },
+          routeSnapshot: { workUnit: "output_seconds" },
+        },
         gatewaySessionId: "live-1",
         brokerSessionId: "broker-session-1",
         workId: "work-1",
@@ -94,6 +100,7 @@ test("paid live open binds durable identities and encrypted private ingest befor
   ]);
   assert.match(JSON.stringify(storedSecrets), /private-runner-key/);
   assert.match(JSON.stringify(storedSecrets), /grant-secret/);
+  assert.match(JSON.stringify(storedSecrets), /control_handle/);
   assert.doesNotMatch(JSON.stringify(result), /private-runner-key|grant-secret|broker-credential/);
   assert.equal(result.rtmpPushUrl.startsWith("rtmp://gateway.example/live/live_"), true);
 });

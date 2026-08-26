@@ -113,3 +113,9 @@ enabled, and configure LOC plus the operation-secrets key. The default live
 offering is `live-standard`; finite funding defaults to 60 initial
 `output_seconds` and a 3,600-unit lifetime ceiling through
 `LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS` and `LIVEPEER_LIVE_MAX_TOTAL_UNITS`.
+Authoritative live reconciliation defaults to every 5 seconds. The gateway
+opens the advisory control WebSocket for a bounded 250 ms window on each scan,
+requests a refill at 15 remaining units, and permits at most 60 accepted
+refills. Operators can set `LIVEPEER_LIVE_RECONCILE_INTERVAL_MS`,
+`LIVEPEER_LIVE_CONTROL_WINDOW_MS`, `LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS`, and
+`LIVEPEER_LIVE_MAX_REFILLS`; the total-unit ceiling remains authoritative.

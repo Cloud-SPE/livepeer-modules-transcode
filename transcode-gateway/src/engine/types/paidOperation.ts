@@ -73,6 +73,8 @@ export interface PaidSessionRuntimeState {
   lastRunnerSequence: string;
   lastRunnerUsage: string;
   controlCursor?: string;
+  refillCount?: number;
+  lastHttpReconcileAt?: string;
 }
 
 export interface PaidTerminalEvidence {
@@ -95,4 +97,5 @@ export interface PaidOperationSecrets {
   runnerIngestUrl?: string;
   runnerIngestKey?: string;
   credentials?: JsonValue;
+  refillIntent?: JsonValue;
 }

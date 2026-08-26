@@ -17,6 +17,18 @@ test("LOC configuration is disabled only when URL and API key are both absent", 
   assert.equal(config.LIVEPEER_LIVE_OFFERING_DEFAULT, "live-standard");
   assert.equal(config.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS, 60);
   assert.equal(config.LIVEPEER_LIVE_MAX_TOTAL_UNITS, 3_600);
+  assert.equal(config.LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS, 15);
+  assert.equal(config.LIVEPEER_LIVE_MAX_REFILLS, 60);
+  assert.equal(config.LIVEPEER_LIVE_RECONCILE_INTERVAL_MS, 5_000);
+  assert.equal(config.LIVEPEER_LIVE_CONTROL_WINDOW_MS, 250);
+});
+
+test("live refill threshold must leave positive initial runway", () => {
+  assert.throws(() => loadConfig({
+    ...required,
+    LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: "60",
+    LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS: "60",
+  }), /must be below initial runway/);
 });
 
 test("live funding ceiling must cover the initial finite runway", () => {

@@ -70,8 +70,17 @@ export interface PaidSessionOpenResult {
   control: PaidSessionControl;
 }
 
+export interface PaidSessionRecoveryHandle {
+  operationId: string;
+  brokerUrl: string;
+  descriptorSchema: string;
+  workUnit: string;
+}
+
+export type PaidSessionControlHandle = LocOpenSessionResult | PaidSessionRecoveryHandle;
+
 export interface PaidSessionRefillRequest {
-  opened: LocOpenSessionResult;
+  opened: PaidSessionControlHandle;
   brokerSessionId: string;
   credential: string;
   requestId: string;
@@ -125,7 +134,7 @@ export interface PaidSessionEndResult {
 export interface PaidSessionClient {
   open(input: PaidSessionOpenRequest): Promise<PaidSessionOpenResult>;
   issueStreamKey(input: PaidSessionStreamKeyRequest): Promise<PaidSessionStreamKeyResult>;
-  status(input: { opened: LocOpenSessionResult; brokerSessionId: string; workId: string; credential: string }): Promise<PaidSessionStatusResult>;
+  status(input: { opened: PaidSessionControlHandle; brokerSessionId: string; workId: string; credential: string }): Promise<PaidSessionStatusResult>;
   refill(input: PaidSessionRefillRequest): Promise<PaidSessionRefillResult>;
   end(input: PaidSessionEndRequest): Promise<PaidSessionEndResult>;
 }

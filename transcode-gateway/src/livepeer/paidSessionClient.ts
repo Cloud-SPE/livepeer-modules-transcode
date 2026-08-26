@@ -12,6 +12,7 @@ import type {
   PaidSessionRefillRequest,
 } from "../engine/interfaces/index.js";
 import { PaidSessionClientError } from "../engine/interfaces/index.js";
+import { LocTransportError } from "../engine/interfaces/index.js";
 import type { JsonValue } from "../engine/types/index.js";
 import { HEADER } from "./headers.js";
 import { routeBindingFor } from "./locClient.js";
@@ -214,9 +215,9 @@ export function createPaidSessionClient(
       if (
         value.session_id !== input.brokerSessionId ||
         value.work_id !== input.workId ||
-        value.runtime.schema !== input.opened.session.descriptorSchema ||
-        value.usage.unit !== input.opened.routeSnapshot.workUnit ||
-        value.balance.unit !== input.opened.routeSnapshot.workUnit
+        value.runtime.schema !== controlDescriptor(input.opened) ||
+        value.usage.unit !== controlWorkUnit(input.opened) ||
+        value.balance.unit !== controlWorkUnit(input.opened)
       ) throw invalidEvidence();
       return {
         brokerSessionId: value.session_id,
@@ -235,14 +236,25 @@ export function createPaidSessionClient(
 
     async refill(input) {
       validateRefill(input);
-      const refill = await loc.refillSession({
-        operationId: input.opened.operationId,
-        requestId: input.requestId,
-        ...(input.observedConsumedUnits === undefined ? {} : { observedConsumedUnits: input.observedConsumedUnits }),
-        ...(input.rebindFrom === undefined
-          ? {}
-          : { rebindFrom: input.rebindFrom, replacesRequestId: input.replacesRequestId }),
-      });
+      let refill;
+      try {
+        refill = await loc.refillSession({
+          operationId: input.opened.operationId,
+          requestId: input.requestId,
+          ...(input.observedConsumedUnits === undefined ? {} : { observedConsumedUnits: input.observedConsumedUnits }),
+          ...(input.rebindFrom === undefined
+            ? {}
+            : { rebindFrom: input.rebindFrom, replacesRequestId: input.replacesRequestId }),
+        });
+      } catch (error) {
+        if (error instanceof LocTransportError) {
+          throw new PaidSessionClientError(error.remoteCode ?? error.code, {
+            retryable: error.retryable,
+            cause: error,
+          });
+        }
+        throw error;
+      }
       const headers = authHeaders(input.credential);
       headers.set(HEADER.PAYMENT, refill.paymentEnvelope);
       headers.set(HEADER.REQUEST_ID, refill.requestId);
@@ -256,7 +268,7 @@ export function createPaidSessionClient(
       if (
         value.session_id !== input.brokerSessionId ||
         value.work_id !== refill.workId ||
-        value.balance.unit !== input.opened.routeSnapshot.workUnit
+        value.balance.unit !== controlWorkUnit(input.opened)
       ) throw invalidEvidence();
       return {
         loc: refill,
@@ -391,9 +403,17 @@ function authHeaders(credential: string): Headers {
   return new Headers({ Authorization: `Bearer ${credential}` });
 }
 
-function brokerControlUrl(opened: LocOpenSessionResult, id: string, suffix: string): string {
+function brokerControlUrl(opened: { brokerUrl: string }, id: string, suffix: string): string {
   if (id.length === 0) throw invalidRequest();
   return `${opened.brokerUrl.replace(/\/$/, "")}/v1/session/${encodeURIComponent(id)}${suffix}`;
+}
+
+function controlDescriptor(opened: PaidSessionRefillRequest["opened"]): string {
+  return "descriptorSchema" in opened ? opened.descriptorSchema : opened.session.descriptorSchema;
+}
+
+function controlWorkUnit(opened: PaidSessionRefillRequest["opened"]): string {
+  return "workUnit" in opened ? opened.workUnit : opened.routeSnapshot.workUnit;
 }
 
 async function jsonRequest<T extends z.ZodType>(

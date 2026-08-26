@@ -194,6 +194,14 @@ test("paid operation recovery is restart-safe and customer reads are owner-scope
       { status: "active" },
     ),
   );
+
+  await repo.recordProgress("op-1", claim, {
+    status: "active",
+    workId: "work-2",
+    rotationGeneration: 1,
+  });
+  assert.match(calls[4]!.sql, /work_id = \$3/);
+  assert.match(calls[4]!.sql, /rotation_generation = \$4/);
 });
 
 test("paid live operation and encrypted open intent are created in one transaction", async () => {

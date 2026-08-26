@@ -450,6 +450,8 @@ export function createPaidOperationRepo(
       ];
       const params: unknown[] = [id, value.status];
       const fields: Array<[string, unknown]> = [
+        ["work_id", value.workId],
+        ["rotation_generation", value.rotationGeneration],
         ["request_id", value.requestId],
         ["loc_operation_id", value.locOperationId],
         ["broker_job_id", value.brokerJobId],

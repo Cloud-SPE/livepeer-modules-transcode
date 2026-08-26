@@ -139,7 +139,17 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     sessionParams,
     grants: opened.grants as unknown as JsonValue,
     control: opened.control as unknown as JsonValue,
-    loc: { idempotency_key: requestId, key_request_id: keyRequestId },
+    loc: {
+      idempotency_key: requestId,
+      key_request_id: keyRequestId,
+      control_handle: {
+        operation_id: opened.opened.operationId,
+        broker_url: opened.opened.brokerUrl,
+        descriptor_schema: opened.opened.session.descriptorSchema,
+        work_unit: opened.opened.routeSnapshot.workUnit,
+        max_rotations: opened.opened.session.maxRotations,
+      },
+    },
     runnerIngestUrl: runtime.rtmp_url,
     runnerIngestKey: issued.streamKey,
     credentials: {
@@ -195,6 +205,7 @@ function validateRoute(route: SelectedWorkerRoute): void {
     route.protocol !== "paid-session/v1" ||
     route.session?.descriptorSchema !== RUNTIME_SCHEMA ||
     route.session.attachment !== "external" ||
+    route.session.refill !== "extensible" ||
     route.workUnit !== WORK_UNIT
   ) throw new Error("paid live route is incompatible");
 }

@@ -37,6 +37,8 @@ import { createSourceProbe } from "./runtime/sourceProbe.js";
 import { recoverPaidAbrOperations } from "./engine/service/paidAbrRecovery.js";
 import { createPaidSessionStore, type PaidSessionStore } from "./livepeer/paidSessionStore.js";
 import { createRtmpListener, type RtmpListenerHandle } from "./runtime/rtmp/index.js";
+import { reconcilePaidLiveSessions } from "./engine/service/paidLiveReconciler.js";
+import { createPaidSessionControlSource } from "./livepeer/paidSessionControlSource.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, "..", "migrations");
@@ -188,6 +190,7 @@ async function main(): Promise<void> {
   });
 
   let vodRecoveryTimer: NodeJS.Timeout | null = null;
+  let liveRecoveryTimer: NodeJS.Timeout | null = null;
   if (paidJobClient && paidOperationRepo) {
     let recovering = false;
     const recoverVod = async () => {
@@ -218,6 +221,33 @@ async function main(): Promise<void> {
     vodRecoveryTimer.unref();
   }
 
+  if (paidSessionClient && paidSessionStore) {
+    const controlSource = createPaidSessionControlSource(config.LIVEPEER_LIVE_CONTROL_WINDOW_MS);
+    let reconcilingLive = false;
+    const reconcileLive = async () => {
+      if (reconcilingLive) return;
+      reconcilingLive = true;
+      try {
+        await reconcilePaidLiveSessions({
+          paidSessionStore,
+          paidSessionClient,
+          controlSource,
+          refillThresholdUnits: config.LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS,
+          maxTotalUnits: config.LIVEPEER_LIVE_MAX_TOTAL_UNITS,
+          maxRefills: config.LIVEPEER_LIVE_MAX_REFILLS,
+          logger: consoleLogger,
+        });
+      } catch {
+        consoleLogger.error("orchestrator.live_recovery_scan_failed", { code: "scan_failed" });
+      } finally {
+        reconcilingLive = false;
+      }
+    };
+    void reconcileLive();
+    liveRecoveryTimer = setInterval(() => void reconcileLive(), config.LIVEPEER_LIVE_RECONCILE_INTERVAL_MS);
+    liveRecoveryTimer.unref();
+  }
+
   // Gateway RTMP listener (plan 0007). Opt-in via
   // LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL. Disabled by default — plan-0006
   // behavior preserved when env unset.
@@ -245,6 +275,7 @@ async function main(): Promise<void> {
     app.log.info({ signal }, "shutdown.starting");
     rateLimiter.stop();
     if (vodRecoveryTimer) clearInterval(vodRecoveryTimer);
+    if (liveRecoveryTimer) clearInterval(liveRecoveryTimer);
     if (rtmpHandle) await rtmpHandle.stop();
     await app.close();
     if (resolverHandle) await resolverHandle.close();

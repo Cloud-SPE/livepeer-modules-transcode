@@ -30,6 +30,10 @@ const envSchema = z.object({
   LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("live-standard"),
   LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: z.coerce.number().int().positive().default(60),
   LIVEPEER_LIVE_MAX_TOTAL_UNITS: z.coerce.number().int().positive().default(3_600),
+  LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS: z.coerce.number().int().nonnegative().default(15),
+  LIVEPEER_LIVE_MAX_REFILLS: z.coerce.number().int().positive().default(60),
+  LIVEPEER_LIVE_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(250).default(5_000),
+  LIVEPEER_LIVE_CONTROL_WINDOW_MS: z.coerce.number().int().min(10).max(10_000).default(250),
   LIVEPEER_SESSION_RECOVERY_LEASE_MS: z.coerce.number().int().min(1_000).default(60_000),
   // Required by v2 live paths before they may persist session credentials.
   // Canonical base64 for a 32-byte wrapping key held outside Postgres.
@@ -80,6 +84,13 @@ const envSchema = z.object({
       code: "custom",
       path: ["LIVEPEER_LIVE_MAX_TOTAL_UNITS"],
       message: "LIVEPEER_LIVE_MAX_TOTAL_UNITS must cover LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS",
+    });
+  }
+  if (value.LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS >= value.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS) {
+    context.addIssue({
+      code: "custom",
+      path: ["LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS"],
+      message: "LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS must be below initial runway",
     });
   }
 });

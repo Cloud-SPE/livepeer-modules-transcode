@@ -29,6 +29,8 @@ export interface PaidOperationClaim {
 
 export interface PaidOperationProgress {
   status: string;
+  workId?: string;
+  rotationGeneration?: number;
   requestId?: string;
   locOperationId?: string;
   brokerJobId?: string;

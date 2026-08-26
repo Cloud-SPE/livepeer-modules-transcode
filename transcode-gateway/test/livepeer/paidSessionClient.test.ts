@@ -7,7 +7,7 @@ import type {
   LocOpenSessionResult,
   LocRefillSessionInput,
 } from "../../src/engine/interfaces/index.js";
-import { PaidSessionClientError } from "../../src/engine/interfaces/index.js";
+import { LocTransportError, PaidSessionClientError } from "../../src/engine/interfaces/index.js";
 import type { SelectedWorkerRoute } from "../../src/engine/types/index.js";
 import { HEADER } from "../../src/livepeer/headers.js";
 import {
@@ -338,6 +338,34 @@ test("refill keeps its durable request identity and atomically forwards recipien
   assert.equal(headers.get(HEADER.REQUEST_ID), "broker-refill-request-1");
   assert.equal(headers.get(HEADER.REBIND_FROM), "work-1");
   assert.equal(headers.get(HEADER.PAYMENT), "refill-payment");
+});
+
+test("refill exposes LOC recipient rotation as a typed recoverable session outcome", async () => {
+  const { loc } = fakeLoc();
+  loc.refillSession = async () => {
+    throw new LocTransportError("loc_http_error", {
+      status: 409,
+      remoteCode: "INVALID_RECIPIENT_RAND",
+      retryable: true,
+    });
+  };
+  const client = createPaidSessionClient(loc, {
+    fetch: async () => { throw new Error("broker must not receive an invalid payment"); },
+  });
+
+  await assert.rejects(
+    () => client.refill({
+      opened,
+      brokerSessionId,
+      credential: "session-credential",
+      requestId: "gateway-refill-1",
+      observedConsumedUnits: 12,
+    }),
+    (error: unknown) =>
+      error instanceof PaidSessionClientError &&
+      error.code === "INVALID_RECIPIENT_RAND" &&
+      error.retryable,
+  );
 });
 
 test("end retrieves the authoritative settlement by gateway id and closes LOC once", async () => {
