@@ -13,7 +13,7 @@ tag, new digest below; the earlier digest `e6059b27…` is superseded.
 | VOD NVIDIA runner | `tztcloud/transcode-runner-nvidia:v2.0.0@sha256:7f92ba9b6f9c04f77279cf2f0ddd7aad48ec1704c65e3ee87ed9898777e5e6bc` |
 | ABR NVIDIA runner | `tztcloud/abr-runner-nvidia:v2.0.0@sha256:abbbab2e145f1910c68debd83a3bb60da0a8ff8d6b6d456b279bb06d6992386d` |
 | Legacy unqualified live runner (do not deploy) | `tztcloud/live-runner:v2.0.0@sha256:e67b5b1e213727b903654c771e7444e0e91ec191287a03305fb1d4e83ca707f7` |
-| NVIDIA live runner | Pending vendor-specific build, push, and GTX 1080 certification |
+| NVIDIA live runner | `tztcloud/live-runner-nvidia:v2.0.0@sha256:a3e0bc4d21e23184d34bdfa5fb039acf44164ec5c6782287f85f1682ac4fcde6` (2026-09-07, commit with the optional broker token; attach + readiness certified on a GTX 1080, create pending the broker template) |
 
 The old live image did not encode a truthful hardware contract and is retained
 above only as historical provenance. The stack requires `LIVE_NVIDIA_IMAGE`;

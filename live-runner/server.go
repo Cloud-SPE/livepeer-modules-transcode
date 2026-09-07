@@ -114,7 +114,7 @@ type LiveRunnerServerV1 struct {
 }
 
 func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler, error) {
-	if s.Store == nil || s.Runtime == nil || len(s.BrokerToken) < 32 || s.KeyTTL <= 0 || mediaAuthorizer == nil {
+	if s.Store == nil || s.Runtime == nil || (s.BrokerToken != "" && len(s.BrokerToken) < 32) || s.KeyTTL <= 0 || mediaAuthorizer == nil {
 		return nil, errors.New("live runner server dependencies are incomplete")
 	}
 	mux := http.NewServeMux()
@@ -309,6 +309,11 @@ func (s *LiveRunnerServerV1) handleRunnerContractV1(writer http.ResponseWriter, 
 }
 
 func (s *LiveRunnerServerV1) brokerAuthV1(next http.Handler) http.Handler {
+	if s.BrokerToken == "" {
+		// No token configured: the session routes are reached only over the
+		// agent's tunnel, which carries no bearer. See LoadLiveRunnerConfigV1.
+		return next
+	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		token, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
 		if !ok || !secureEqualV1(token, s.BrokerToken) {

@@ -30,9 +30,16 @@ func TestLoadLiveRunnerConfigRequiresSecretsAndPublicCoordinates(t *testing.T) {
 	if config.PublicRTMPBase != "rtmps://runner.example:1936" || config.PublicHTTPBase != "https://runner.example/r/live-runner" {
 		t.Fatalf("public origins were not preserved: %#v", config)
 	}
+	// The broker token is optional: the broker attaches over the agent's
+	// tunnel and presents no bearer. Absent is fine; short is not.
 	delete(values, "LIVE_RUNNER_BROKER_TOKEN")
-	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil || strings.Contains(err.Error(), strings.Repeat("b", 32)) {
-		t.Fatalf("missing secret error=%v", err)
+	config, err = LoadLiveRunnerConfigV1(func(name string) string { return values[name] })
+	if err != nil || config.BrokerToken != "" {
+		t.Fatalf("absent broker token should load with auth disabled: err=%v token=%q", err, config.BrokerToken)
+	}
+	values["LIVE_RUNNER_BROKER_TOKEN"] = "short"
+	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil || strings.Contains(err.Error(), "short") {
+		t.Fatalf("short broker token error=%v", err)
 	}
 }
 

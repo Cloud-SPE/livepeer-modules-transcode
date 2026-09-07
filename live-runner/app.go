@@ -59,9 +59,14 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	if err != nil || len(masterKey) != 32 {
 		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_MASTER_KEY must be base64 for exactly 32 bytes")
 	}
-	brokerToken, err := required("LIVE_RUNNER_BROKER_TOKEN")
-	if err != nil || len(brokerToken) < 32 {
-		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_BROKER_TOKEN must contain at least 32 characters")
+	// Optional. Under the attach model the broker reaches this runner over
+	// the pool member agent's tunnel and presents no credential of its own
+	// — the tunnel is the trust boundary (runner-attach §7) — so a token
+	// here would only ever reject the broker. Set it to gate the session
+	// routes when something other than an agent can reach this port.
+	brokerToken := getenv("LIVE_RUNNER_BROKER_TOKEN")
+	if brokerToken != "" && len(brokerToken) < 32 {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_BROKER_TOKEN must contain at least 32 characters when set")
 	}
 	internalToken, err := required("LIVE_RUNNER_INTERNAL_MEDIA_TOKEN")
 	if err != nil || len(internalToken) < 32 {

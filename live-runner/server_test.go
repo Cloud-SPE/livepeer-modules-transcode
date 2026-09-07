@@ -409,3 +409,26 @@ func runnerRequestV1(t *testing.T, handler http.Handler, method, path string, bo
 	handler.ServeHTTP(response, request)
 	return response
 }
+
+// Under the attach model the broker reaches the session routes over the
+// pool member agent's tunnel and presents no bearer. With no
+// LIVE_RUNNER_BROKER_TOKEN configured the routes must admit that request;
+// the first eu-central certification failed here with a 401 on create.
+func TestLiveRunnerAdmitsUnauthenticatedCreateWithoutBrokerToken(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x68}, 32))
+	runtime := &fakeLiveRuntimeV1{}
+	server := testLiveRunnerServerWithStoreV1(t, store, runtime)
+	server.BrokerToken = ""
+	handler, err := server.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	created := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, "")
+	if created.Code == http.StatusUnauthorized {
+		t.Fatalf("create without a bearer was refused although no broker token is configured: %d %s", created.Code, created.Body.String())
+	}
+	if created.Code != http.StatusCreated && created.Code != http.StatusOK {
+		t.Fatalf("create=%d %s", created.Code, created.Body.String())
+	}
+}
