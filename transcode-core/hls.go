@@ -158,11 +158,16 @@ func buildHLSFilterGraph(rendition ABRRendition, hw HWProfile, probe ProbeResult
 
 	switch hw.Vendor {
 	case VendorNVIDIA:
-		// Upload software-decoded frames to GPU before scale_cuda.
-		// This handles the common case where CUDA hwaccel decode fails
-		// (e.g. too many decode surfaces) and ffmpeg falls back to CPU decode.
+		// Put the frames on the GPU before scale_cuda, whichever way they
+		// were decoded. The generic hwupload passes a frame that is already
+		// a CUDA frame (hwaccel decode with -hwaccel_output_format cuda)
+		// straight through and uploads a software frame (CUDA decode fell
+		// back to CPU, e.g. too many decode surfaces). hwupload_cuda is not
+		// that filter: it only accepts software frames and fails the encode
+		// with "Invalid argument" on a hardware-decoded input — which was
+		// every ABR rendition that needed scaling on a GTX 1080.
 		if hw.HasHWAccel("cuda") {
-			filters = append(filters, "hwupload_cuda")
+			filters = append(filters, "hwupload")
 		}
 	case VendorAMD:
 		// AMD VAAPI requires hwupload before scale

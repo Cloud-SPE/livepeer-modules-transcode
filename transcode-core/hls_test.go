@@ -53,9 +53,16 @@ func TestHLSRenditionCmd_WithGPU(t *testing.T) {
 		t.Error("expected -maxrate 7.5M")
 	}
 
-	// Scale (4K input → 1080p output)
-	if !strings.Contains(args, "scale_cuda=1920:1080") {
-		t.Error("expected scale_cuda=1920:1080")
+	// Scale (4K input → 1080p output). The upload ahead of scale_cuda must
+	// be the generic hwupload: it passes a hardware-decoded CUDA frame
+	// through and uploads a software one. hwupload_cuda rejects CUDA frames
+	// with "Invalid argument", which failed every scaled ABR rendition on a
+	// hardware-decoding GTX 1080 while the unscaled VOD rendition passed.
+	if !strings.Contains(args, "hwupload,scale_cuda=1920:1080") {
+		t.Errorf("expected hwupload,scale_cuda=1920:1080, got: %s", args)
+	}
+	if strings.Contains(args, "hwupload_cuda") {
+		t.Errorf("hwupload_cuda fails on hardware-decoded frames, got: %s", args)
 	}
 
 	// Profile and level
