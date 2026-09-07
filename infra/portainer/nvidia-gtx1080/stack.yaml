@@ -44,7 +44,7 @@ services:
 
   abr-runner:
     <<: [*runner, *nvidia]
-    image: tztcloud/abr-runner-nvidia:v2.0.0@sha256:e6059b27099bb30388c40c5d06fbdc5666729f326f71ee69d8ca81921c40e93a
+    image: tztcloud/abr-runner-nvidia:v2.0.0@sha256:abbbab2e145f1910c68debd83a3bb60da0a8ff8d6b6d456b279bb06d6992386d
     environment:
       MAX_QUEUE_SIZE: ${ABR_MAX_QUEUE_SIZE:-1}
       METRICS_ENABLED: "true"
