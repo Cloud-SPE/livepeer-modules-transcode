@@ -1,4 +1,5 @@
-FROM node:22-alpine
+ARG NODE_VERSION=24
+FROM node:${NODE_VERSION}-alpine
 
 WORKDIR /app
 COPY package.json package-lock.json* ./

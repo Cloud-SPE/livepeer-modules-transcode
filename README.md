@@ -116,6 +116,7 @@ This repo follows the agent-first harness pattern documented in
 ├── package.json           # pnpm workspace root
 ├── pnpm-workspace.yaml
 ├── .tool-versions / .nvmrc / .npmrc
+├── infra/                 # centralized, dependency-ordered image builds
 ├── docs/                  # All design / plan / reference docs (single root)
 │   ├── design-docs/       # start at index.md
 │   ├── api/               # OpenAPI contracts
@@ -128,3 +129,17 @@ This repo follows the agent-first harness pattern documented in
     ├── AGENTS.md
     └── ...
 ```
+
+## Build all images
+
+The release image matrix is built from the repository root. The default tag
+remains `v0.1.0`; override it explicitly for a release:
+
+```sh
+./infra/scripts/build-images.sh
+REGISTRY=ghcr.io/cloud-spe TAG=2026.9.5 ./infra/scripts/build-images.sh
+```
+
+See [`infra/README.md`](./infra/README.md) for subset builds, GPU variants,
+push safeguards, and digest pinning. Component Makefiles remain available for
+local development.

@@ -263,6 +263,17 @@ func (s *FileWorkloadStoreV2) recordTerminal(workloadID string, state WorkloadJo
 		if result.WorkloadID != record.WorkloadID || result.RequestSHA256 != record.RequestSHA256 {
 			return StoredSSEEventV2{}, errors.New("terminal error identity differs from workload journal")
 		}
+		delivered := make([]RenditionResultV2, 0, len(record.Delivered))
+		for _, rendition := range record.Delivered {
+			delivered = append(delivered, rendition)
+		}
+		units, err := CalculateFrameMegapixelUnitsV2(delivered)
+		if err != nil {
+			return StoredSSEEventV2{}, err
+		}
+		if result.Usage.Units != units {
+			return StoredSSEEventV2{}, fmt.Errorf("terminal error usage differs from delivered checkpoints: got %d want %d", result.Usage.Units, units)
+		}
 	default:
 		return StoredSSEEventV2{}, errors.New("unsupported terminal event type")
 	}

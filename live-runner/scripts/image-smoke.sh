@@ -2,6 +2,7 @@
 set -eu
 
 smoke_image=${1:?image reference is required}
+smoke_target=${2:?hardware target is required: nvidia, intel, amd, or cpu}
 smoke_name="live-runner-image-smoke-$$"
 
 cleanup() {
@@ -9,13 +10,48 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+case "$smoke_target" in
+  nvidia)
+    required_encoders='h264_nvenc hevc_nvenc'
+    ;;
+  intel)
+    required_encoders='h264_qsv hevc_qsv'
+    docker run --rm --entrypoint sh "$smoke_image" -c 'command -v vainfo >/dev/null'
+    ;;
+  amd)
+    required_encoders='h264_vaapi hevc_vaapi'
+    docker run --rm --entrypoint sh "$smoke_image" -c 'command -v vainfo >/dev/null'
+    ;;
+  cpu)
+    required_encoders='libx264'
+    ;;
+  *)
+    echo "unsupported hardware target: $smoke_target" >&2
+    exit 1
+    ;;
+esac
+
+configured_target=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$smoke_image" | sed -n 's/^LIVE_RUNNER_HARDWARE=//p')
+if [ "$configured_target" != "$smoke_target" ]; then
+  echo "$smoke_image declares LIVE_RUNNER_HARDWARE=$configured_target, expected $smoke_target" >&2
+  exit 1
+fi
+
+encoders=$(docker run --rm --entrypoint ffmpeg "$smoke_image" -hide_banner -encoders 2>/dev/null)
+for encoder in $required_encoders; do
+  printf '%s\n' "$encoders" | grep -F "$encoder" >/dev/null || {
+    echo "$smoke_image does not contain $encoder" >&2
+    exit 1
+  }
+done
+
 docker run --detach --name "$smoke_name" \
+  --env LIVE_RUNNER_HARDWARE=cpu \
   --env LIVE_RUNNER_MASTER_KEY=bW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0= \
   --env LIVE_RUNNER_BROKER_TOKEN=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
   --env LIVE_RUNNER_INTERNAL_MEDIA_TOKEN=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii \
-  --env LIVE_RUNNER_PUBLIC_RTMP_URL=rtmp://runner.invalid/ingest \
-  --env LIVE_RUNNER_PUBLIC_HLS_BASE=https://runner.invalid \
-  --env LIVE_RUNNER_PUBLIC_API_BASE=https://runner.invalid \
+  --env LIVEPEER_PUBLIC_RTMP_URL=rtmps://runner.invalid:1936 \
+  --env LIVEPEER_PUBLIC_URL=https://runner.invalid/r/live-runner \
   "$smoke_image" >/dev/null
 
 smoke_attempt=0
@@ -45,3 +81,5 @@ fi
 
 cleanup
 trap - EXIT INT TERM
+
+echo "$smoke_image ($smoke_target) image contract and CPU lifecycle verified"

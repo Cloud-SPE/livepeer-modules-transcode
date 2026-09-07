@@ -24,12 +24,11 @@ type LiveSessionRuntimeV1 interface {
 }
 
 type RunnerResponseFactoryV1 struct {
-	PublicRTMPURL string
-	PublicHLSBase string
-	PublicAPIBase string
-	GrantTTL      time.Duration
-	Now           func() time.Time
-	Random        func(int) ([]byte, error)
+	PublicRTMPBase string
+	PublicHTTPBase string
+	GrantTTL       time.Duration
+	Now            func() time.Time
+	Random         func(int) ([]byte, error)
 }
 
 func (f RunnerResponseFactoryV1) Create(_ RunnerCreateRequestV1) (RunnerCreateResponseV1, error) {
@@ -57,10 +56,10 @@ func (f RunnerResponseFactoryV1) Create(_ RunnerCreateRequestV1) (RunnerCreateRe
 		Runtime: RuntimeDescriptorV1{
 			Schema: RuntimeSchemaV1,
 			Public: RuntimePublicV1{
-				RTMPURL:     strings.TrimRight(f.PublicRTMPURL, "/"),
-				HLSURL:      joinPublicURLV1(f.PublicHLSBase, "v1/public/sessions/"+url.PathEscape(runnerID)+"/master.m3u8"),
-				KeyIssueURL: joinPublicURLV1(f.PublicAPIBase, "v1/sessions/"+url.PathEscape(runnerID)+"/stream-keys"),
-				StatusURL:   joinPublicURLV1(f.PublicAPIBase, "v1/public/sessions/"+url.PathEscape(runnerID)+"/status"),
+				RTMPURL:     joinPublicURLV1(f.PublicRTMPBase, "ingest"),
+				HLSURL:      joinPublicURLV1(f.PublicHTTPBase, "v1/public/sessions/"+url.PathEscape(runnerID)+"/master.m3u8"),
+				KeyIssueURL: joinPublicURLV1(f.PublicHTTPBase, "v1/sessions/"+url.PathEscape(runnerID)+"/stream-keys"),
+				StatusURL:   joinPublicURLV1(f.PublicHTTPBase, "v1/public/sessions/"+url.PathEscape(runnerID)+"/status"),
 			},
 			Grants: []GrantV1{{ID: grantID, Operations: []string{GrantOperationV1}, Secret: grantSecret, ExpiresAt: now().Add(f.GrantTTL).UTC().Format(time.RFC3339)}},
 		},
@@ -72,18 +71,15 @@ func (f RunnerResponseFactoryV1) Create(_ RunnerCreateRequestV1) (RunnerCreateRe
 }
 
 func (f RunnerResponseFactoryV1) Validate() error {
-	if err := validateURLScheme(f.PublicRTMPURL, "rtmp", "rtmps"); err != nil {
+	if err := validateURLScheme(f.PublicRTMPBase, "rtmp", "rtmps"); err != nil {
 		return errors.New("public RTMP URL is invalid")
 	}
-	rtmpURL, _ := url.Parse(f.PublicRTMPURL)
-	if strings.TrimRight(rtmpURL.Path, "/") != "/ingest" || rtmpURL.RawQuery != "" || rtmpURL.Fragment != "" {
-		return errors.New("public RTMP URL must end at the ingest application")
+	rtmpURL, _ := url.Parse(f.PublicRTMPBase)
+	if strings.TrimRight(rtmpURL.Path, "/") != "" || rtmpURL.RawQuery != "" || rtmpURL.Fragment != "" {
+		return errors.New("public RTMP URL must be an origin without a path")
 	}
-	if err := validatePublicHTTPBaseV1(f.PublicHLSBase); err != nil {
-		return errors.New("public HLS base URL is invalid")
-	}
-	if err := validatePublicHTTPBaseV1(f.PublicAPIBase); err != nil || f.GrantTTL <= 0 {
-		return errors.New("public API base URL or grant TTL is invalid")
+	if err := validatePublicHTTPBaseV1(f.PublicHTTPBase); err != nil || f.GrantTTL <= 0 {
+		return errors.New("public HTTP base URL or grant TTL is invalid")
 	}
 	return nil
 }
@@ -135,7 +131,7 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 	}
 	mux.Handle("DELETE /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleTerminateV1)))
 	mux.HandleFunc("POST /v1/sessions/{id}/stream-keys", s.handleStreamKeyV1)
-	mux.HandleFunc("GET /v1/describe", s.handleDescribeV1)
+	mux.HandleFunc("GET /.well-known/livepeer-runner", s.handleRunnerContractV1)
 	mux.HandleFunc("GET /ready", func(writer http.ResponseWriter, _ *http.Request) {
 		if s.Ready != nil && !s.Ready() {
 			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "media_router_unavailable")
@@ -308,14 +304,8 @@ func (s *LiveRunnerServerV1) handleStreamKeyV1(writer http.ResponseWriter, reque
 	}
 }
 
-func (s *LiveRunnerServerV1) handleDescribeV1(writer http.ResponseWriter, _ *http.Request) {
-	describe := DescribeResponseV1{Protocols: []string{PaidSessionProtocolV1}, Capabilities: []DescribedCapabilityV1{{
-		CapabilityID: "video:live.rtmp", DescriptorSchemas: []string{RuntimeSchemaV1}, WorkUnit: WorkUnitV1, Metering: "runner-reported",
-		Heartbeat: HeartbeatV1{IntervalSeconds: 5}, Readiness: ReadinessV1{Path: "/ready"},
-		SessionParamsSchema: json.RawMessage(`{"required":["schema","publisher_mode","output_profile","metering_rendition","storage"],"properties":{"schema":"string","publisher_mode":"gateway-relay|direct-publisher","output_profile":"string","metering_rendition":"string","storage":"object"}}`),
-		Paths:               RunnerPathsV1{Create: "/v1/sessions", Status: "/v1/sessions/{id}", Terminate: "/v1/sessions/{id}"},
-	}}}
-	writeRunnerJSONV1(writer, http.StatusOK, describe)
+func (s *LiveRunnerServerV1) handleRunnerContractV1(writer http.ResponseWriter, _ *http.Request) {
+	writeRunnerJSONV1(writer, http.StatusOK, LiveRunnerContractV1())
 }
 
 func (s *LiveRunnerServerV1) brokerAuthV1(next http.Handler) http.Handler {

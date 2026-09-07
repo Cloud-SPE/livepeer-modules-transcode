@@ -1,7 +1,7 @@
 {
   "session_id": "sess_broker_001",
   "work_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "capability": "video:live.rtmp",
+  "capability": "video:transcode.live",
   "offering": "live-standard",
   "session_params": {
     "schema": "rtmp-hls-session/v1",

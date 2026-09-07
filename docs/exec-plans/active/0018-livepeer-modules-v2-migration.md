@@ -109,6 +109,18 @@ and this gateway. The release removes legacy mode headers/adapters, `/v1/cap`
 calls, direct payer-daemon code, compensating settles, and stale configuration.
 No component is upgraded alone.
 
+Transcode release images are built through `infra/scripts/build-images.sh`,
+which preserves the codec-base dependency order and hardware-specific runner
+targets. Publication requires a clean committed tree and produces digests for
+the coordinated deployment manifest; mutable tags are never sufficient
+release evidence.
+
+Live images are vendor-specific and fail closed: NVIDIA, Intel, AMD, and CPU
+are separately named artifacts, and no GPU artifact is published under the
+catalog's `any` key. The exact Modules catalog handoff and real-device gates
+are recorded in
+`docs/references/2026-09-07-live-runner-vendor-image-handoff.md`.
+
 Rollback restores the complete previous compatibility set and its database-
 compatible application version. It never routes v2 durable operations into a
 v0 gateway or asks a v2 gateway to resume v0 work. Before rollout, the team

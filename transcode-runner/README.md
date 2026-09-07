@@ -3,6 +3,13 @@
 Single-rendition VOD transcode binary. Go + FFmpeg, behind the
 capability-broker.
 
+The `video-transcode-vod/v2` request is one synchronous `paid-job/v1`
+exchange. The response is typed SSE and ends with an
+`X-Livepeer-Work-Units` trailer containing delivered frame-megapixels.
+Identical `workload_id` retries converge on the durable journal; changed
+content under the same id is rejected. The runner-owned attach contract is
+served at `GET /.well-known/livepeer-runner`.
+
 > **For agents:** start at [`AGENTS.md`](./AGENTS.md).
 
 ## Build + run

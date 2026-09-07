@@ -16,12 +16,13 @@ import (
 )
 
 type fakeABRExecutorV2 struct {
-	calls    atomic.Int32
-	started  chan struct{}
-	release  chan struct{}
-	canceled chan struct{}
-	fail     error
-	once     sync.Once
+	calls             atomic.Int32
+	started           chan struct{}
+	release           chan struct{}
+	canceled          chan struct{}
+	fail              error
+	failAfterDelivery error
+	once              sync.Once
 }
 
 func (f *fakeABRExecutorV2) Execute(ctx context.Context, req ABRWorkloadRequestV2, _ transcode.ABRPreset, reporter ABRExecutionReporterV2) (ABRTerminalResultV2, error) {
@@ -60,6 +61,9 @@ func (f *fakeABRExecutorV2) Execute(ctx context.Context, req ABRWorkloadRequestV
 	if err := reporter.Delivered(delivered); err != nil {
 		return ABRTerminalResultV2{}, err
 	}
+	if f.failAfterDelivery != nil {
+		return ABRTerminalResultV2{}, f.failAfterDelivery
+	}
 	if err := reporter.PreparedManifest(PreparedArtifactV2{Path: "work/asset/master.m3u8", SHA256: strings.Repeat("c", 64)}); err != nil {
 		return ABRTerminalResultV2{}, err
 	}
@@ -88,6 +92,9 @@ func TestABRHandlerV2KeepsExchangeOpenThroughTerminalSuccess(t *testing.T) {
 	if executor.calls.Load() != 1 {
 		t.Fatalf("executor calls = %d", executor.calls.Load())
 	}
+	if got := recorder.Result().Trailer.Get(ABRWorkUnitsTrailerV2); got != "277" {
+		t.Fatalf("work-unit trailer = %q, want 277", got)
+	}
 	record, err := store.Load("asset-success")
 	if err != nil || record.State != WorkloadSucceededV2 {
 		t.Fatalf("terminal journal = %q, %v", record.State, err)
@@ -105,9 +112,29 @@ func TestABRHandlerV2FailureIsTerminalZeroUsageAndRedacted(t *testing.T) {
 	if strings.Contains(body, "storage.example") || strings.Contains(body, "sig=") {
 		t.Fatalf("failure leaked credentials: %s", body)
 	}
+	if got := recorder.Result().Trailer.Get(ABRWorkUnitsTrailerV2); got != "0" {
+		t.Fatalf("failed work-unit trailer = %q, want 0", got)
+	}
 	record, err := store.Load("asset-failure")
 	if err != nil || record.State != WorkloadFailedV2 {
 		t.Fatalf("failure journal = %q, %v", record.State, err)
+	}
+}
+
+func TestABRHandlerV2PartialFailureBillsDeliveredRenditions(t *testing.T) {
+	executor := &fakeABRExecutorV2{failAfterDelivery: &ABRExecutionErrorV2{Code: "upload_failed", Message: "later rendition upload failed", Retryable: true}}
+	handler, _, store := newTestABRHandlerV2(t, executor)
+	recorder := performABRRequestV2(t, handler, testABRRequestV2("asset-partial"))
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK || !strings.Contains(body, "event: error") || !strings.Contains(body, `"units":277`) {
+		t.Fatalf("partial failure SSE status=%d body=%s", recorder.Code, body)
+	}
+	if got := recorder.Result().Trailer.Get(ABRWorkUnitsTrailerV2); got != "277" {
+		t.Fatalf("partial failure trailer = %q, want 277", got)
+	}
+	record, err := store.Load("asset-partial")
+	if err != nil || record.State != WorkloadFailedV2 || len(record.Delivered) != 1 {
+		t.Fatalf("partial failure journal = state %q delivered %d err=%v", record.State, len(record.Delivered), err)
 	}
 }
 
@@ -154,6 +181,9 @@ func TestABRHandlerV2TerminalReplayAndContentMismatch(t *testing.T) {
 	withoutKeepalive := func(value string) string { return strings.ReplaceAll(value, ": keepalive\n\n", "") }
 	if first.Code != http.StatusOK || second.Code != http.StatusOK || withoutKeepalive(first.Body.String()) != withoutKeepalive(second.Body.String()) {
 		t.Fatalf("terminal replay differs:\nfirst=%s\nsecond=%s", first.Body.String(), second.Body.String())
+	}
+	if first.Result().Trailer.Get(ABRWorkUnitsTrailerV2) != "277" || second.Result().Trailer.Get(ABRWorkUnitsTrailerV2) != "277" {
+		t.Fatalf("terminal replay trailers = %q, %q", first.Result().Trailer.Get(ABRWorkUnitsTrailerV2), second.Result().Trailer.Get(ABRWorkUnitsTrailerV2))
 	}
 
 	req.Input.DownloadURL = "https://storage.example/different.mp4?sig=different"

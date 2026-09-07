@@ -1,0 +1,84 @@
+name: livepeer-transcode-nvidia
+
+x-runner: &runner
+  platform: linux/amd64
+  pull_policy: always
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+  stop_grace_period: 45s
+
+x-nvidia: &nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["${NVIDIA_GPU_ID}"]
+            capabilities: [gpu]
+
+services:
+  transcode-runner:
+    <<: [*runner, *nvidia]
+    image: tztcloud/transcode-runner-nvidia:v2.0.0@sha256:7f92ba9b6f9c04f77279cf2f0ddd7aad48ec1704c65e3ee87ed9898777e5e6bc
+    environment:
+      MAX_QUEUE_SIZE: ${VOD_MAX_QUEUE_SIZE:-1}
+      METRICS_ENABLED: "true"
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    ports:
+      - "${VOD_BIND_IP:-0.0.0.0}:${VOD_PORT:-18080}:8080"
+    volumes:
+      - transcode-runner-state:/var/lib/transcode-runner
+    networks: [runners]
+
+  abr-runner:
+    <<: [*runner, *nvidia]
+    image: tztcloud/abr-runner-nvidia:v2.0.0@sha256:e6059b27099bb30388c40c5d06fbdc5666729f326f71ee69d8ca81921c40e93a
+    environment:
+      MAX_QUEUE_SIZE: ${ABR_MAX_QUEUE_SIZE:-1}
+      METRICS_ENABLED: "true"
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    ports:
+      - "${ABR_BIND_IP:-0.0.0.0}:${ABR_PORT:-18180}:8080"
+    volumes:
+      - abr-runner-state:/var/lib/abr-runner
+    networks: [runners]
+
+  live-runner:
+    <<: [*runner, *nvidia]
+    image: ${LIVE_NVIDIA_IMAGE}
+    environment:
+      LIVE_RUNNER_MASTER_KEY: ${LIVE_RUNNER_MASTER_KEY}
+      LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN}
+      LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN}
+      LIVE_RUNNER_MAX_CONCURRENT: "1"
+      LIVE_RUNNER_HARDWARE: nvidia
+      LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL}
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    ports:
+      - "${LIVE_HTTP_BIND_IP:-0.0.0.0}:${LIVE_HTTP_PORT:-18280}:8080"
+      - "${LIVE_RTMP_BIND_IP:-0.0.0.0}:${LIVE_RTMP_PORT:-1935}:1935"
+    volumes:
+      - live-runner-state:/var/lib/live-runner
+    networks: [runners]
+
+networks:
+  runners:
+    driver: bridge
+
+volumes:
+  transcode-runner-state:
+  abr-runner-state:
+  live-runner-state:

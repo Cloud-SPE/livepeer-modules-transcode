@@ -22,7 +22,7 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
     requestId: "request-1", requestContentSha256: "a".repeat(64), workId: "work-1",
     rotationGeneration: 0,
     route: {
-      protocol: "paid-session/v1", capability: "video:live.rtmp", offering: "live-standard",
+      protocol: "paid-session/v1", capability: "video:transcode.live", offering: "live-standard",
       requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1",
       workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1",
       quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32),
@@ -165,6 +165,7 @@ function harness(options: {
     maxTotalUnits: 3_600,
     maxRefills: 60,
     disconnectGraceMs: 15_000,
+    now: () => now,
     liveSessions: {
       record() { calls.push("cache-record"); }, get() { return null; }, getByStreamId() { return null; },
       remove() { calls.push("cache-remove"); },
@@ -257,7 +258,7 @@ function recoveredOpenResult(): Awaited<ReturnType<PaidSessionClient["open"]>> {
       protocol: "paid-session/v1", session,
       routeSnapshot: {
         schemaVersion: "route-snapshot/v1", brokerUrl: "https://broker.example",
-        ethAddress: `0x${"11".repeat(20)}`, capability: "video:live.rtmp",
+        ethAddress: `0x${"11".repeat(20)}`, capability: "video:transcode.live",
         offering: "live-standard", protocol: "paid-session/v1",
         workUnit: "output_seconds", pricePerWorkUnitWei: "1", unitsPerPrice: "1",
         binding: {

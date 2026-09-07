@@ -110,7 +110,7 @@ function operationFixture(version: string): PaidOperation {
   return {
     id: "operation-1", kind: "session", apiKeyId: "api-key-1", liveStreamId: "live-1",
     requestId: "pending:req_1", requestContentSha256: "a".repeat(64), workId: "pending:req_1",
-    rotationGeneration: 0, route: { protocol: "paid-session/v1", capability: "video:live.rtmp", offering: "live-standard", requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1", workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1", quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32), settlementKey: "key-1", raw: {} },
+    rotationGeneration: 0, route: { protocol: "paid-session/v1", capability: "video:transcode.live", offering: "live-standard", requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1", workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1", quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32), settlementKey: "key-1", raw: {} },
     status: "opening", fundedUnits: "60", settlementSequence: "0", lifecycleVersion: version,
     recoveryOwner: "gateway-1", recoveryLeaseExpiresAt: new Date("2030-01-01T00:00:00Z"),
     sessionRuntime: { publisherMode: "gateway-relay", relayStatus: "pending", relayGeneration: 0, lastRunnerSequence: "0", lastRunnerUsage: "0" },
@@ -121,7 +121,7 @@ function operationFixture(version: string): PaidOperation {
 function routeFixture(): SelectedWorkerRoute {
   return {
     workerUrl: "https://broker.example", ethAddress: "0x1111111111111111111111111111111111111111",
-    capability: "video:live.rtmp", offering: "live-standard", pricePerWorkUnitWei: "1",
+    capability: "video:transcode.live", offering: "live-standard", pricePerWorkUnitWei: "1",
     unitsPerPrice: "1", workUnit: "output_seconds", protocol: "paid-session/v1", job: null,
     session: { descriptorSchema: "rtmp-hls/v1", attachment: "external", metering: "runner-reported", maxRotations: 3, refill: "extensible", heartbeat: { intervalSeconds: 5, missedThreshold: 3 }, lease: { policy: "funding-tracking" } },
     workUnitEstimator: null, settlementKeys: [{ publicKey: "key-1", notBefore: "2026-01-01T00:00:00Z", expiresAt: "2030-01-01T00:00:00Z", introducedInPublicationSeq: "1" }],

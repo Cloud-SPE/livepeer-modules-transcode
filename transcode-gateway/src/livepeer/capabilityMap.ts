@@ -15,7 +15,7 @@ export const CAPABILITY_ROUTE_REQUIREMENTS: Record<Capability, RouteProtocolRequ
     // choice is made by the paid-job client for each exchange.
     acceptedTransports: ["unary", "stream"],
   },
-  "video:live.rtmp": {
+  "video:transcode.live": {
     protocol: PROTOCOL.PAID_SESSION,
     descriptorSchema: "rtmp-hls/v1",
     attachment: "external",

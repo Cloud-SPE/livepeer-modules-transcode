@@ -19,9 +19,8 @@ type LiveRunnerConfigV1 struct {
 	MasterKey        []byte
 	BrokerToken      string
 	InternalToken    string
-	PublicRTMPURL    string
-	PublicHLSBase    string
-	PublicAPIBase    string
+	PublicRTMPBase   string
+	PublicHTTPBase   string
 	PresetsFile      string
 	MediaMTXBinary   string
 	MediaMTXConfig   string
@@ -38,6 +37,7 @@ type LiveRunnerConfigV1 struct {
 	HLSHeaderTimeout time.Duration
 	GrantTTL         time.Duration
 	StreamKeyTTL     time.Duration
+	HardwareTarget   string
 }
 
 func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, error) {
@@ -67,15 +67,11 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	if err != nil || len(internalToken) < 32 {
 		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_INTERNAL_MEDIA_TOKEN must contain at least 32 characters")
 	}
-	publicRTMP, err := required("LIVE_RUNNER_PUBLIC_RTMP_URL")
+	publicRTMP, err := required("LIVEPEER_PUBLIC_RTMP_URL")
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
 	}
-	publicHLS, err := required("LIVE_RUNNER_PUBLIC_HLS_BASE")
-	if err != nil {
-		return LiveRunnerConfigV1{}, err
-	}
-	publicAPI, err := required("LIVE_RUNNER_PUBLIC_API_BASE")
+	publicHTTP, err := required("LIVEPEER_PUBLIC_URL")
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
 	}
@@ -98,17 +94,24 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
 	}
+	hardwareTarget := valueOrV1(getenv("LIVE_RUNNER_HARDWARE"), "auto")
+	switch hardwareTarget {
+	case "auto", "cpu", string(transcode.VendorNVIDIA), string(transcode.VendorIntel), string(transcode.VendorAMD):
+	default:
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_HARDWARE must be one of auto, cpu, nvidia, intel, or amd")
+	}
 	config := LiveRunnerConfigV1{
 		ListenAddress:  valueOrV1(getenv("LIVE_RUNNER_ADDR"), ":8080"),
 		StateDirectory: valueOrV1(getenv("LIVE_RUNNER_STATE_DIR"), "/var/lib/live-runner"),
 		MasterKey:      masterKey, BrokerToken: brokerToken, InternalToken: internalToken,
-		PublicRTMPURL: publicRTMP, PublicHLSBase: publicHLS, PublicAPIBase: publicAPI, PresetsFile: presetsFile,
+		PublicRTMPBase: publicRTMP, PublicHTTPBase: publicHTTP, PresetsFile: presetsFile,
 		MediaMTXBinary: valueOrV1(getenv("LIVE_RUNNER_MEDIAMTX_BINARY"), "/usr/local/bin/mediamtx"),
 		RouterRTMPBase: valueOrV1(getenv("LIVE_RUNNER_ROUTER_RTMP_BASE"), "rtmp://127.0.0.1:1935"),
 		MaxConcurrent:  maxConcurrent, StartupTimeout: 30 * time.Second, ShutdownTimeout: 30 * time.Second,
 		RouterPoll: 100 * time.Millisecond, MeterPoll: 250 * time.Millisecond, HeartbeatEvery: 4 * time.Second, CallbackPoll: 250 * time.Millisecond,
 		RequestTimeout: 2 * time.Second, GrantTTL: time.Hour, StreamKeyTTL: 10 * time.Minute,
 		HLSHeaderTimeout: 15 * time.Second,
+		HardwareTarget:   hardwareTarget,
 	}
 	config.MediaMTXConfig = config.StateDirectory + "/mediamtx.yml"
 	config.MediaMTX = DefaultMediaMTXConfigV1(valueOrV1(getenv("LIVE_RUNNER_MEDIAMTX_AUTH_URL"), "http://127.0.0.1:8080/internal/mediamtx/auth"))
@@ -128,7 +131,10 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return errors.New("parse live presets failed")
 	}
-	hardware := transcode.DetectGPU()
+	hardware, err := resolveLiveHardwareV1(config.HardwareTarget, transcode.DetectGPU)
+	if err != nil {
+		return err
+	}
 	store, err := NewEncryptedFileSessionStoreV1(config.StateDirectory+"/sessions", config.MasterKey)
 	if err != nil {
 		return err
@@ -178,7 +184,7 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	callbackContext, cancelCallbacks := context.WithCancel(ctx)
 	callbackExit := make(chan error, 1)
 	go func() { callbackExit <- callbackWorker.Run(callbackContext) }()
-	factory := RunnerResponseFactoryV1{PublicRTMPURL: config.PublicRTMPURL, PublicHLSBase: config.PublicHLSBase, PublicAPIBase: config.PublicAPIBase, GrantTTL: config.GrantTTL}
+	factory := RunnerResponseFactoryV1{PublicRTMPBase: config.PublicRTMPBase, PublicHTTPBase: config.PublicHTTPBase, GrantTTL: config.GrantTTL}
 	if err := factory.Validate(); err != nil {
 		cancelCallbacks()
 		<-callbackExit
@@ -225,6 +231,28 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	}
 	mediaErr := supervisor.Stop(shutdown)
 	return errors.Join(runErr, serverErr, runtimeErr, callbackErr, mediaErr)
+}
+
+func resolveLiveHardwareV1(target string, detect func() transcode.HWProfile) (transcode.HWProfile, error) {
+	if target == "cpu" {
+		return transcode.HWProfile{}, nil
+	}
+	hardware := detect()
+	if target == "auto" {
+		return hardware, nil
+	}
+	if !hardware.IsGPUAvailable() || string(hardware.Vendor) != target {
+		return transcode.HWProfile{}, fmt.Errorf("live-runner image requires %s GPU acceleration, but that hardware was not detected", target)
+	}
+	requiredEncoder := map[string]string{
+		string(transcode.VendorNVIDIA): "h264_nvenc",
+		string(transcode.VendorIntel):  "h264_qsv",
+		string(transcode.VendorAMD):    "h264_vaapi",
+	}[target]
+	if !hardware.HasEncoder(requiredEncoder) {
+		return transcode.HWProfile{}, fmt.Errorf("live-runner image requires %s encoder %s, but it was not detected", target, requiredEncoder)
+	}
+	return hardware, nil
 }
 
 func valueOrV1(value, fallback string) string {

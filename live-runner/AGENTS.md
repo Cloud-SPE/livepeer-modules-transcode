@@ -13,6 +13,11 @@ The broker never carries media or interprets `session_params`. The runner
 owns ingest, output, private stream-key issuance, cumulative `output_seconds`
 events, and idempotent termination.
 
+The attach contract is served only at `GET /.well-known/livepeer-runner`.
+Public descriptor coordinates derive exclusively from
+`LIVEPEER_PUBLIC_RTMP_URL` and `LIVEPEER_PUBLIC_URL`; the deleted
+`LIVE_RUNNER_PUBLIC_*` variables are not accepted.
+
 ## Work rules
 
 - All design docs and exec plans remain in root `docs/`.

@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
+ARG NODE_VERSION=24
+
 # ---------- build ----------
-FROM node:24-alpine AS build
+FROM node:${NODE_VERSION}-alpine AS build
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
@@ -19,7 +21,7 @@ WORKDIR /app/transcode-gateway
 RUN pnpm build
 
 # ---------- runtime ----------
-FROM node:24-alpine AS runtime
+FROM node:${NODE_VERSION}-alpine AS runtime
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate

@@ -151,26 +151,29 @@ type TerminateResponseV1 struct {
 	CloseReason     string `json:"close_reason"`
 }
 
-type DescribeResponseV1 struct {
-	Protocols    []string                `json:"protocols"`
-	Capabilities []DescribedCapabilityV1 `json:"capabilities"`
+type LiveRunnerContractDocumentV1 struct {
+	CapabilityID        string            `json:"capability_id"`
+	Protocol            string            `json:"protocol"`
+	DescriptorSchemas   []string          `json:"descriptor_schemas"`
+	WorkUnit            RunnerWorkUnitV1  `json:"work_unit"`
+	Metering            string            `json:"metering"`
+	Heartbeat           HeartbeatV1       `json:"heartbeat"`
+	Readiness           RunnerReadinessV1 `json:"readiness"`
+	SessionParamsSchema json.RawMessage   `json:"session_params_schema"`
+	Paths               RunnerPathsV1     `json:"paths"`
+	Identity            map[string]string `json:"identity"`
+	SchemaVersions      map[string]string `json:"schema_versions"`
 }
 
-type DescribedCapabilityV1 struct {
-	CapabilityID        string          `json:"capability_id"`
-	DescriptorSchemas   []string        `json:"descriptor_schemas"`
-	WorkUnit            string          `json:"work_unit"`
-	Metering            string          `json:"metering"`
-	Heartbeat           HeartbeatV1     `json:"heartbeat"`
-	Readiness           ReadinessV1     `json:"readiness"`
-	SessionParamsSchema json.RawMessage `json:"session_params_schema"`
-	Paths               RunnerPathsV1   `json:"paths"`
+type RunnerWorkUnitV1 struct {
+	Name string `json:"name"`
 }
 
 type HeartbeatV1 struct {
 	IntervalSeconds uint32 `json:"interval_seconds"`
 }
-type ReadinessV1 struct {
+type RunnerReadinessV1 struct {
+	Type string `json:"type"`
 	Path string `json:"path"`
 }
 type RunnerPathsV1 struct {
@@ -395,16 +398,28 @@ func ValidateTerminateV1(request TerminateRequestV1, response TerminateResponseV
 	return nil
 }
 
-func ValidateDescribeV1(value DescribeResponseV1) error {
-	if len(value.Protocols) != 1 || value.Protocols[0] != PaidSessionProtocolV1 || len(value.Capabilities) != 1 {
-		return errors.New("describe protocol or capability count is invalid")
+func LiveRunnerContractV1() LiveRunnerContractDocumentV1 {
+	return LiveRunnerContractDocumentV1{
+		CapabilityID: "video:transcode.live", Protocol: PaidSessionProtocolV1,
+		DescriptorSchemas: []string{RuntimeSchemaV1}, Metering: "runner-reported",
+		WorkUnit: RunnerWorkUnitV1{Name: WorkUnitV1}, Heartbeat: HeartbeatV1{IntervalSeconds: 5},
+		Readiness:           RunnerReadinessV1{Type: "http-status", Path: "/ready"},
+		Paths:               RunnerPathsV1{Create: "/v1/sessions", Status: "/v1/sessions/{id}", Terminate: "/v1/sessions/{id}"},
+		Identity:            map[string]string{"provider": "livepeer-live-runner"},
+		SchemaVersions:      map[string]string{PaidSessionProtocolV1: "1.0.0", RuntimeSchemaV1: "1.0.0", SessionParamsSchemaV1: "1.0.0"},
+		SessionParamsSchema: json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["schema","publisher_mode","output_profile","metering_rendition","storage"],"properties":{"schema":{"const":"rtmp-hls-session/v1"},"publisher_mode":{"enum":["gateway-relay","direct-publisher"]},"output_profile":{"type":"string"},"metering_rendition":{"type":"string"},"storage":{"type":"object"}}}`),
 	}
-	capability := value.Capabilities[0]
-	if capability.CapabilityID == "" || len(capability.DescriptorSchemas) != 1 || capability.DescriptorSchemas[0] != RuntimeSchemaV1 || capability.WorkUnit != WorkUnitV1 || capability.Metering != "runner-reported" || capability.Heartbeat.IntervalSeconds == 0 {
-		return errors.New("described capability is invalid")
+}
+
+func ValidateRunnerContractV1(value LiveRunnerContractDocumentV1) error {
+	if value.CapabilityID != "video:transcode.live" || value.Protocol != PaidSessionProtocolV1 || len(value.DescriptorSchemas) != 1 || value.DescriptorSchemas[0] != RuntimeSchemaV1 || value.WorkUnit.Name != WorkUnitV1 || value.Metering != "runner-reported" || value.Heartbeat.IntervalSeconds == 0 {
+		return errors.New("runner capability contract is invalid")
 	}
-	if capability.Readiness.Path != "/ready" || capability.Paths.Create == "" || !strings.Contains(capability.Paths.Status, "{id}") || !strings.Contains(capability.Paths.Terminate, "{id}") || !json.Valid(capability.SessionParamsSchema) {
-		return errors.New("described runner paths or parameter schema is invalid")
+	if value.Readiness.Type != "http-status" || value.Readiness.Path != "/ready" || value.Paths.Create != "/v1/sessions" || !strings.Contains(value.Paths.Status, "{id}") || !strings.Contains(value.Paths.Terminate, "{id}") || !json.Valid(value.SessionParamsSchema) {
+		return errors.New("runner paths or parameter schema is invalid")
+	}
+	if value.Identity["provider"] == "" || value.SchemaVersions[PaidSessionProtocolV1] == "" || value.SchemaVersions[RuntimeSchemaV1] == "" {
+		return errors.New("runner identity or schema versions are invalid")
 	}
 	return nil
 }

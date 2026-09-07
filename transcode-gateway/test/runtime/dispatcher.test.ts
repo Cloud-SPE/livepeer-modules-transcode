@@ -18,7 +18,7 @@ function operation(version = "1", relayGeneration = 0): PaidOperation {
     requestId: "request-1", requestContentSha256: "a".repeat(64), workId: "work-1",
     rotationGeneration: 0,
     route: {
-      protocol: "paid-session/v1", capability: "video:live.rtmp", offering: "live-standard",
+      protocol: "paid-session/v1", capability: "video:transcode.live", offering: "live-standard",
       requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1",
       workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1",
       quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "constraint-1",

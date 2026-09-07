@@ -13,7 +13,7 @@ test("transcode.abr selects paid-job/v1 without interaction-mode derivation", ()
 });
 
 test("live.rtmp selects the supported paid-session descriptor before open", () => {
-  assert.deepEqual(routeRequirementForCapability("video:live.rtmp"), {
+  assert.deepEqual(routeRequirementForCapability("video:transcode.live"), {
     protocol: PROTOCOL.PAID_SESSION,
     descriptorSchema: "rtmp-hls/v1",
     attachment: "external",

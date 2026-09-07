@@ -37,8 +37,8 @@ func TestContractFixturesValidate(t *testing.T) {
 	if err := ValidateTerminateV1(terminateRequest, terminateResponse); err != nil {
 		t.Fatal(err)
 	}
-	describe := readStrictFixtureV1[DescribeResponseV1](t, "describe.json")
-	if err := ValidateDescribeV1(describe); err != nil {
+	contract := LiveRunnerContractV1()
+	if err := ValidateRunnerContractV1(contract); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,7 +122,7 @@ func TestCreateAndKeyIssueReplayIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hash != "a77087d5b62ada2d893480c53ff0c2a36507daded4013870bf45424d033e65ab" {
+	if hash != "e7ffb5812d58596381abe67e058b3550f0b163b62c51c14747fef48da077ed22" {
 		t.Fatalf("create fingerprint = %s", hash)
 	}
 	if ClassifyReplayV1(hash, hash) != ReplayIdenticalV1 {

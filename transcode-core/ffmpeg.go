@@ -111,10 +111,12 @@ func ParseProbeOutput(jsonData []byte) (ProbeResult, error) {
 // TranscodeCmd builds the ffmpeg command for transcoding with the given preset and hardware profile.
 func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, probe ProbeResult, opts TranscodeOptions) *exec.Cmd {
 	args := []string{"-y"}
+	softwareDecode := opts.NeedsSoftwareDecode() ||
+		(opts.ToneMap && probe.IsHDR() && buildGPUTonemapFilter(hw) == "")
 
 	// Hardware acceleration input — skip when software decode is needed
 	// (subtitle burn-in and watermark overlay require CPU-side frames)
-	if !opts.NeedsSoftwareDecode() {
+	if !softwareDecode {
 		args = append(args, buildHWAccelInputArgs(hw)...)
 	}
 
@@ -126,7 +128,7 @@ func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, pro
 	}
 
 	// Video encoding args
-	if opts.NeedsSoftwareDecode() {
+	if softwareDecode {
 		// Use GPU encoder but with software-decoded input
 		args = append(args, buildVideoArgsSWDecode(preset, hw, probe)...)
 	} else {
@@ -134,7 +136,7 @@ func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, pro
 	}
 
 	// Filter graph
-	if opts.NeedsSoftwareDecode() {
+	if softwareDecode {
 		// Subtitles/watermarks present — software decode, use advanced filter graph
 		// (includes CPU tonemap if HDR + ToneMap is set)
 		filterType, filterStr := BuildAdvancedFilterGraph(opts, hw, probe, preset.Width, preset.Height)

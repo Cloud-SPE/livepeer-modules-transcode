@@ -21,7 +21,7 @@ function newSession(): NewPaidOperation {
     workId: "work-001",
     route: {
       protocol: "paid-session/v1",
-      capability: "video:live.rtmp",
+      capability: "video:transcode.live",
       offering: "live-standard",
       requestDescriptor: "rtmp-hls-session/v1",
       responseDescriptor: "rtmp-hls/v1",

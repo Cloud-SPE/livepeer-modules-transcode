@@ -1,6 +1,7 @@
 .PHONY: build test test-container race vet fmt image image-test image-smoke
 
-IMAGE ?= tztcloud/live-runner
+HARDWARE ?= cpu
+IMAGE ?= tztcloud/live-runner-$(HARDWARE)
 TAG ?= dev
 
 build:
@@ -16,10 +17,10 @@ image-test:
 	docker build --target go-test -f Dockerfile ..
 
 image:
-	docker build --target runtime -t $(IMAGE):$(TAG) -f Dockerfile ..
+	docker build --target runtime-$(HARDWARE) -t $(IMAGE):$(TAG) -f Dockerfile ..
 
 image-smoke: image
-	./scripts/image-smoke.sh $(IMAGE):$(TAG)
+	./scripts/image-smoke.sh $(IMAGE):$(TAG) $(HARDWARE)
 
 race:
 	go test -race ./...

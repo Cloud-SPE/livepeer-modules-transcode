@@ -68,7 +68,7 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     streamKeyHash: createHash("sha256").update(customerStreamKey).digest("hex"),
     status: "idle",
     ingestProtocol: "rtmp",
-    selectedCapability: "video:live.rtmp",
+    selectedCapability: "video:transcode.live",
     selectedOffering: input.route.offering,
     selectedWorkUnit: input.route.workUnit,
     selectedPricePerWorkUnitWei: input.route.pricePerWorkUnitWei,

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -283,12 +284,15 @@ func TestLiveRunnerTerminationIntentSurvivesRuntimeFailure(t *testing.T) {
 	}
 }
 
-func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
+func TestLiveRunnerContractReadyAndUnknownTermination(t *testing.T) {
 	handler, _, runtime := testLiveRunnerHandlerV1(t)
-	describe := runnerRequestV1(t, handler, http.MethodGet, "/v1/describe", nil, "")
-	var value DescribeResponseV1
-	if describe.Code != http.StatusOK || json.Unmarshal(describe.Body.Bytes(), &value) != nil || ValidateDescribeV1(value) != nil {
-		t.Fatalf("describe=%d %s", describe.Code, describe.Body.String())
+	contractResponse := runnerRequestV1(t, handler, http.MethodGet, "/.well-known/livepeer-runner", nil, "")
+	var value LiveRunnerContractDocumentV1
+	if contractResponse.Code != http.StatusOK || json.Unmarshal(contractResponse.Body.Bytes(), &value) != nil || ValidateRunnerContractV1(value) != nil {
+		t.Fatalf("contract=%d %s", contractResponse.Code, contractResponse.Body.String())
+	}
+	if describe := runnerRequestV1(t, handler, http.MethodGet, "/v1/describe", nil, ""); describe.Code != http.StatusNotFound {
+		t.Fatalf("deleted describe route status=%d", describe.Code)
 	}
 	if ready := runnerRequestV1(t, handler, http.MethodGet, "/ready", nil, ""); ready.Code != http.StatusNoContent {
 		t.Fatalf("ready=%d", ready.Code)
@@ -305,6 +309,28 @@ func TestLiveRunnerDescribeReadyAndUnknownTermination(t *testing.T) {
 	unknown := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/unknown_runner", TerminateRequestV1{Reason: "gateway_close"}, testBrokerTokenV1)
 	if unknown.Code != http.StatusNoContent {
 		t.Fatalf("unknown terminate=%d %s", unknown.Code, unknown.Body.String())
+	}
+}
+
+func TestRunnerResponseUsesOnlyModulesPublicOrigins(t *testing.T) {
+	factory := RunnerResponseFactoryV1{
+		PublicRTMPBase: "rtmps://media.example:1936",
+		PublicHTTPBase: "https://media.example/r/live-service",
+		GrantTTL:       time.Hour,
+		Random:         func(size int) ([]byte, error) { return bytes.Repeat([]byte{1}, size), nil },
+	}
+	response, err := factory.Create(RunnerCreateRequestV1{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Runtime.Public.RTMPURL != "rtmps://media.example:1936/ingest" {
+		t.Fatalf("rtmp_url=%q", response.Runtime.Public.RTMPURL)
+	}
+	prefix := "https://media.example/r/live-service/"
+	for name, value := range map[string]string{"hls": response.Runtime.Public.HLSURL, "key": response.Runtime.Public.KeyIssueURL, "status": response.Runtime.Public.StatusURL} {
+		if !strings.HasPrefix(value, prefix) {
+			t.Fatalf("%s URL escaped public origin: %q", name, value)
+		}
 	}
 }
 
@@ -359,7 +385,7 @@ func testLiveRunnerServerWithStoreV1(t *testing.T, store *EncryptedFileSessionSt
 	return &LiveRunnerServerV1{
 		Store: store, Runtime: runtime, BrokerToken: testBrokerTokenV1, KeyTTL: 10 * time.Minute, Now: func() time.Time { return fixedNow }, Random: randomSource,
 		Factory: RunnerResponseFactoryV1{
-			PublicRTMPURL: "rtmps://runner.example/ingest", PublicHLSBase: "https://runner.example", PublicAPIBase: "https://runner.example", GrantTTL: time.Hour,
+			PublicRTMPBase: "rtmps://runner.example:1936", PublicHTTPBase: "https://runner.example/r/live-runner", GrantTTL: time.Hour,
 			Now: func() time.Time { return fixedNow }, Random: randomSource,
 		},
 	}

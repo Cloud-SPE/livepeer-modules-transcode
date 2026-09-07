@@ -15,6 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    clang \
     git \
     nasm \
     yasm \
@@ -43,10 +44,9 @@ RUN git clone --depth 1 --branch n7.1.3 https://github.com/FFmpeg/FFmpeg.git && 
     ./configure \
         --prefix=/usr/local \
         --enable-gpl \
-        --enable-nonfree \
-        --enable-cuda-nvcc \
+        --enable-version3 \
+        --enable-cuda-llvm \
         --enable-openssl \
-        --enable-libnpp \
         --enable-nvenc \
         --enable-nvdec \
         --enable-cuvid \
@@ -110,7 +110,7 @@ RUN git clone --depth 1 --branch n7.1.3 https://github.com/FFmpeg/FFmpeg.git && 
     ./configure \
         --prefix=/usr/local \
         --enable-gpl \
-        --enable-nonfree \
+        --enable-version3 \
         --enable-libvpl \
         --enable-openssl \
         --enable-vaapi \
@@ -164,7 +164,7 @@ RUN git clone --depth 1 --branch n7.1.3 https://github.com/FFmpeg/FFmpeg.git && 
     ./configure \
         --prefix=/usr/local \
         --enable-gpl \
-        --enable-nonfree \
+        --enable-version3 \
         --enable-vaapi \
         --enable-openssl \
         --enable-libx264 \
@@ -222,12 +222,13 @@ RUN ldconfig
 COPY --from=go-builder /bin/transcode-runner /usr/local/bin/transcode-runner
 
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode
-RUN mkdir -p /tmp/transcode && chown transcode:transcode /tmp/transcode
+RUN mkdir -p /tmp/transcode /var/lib/transcode-runner && chown transcode:transcode /tmp/transcode /var/lib/transcode-runner
 
 USER transcode
+VOLUME ["/var/lib/transcode-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"] || exit 1
+    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/transcode-runner"]
 
 # ============================================================================
@@ -269,12 +270,13 @@ COPY --from=go-builder /bin/transcode-runner /usr/local/bin/transcode-runner
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode && \
     groupadd -r render 2>/dev/null || true && \
     usermod -aG video,render transcode
-RUN mkdir -p /tmp/transcode && chown transcode:transcode /tmp/transcode
+RUN mkdir -p /tmp/transcode /var/lib/transcode-runner && chown transcode:transcode /tmp/transcode /var/lib/transcode-runner
 
 USER transcode
+VOLUME ["/var/lib/transcode-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"] || exit 1
+    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/transcode-runner"]
 
 # ============================================================================
@@ -304,10 +306,11 @@ COPY --from=go-builder /bin/transcode-runner /usr/local/bin/transcode-runner
 RUN groupadd -r transcode && useradd -r -g transcode -d /home/transcode -s /sbin/nologin transcode && \
     groupadd -r render 2>/dev/null || true && \
     usermod -aG video,render transcode
-RUN mkdir -p /tmp/transcode && chown transcode:transcode /tmp/transcode
+RUN mkdir -p /tmp/transcode /var/lib/transcode-runner && chown transcode:transcode /tmp/transcode /var/lib/transcode-runner
 
 USER transcode
+VOLUME ["/var/lib/transcode-runner"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"] || exit 1
+    CMD ["/usr/local/bin/transcode-runner", "-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/transcode-runner"]

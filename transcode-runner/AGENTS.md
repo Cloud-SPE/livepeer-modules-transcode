@@ -1,17 +1,16 @@
 # AGENTS.md
 
 This is `transcode-runner/` — the Go single-rendition VOD transcode
-binary. Exposes `POST /v1/video/transcode` to the capability-broker,
-runs FFmpeg per `presets.yaml`, reports progress via
-`GET /v1/video/transcode/status?job_id=<id>`.
+binary. Exposes synchronous `POST /v1/video/transcode` to the
+capability-broker and streams typed progress plus the terminal outcome.
 
 Component-local agent map. Root [`../AGENTS.md`](../AGENTS.md) is the
 cross-cutting map.
 
 ## Surface
 
-- `POST /v1/video/transcode` — submit a job (returns 202 + job id)
-- `GET /v1/video/transcode/status?job_id=...` — poll
+- `POST /v1/video/transcode` — synchronous `video-transcode-vod/v2` SSE exchange
+- `GET /.well-known/livepeer-runner` — authoritative runner contract
 - `GET /v1/video/transcode/presets` — list embedded presets
 - `GET /healthz` — 200 ready
 - `GET /metrics` — Prometheus (opt-in via `METRICS_ENABLED=true`)
@@ -24,6 +23,10 @@ Inherited from the repo root. Plus:
   payment validation. The capability-broker authenticates upstream
   and forwards paid requests; this runner sees only HTTP method +
   path + body + the informational `Livepeer-*` headers.
+- **Durable workload identity.** `workload_id` plus the canonical request hash
+  converges retries on one execution and one recorded terminal result.
+- **Runner-measured billing.** The terminal `X-Livepeer-Work-Units` trailer is
+  `ceil(actual_frames × delivered_width × delivered_height / 1,000,000)`.
 - **GPU passthrough is operator-supplied** — NVENC (`--gpus all` +
   nvidia-container-toolkit), QSV (`/dev/dri/renderD128` +
   `i965-va-driver`), VAAPI (same device + `mesa-va-drivers`).

@@ -21,7 +21,7 @@ const brokerSessionId = "broker-session-1";
 const route = {
   workerUrl: "https://broker.example",
   ethAddress: `0x${"33".repeat(20)}`,
-  capability: "video:live.rtmp",
+  capability: "video:transcode.live",
   offering: "default",
   pricePerWorkUnitWei: "1",
   unitsPerPrice: "1",

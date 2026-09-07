@@ -28,7 +28,7 @@ function snapshot(protocol: "paid-job/v1" | "paid-session/v1") {
     schema_version: "route-snapshot/v1",
     broker_url: "https://broker.example/livepeer",
     eth_address: `0x${"33".repeat(20)}`,
-    capability: protocol === "paid-job/v1" ? "video:transcode.abr" : "video:live.rtmp",
+    capability: protocol === "paid-job/v1" ? "video:transcode.abr" : "video:transcode.live",
     offering: "default",
     protocol,
     work_unit: protocol === "paid-job/v1" ? "frame_megapixel" : "output_second",
@@ -190,7 +190,7 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
   const client = createLocClient(transport);
   const opened = await client.openSession({
     requestId: "session-request-1",
-    capability: "video:live.rtmp",
+    capability: "video:transcode.live",
     offering: "default",
     descriptorSchema: "rtmp-hls/v1",
     sessionParams: { ingest: "gateway-relay" },
@@ -203,7 +203,7 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
   assert.equal(opened.session.descriptorSchema, "rtmp-hls/v1");
   assert.equal(opened.routeSnapshot.session?.maxRotations, 3);
   assert.deepEqual(requests[0]?.body, {
-    capability: "video:live.rtmp",
+    capability: "video:transcode.live",
     offering: "default",
     descriptor_schema: "rtmp-hls/v1",
     session_params: { ingest: "gateway-relay" },

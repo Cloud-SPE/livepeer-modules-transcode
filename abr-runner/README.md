@@ -26,6 +26,9 @@ starting point for the gateway, runner, Modules extractor, and LOC integration.
 `POST /v1/video/transcode/abr` requires `Accept: text/event-stream` and is
 wired directly to this contract. The removed asynchronous `202` and status
 poll route are not served by the v2 runtime.
+The runner-owned attach contract is served at
+`GET /.well-known/livepeer-runner` and declares the response-trailer
+extractor for `X-Livepeer-Work-Units`.
 
 ### Request and output safety
 
@@ -83,8 +86,13 @@ ceil(sum(actual_frames_i * width_i * height_i) / 1_000_000)
 
 The runner sums every delivered video rendition before applying one ceiling.
 Omitting `video` marks an audio-only rendition and contributes zero. Integer
-overflow is a terminal validation failure. A failed terminal event always
-reports `video-frame-megapixel: 0`.
+overflow is a terminal validation failure. A failed terminal event reports the
+units for video renditions delivered before the failure; a failure that
+delivered no video reports `video-frame-megapixel: 0`.
+
+The runner emits `X-Livepeer-Work-Units` as an HTTP response trailer after the
+terminal SSE event. The broker consumes that private runner-to-broker claim and
+emits the normative `Livepeer-Work-Units` response field to its caller.
 
 `actual_frames` is the decoded video-frame count measured from each completed
 output with `ffprobe -count_frames`, before upload and terminal emission. Input

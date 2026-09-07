@@ -7,7 +7,7 @@ export interface Caller {
   metadata?: unknown;
 }
 
-export type Capability = "video:transcode.abr" | "video:live.rtmp";
+export type Capability = "video:transcode.abr" | "video:transcode.live";
 
 export type Codec = "h264" | "hevc" | "av1";
 

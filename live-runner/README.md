@@ -18,18 +18,38 @@ MediaMTX.
 
 Required environment variables are `LIVE_RUNNER_MASTER_KEY` (base64 for 32
 bytes), `LIVE_RUNNER_BROKER_TOKEN`, `LIVE_RUNNER_INTERNAL_MEDIA_TOKEN`,
-`LIVE_RUNNER_PUBLIC_RTMP_URL`, `LIVE_RUNNER_PUBLIC_HLS_BASE`,
-`LIVE_RUNNER_PUBLIC_API_BASE`, and `LIVE_RUNNER_PRESETS_FILE`. MediaMTX
+`LIVEPEER_PUBLIC_RTMP_URL`, `LIVEPEER_PUBLIC_URL`, and
+`LIVE_RUNNER_PRESETS_FILE`. Modules injects the first as the public RTMPS
+origin (for example `rtmps://host:1936`) and the second as the public HTTP
+service origin. The runner derives all public ingest, playback, key-issue,
+and status URLs from those two values. MediaMTX
 listener addresses, its internal auth URL, the state directory, binary path,
 and encoder concurrency have `LIVE_RUNNER_*` overrides; private HLS, API, and
 metrics addresses are still rejected unless loopback-only.
 
 `make image-test` runs the Go suite in the same copied module graph used by
-the image, `make image` builds the non-root runtime containing FFmpeg, the
-pinned MediaMTX binary, and `presets.yaml`, and `make image-smoke` waits for
-container health before proving bounded SIGTERM exit. CPU H.264 is a supported
-fallback; hardware detected by `transcode-core` is preferred when the runtime
-exposes it.
+the image. `make image HARDWARE=nvidia` (or `intel`, `amd`, `cpu`) builds one
+non-root runtime containing FFmpeg, the pinned MediaMTX binary, and
+`presets.yaml`; `make image-smoke HARDWARE=...` validates its declared target,
+encoder surface, health, and bounded SIGTERM exit.
+
+Hardware policy is explicit and fail-closed. The published artifacts are
+`live-runner-nvidia`, `live-runner-intel`, `live-runner-amd`, and
+`live-runner-cpu`; there is no universal `any` GPU image. Each image bakes its
+target into `LIVE_RUNNER_HARDWARE`. A GPU image refuses startup unless the
+matching device and live H.264 encoder (`h264_nvenc`, `h264_qsv`, or
+`h264_vaapi`) are detected. The CPU image deliberately skips GPU detection and
+uses `libx264`; it is a separately priced/certified offering, not silent GPU
+fallback. `auto` remains available only for source-level development and must
+not be used for a catalog claim.
+
+Image inspection cannot prove a GPU encoder works. On a correctly equipped
+host, `scripts/hardware-smoke.sh IMAGE VENDOR` initializes the actual encoder,
+starts the runner with its vendor admission check enabled, waits for health,
+and verifies graceful termination. Modules certification must additionally
+exercise a real RTMP publish and advancing LL-HLS before that hardware class is
+admitted. In particular, GTX 1080 certification must execute NVENC rather than
+only list the encoder.
 
 ## Media router
 
@@ -85,7 +105,7 @@ defaults:
 | `DELETE` | `/v1/sessions/{id}` | Idempotently terminate media and credentials |
 | `POST` | `/v1/sessions/{id}/stream-keys` | Issue/rotate a scoped ingest key using the grant |
 | `GET` | `/v1/public/sessions/{id}/status` | Read the credential-free status advertised by the descriptor |
-| `GET` | `/v1/describe` | Declare protocol, descriptor, work unit, paths, and parameter shape |
+| `GET` | `/.well-known/livepeer-runner` | Authoritative runner-owned attach contract |
 | `GET` | `/ready` | Readiness probe |
 
 The create request is keyed by the broker `session_id`. An identical retry

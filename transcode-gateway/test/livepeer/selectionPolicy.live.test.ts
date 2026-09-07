@@ -7,7 +7,7 @@ function candidate(extra: VideoRouteCandidate["extra"]): VideoRouteCandidate {
   return {
     brokerUrl: "https://broker.example.com",
     ethAddress: "0xabc",
-    capability: "video:live.rtmp",
+    capability: "video:transcode.live",
     offering: "default",
     pricePerWorkUnitWei: "0",
     workUnit: "seconds",

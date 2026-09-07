@@ -554,13 +554,19 @@ func TestTranscodeCmd_WithTonemap(t *testing.T) {
 	cmd := TranscodeCmd("/tmp/input.mp4", "/tmp/output.mp4", preset, hw, probe, opts)
 	args := strings.Join(cmd.Args, " ")
 
-	// Should have hwaccel (no subtitles/watermarks forcing software decode)
-	if !strings.Contains(args, "-hwaccel cuda") {
-		t.Error("expected -hwaccel cuda for tonemap-only")
+	// FFmpeg 7.1 does not ship tonemap_cuda. Decode and tone-map in software,
+	// then upload implicitly to the NVENC encoder.
+	if strings.Contains(args, "-hwaccel cuda") {
+		t.Error("should not use CUDA hardware frames for the software tone-map chain")
 	}
-	// Should have GPU tonemap filter
-	if !strings.Contains(args, "tonemap_cuda") {
-		t.Errorf("expected tonemap_cuda filter, got: %s", args)
+	if !strings.Contains(args, "zscale=") || !strings.Contains(args, "tonemap=tonemap=hable") {
+		t.Errorf("expected supported software tone-map filters, got: %s", args)
+	}
+	if strings.Contains(args, "tonemap_cuda") {
+		t.Errorf("must not emit unavailable tonemap_cuda filter, got: %s", args)
+	}
+	if !strings.Contains(args, "-c:v h264_nvenc") {
+		t.Errorf("expected NVENC output after software tone mapping, got: %s", args)
 	}
 }
 

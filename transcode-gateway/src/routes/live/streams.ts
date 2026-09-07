@@ -77,12 +77,12 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
     const name = parsed.data.name?.trim() || streamId;
 
     const route = await deps.workerResolver.selectWorker({
-      capability: "video:live.rtmp",
+      capability: "video:transcode.live",
       offering,
       tier: parsed.data.encoding_tier,
     });
     if (!route) {
-      reply.code(503).send({ status: "error", error: "no_live_route", message: "no video:live.rtmp route is currently available" });
+      reply.code(503).send({ status: "error", error: "no_live_route", message: "no video:transcode.live route is currently available" });
       return;
     }
     let session;

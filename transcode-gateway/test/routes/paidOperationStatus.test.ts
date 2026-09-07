@@ -15,7 +15,7 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
     rotationGeneration: 1,
     route: {
       protocol: "paid-session/v1",
-      capability: "video:live.rtmp",
+      capability: "video:transcode.live",
       offering: "live-standard",
       requestDescriptor: "rtmp-hls/v1",
       workUnit: "output_seconds",

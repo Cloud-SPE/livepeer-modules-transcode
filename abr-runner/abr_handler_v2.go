@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -152,13 +154,18 @@ func (c *ABRExecutionCoordinatorV2) run(ctx context.Context, req ABRWorkloadRequ
 			_, executeErr = c.store.RecordTerminalResult(req.WorkloadID, result)
 		} else {
 			failure := safeABRExecutionFailureV2(executeErr)
+			units, usageErr := c.deliveredWorkUnits(req.WorkloadID)
+			if usageErr != nil {
+				failure = ABRErrorV2{Code: "usage_failed", Message: "usage measurement failed", Retryable: false}
+				units = 0
+			}
 			_, executeErr = c.store.RecordTerminalError(req.WorkloadID, ABRTerminalErrorV2{
 				Schema:        ABRResultSchemaV2,
 				WorkloadID:    req.WorkloadID,
 				RequestSHA256: requestSHA256,
 				Outcome:       "failed",
 				Error:         failure,
-				Usage:         UsageClaimV2{Unit: ABRWorkUnitV2, Units: 0},
+				Usage:         UsageClaimV2{Unit: ABRWorkUnitV2, Units: units},
 			})
 		}
 		if executeErr == nil {
@@ -166,6 +173,23 @@ func (c *ABRExecutionCoordinatorV2) run(ctx context.Context, req ABRWorkloadRequ
 		}
 	}
 	c.finish(req.WorkloadID)
+}
+
+func (c *ABRExecutionCoordinatorV2) deliveredWorkUnits(workloadID string) (uint64, error) {
+	record, err := c.store.Load(workloadID)
+	if err != nil {
+		return 0, err
+	}
+	names := make([]string, 0, len(record.Delivered))
+	for name := range record.Delivered {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	delivered := make([]RenditionResultV2, 0, len(names))
+	for _, name := range names {
+		delivered = append(delivered, record.Delivered[name])
+	}
+	return CalculateFrameMegapixelUnitsV2(delivered)
 }
 
 func safeABRExecutionFailureV2(err error) ABRErrorV2 {
@@ -315,6 +339,7 @@ func (h *ABRHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Add("Trailer", ABRWorkUnitsTrailerV2)
 	w.WriteHeader(http.StatusOK)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -326,7 +351,11 @@ func (h *ABRHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lastSequence, terminal, err := writeJournalEventsV2(w, flusher, record, 0)
-	if err != nil || terminal {
+	if err != nil {
+		return
+	}
+	if terminal {
+		writeWorkUnitsTrailerV2(w, record)
 		return
 	}
 	if subscription == nil {
@@ -343,7 +372,14 @@ func (h *ABRHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastSequence, terminal, err = writeJournalEventsV2(w, flusher, record, lastSequence)
-			if err != nil || terminal || !open {
+			if err != nil {
+				return
+			}
+			if terminal {
+				writeWorkUnitsTrailerV2(w, record)
+				return
+			}
+			if !open {
 				return
 			}
 		case <-ticker.C:
@@ -354,6 +390,36 @@ func (h *ABRHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		}
+	}
+}
+
+func writeWorkUnitsTrailerV2(w http.ResponseWriter, record WorkloadJournalV2) {
+	units, err := terminalWorkUnitsV2(record)
+	if err != nil {
+		return
+	}
+	w.Header().Set(ABRWorkUnitsTrailerV2, strconv.FormatUint(units, 10))
+}
+
+func terminalWorkUnitsV2(record WorkloadJournalV2) (uint64, error) {
+	if record.TerminalEvent == nil {
+		return 0, errors.New("terminal event is absent")
+	}
+	switch record.TerminalEvent.Event {
+	case "result":
+		var result ABRTerminalResultV2
+		if err := json.Unmarshal(record.TerminalEvent.Data, &result); err != nil {
+			return 0, err
+		}
+		return result.Usage.Units, nil
+	case "error":
+		var result ABRTerminalErrorV2
+		if err := json.Unmarshal(record.TerminalEvent.Data, &result); err != nil {
+			return 0, err
+		}
+		return result.Usage.Units, nil
+	default:
+		return 0, fmt.Errorf("unsupported terminal event %q", record.TerminalEvent.Event)
 	}
 }
 

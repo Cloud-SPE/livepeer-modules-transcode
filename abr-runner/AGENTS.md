@@ -13,6 +13,7 @@ cross-cutting map.
 Current surface:
 
 - `POST /v1/video/transcode/abr` — terminal Modules v2 SSE exchange
+- `GET /.well-known/livepeer-runner` — authoritative runner contract
 - `GET /v1/video/transcode/abr/presets` — list embedded ladder presets
 - `GET /healthz` — 200 ready
 - `GET /metrics` — Prometheus (opt-in via `METRICS_ENABLED=true`)

@@ -86,9 +86,9 @@ func TestV2SSEFixturesValidateAndNeverEchoCredentialURLs(t *testing.T) {
 	if err := ValidateABRTerminalErrorV2(terminalError); err != nil {
 		t.Fatalf("error fixture: %v", err)
 	}
-	terminalError.Usage.Units = 1
+	terminalError.Usage.Unit = "frames"
 	if err := ValidateABRTerminalErrorV2(terminalError); err == nil {
-		t.Fatal("non-zero failed usage was accepted")
+		t.Fatal("incorrect failed usage unit was accepted")
 	}
 	for name, raw := range map[string]string{"progress": progressRaw, "result": resultRaw, "error": errorRaw} {
 		if strings.Contains(raw, "sig=") || strings.Contains(raw, "upload_url") || strings.Contains(raw, "download_url") {

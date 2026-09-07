@@ -17,7 +17,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /bin/live-runner ./cmd/
 FROM go-builder AS go-test
 RUN go test ./...
 
-FROM ubuntu:${UBUNTU_VERSION} AS runtime
+# The distro FFmpeg build carries the H.264/H.265 software, NVENC, QSV and
+# VAAPI encoders needed by the live-standard ladder. Runtime targets add the
+# vendor user-space packages used by transcode-core's fail-closed detection.
+FROM ubuntu:${UBUNTU_VERSION} AS runtime-ubuntu-base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -35,9 +38,49 @@ RUN groupadd --system transcode && \
     chown transcode:transcode /var/lib/live-runner
 
 ENV LIVE_RUNNER_PRESETS_FILE=/etc/live-runner/presets.yaml
-USER transcode
 VOLUME ["/var/lib/live-runner"]
 EXPOSE 8080 1935
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["curl", "--fail", "--silent", "http://127.0.0.1:8080/ready"]
 ENTRYPOINT ["/usr/local/bin/live-runner"]
+
+FROM runtime-ubuntu-base AS runtime-cpu
+ENV LIVE_RUNNER_HARDWARE=cpu
+USER transcode
+
+FROM runtime-ubuntu-base AS runtime-intel
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gpg \
+    wget \
+    && rm -rf /var/lib/apt/lists/* && \
+    wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
+      gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble unified" \
+      > /etc/apt/sources.list.d/intel-gpu.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      intel-media-va-driver-non-free \
+      libmfx-gen1.2 \
+      libva2 \
+      libvpl2 \
+      vainfo \
+    && rm -rf /var/lib/apt/lists/*
+ENV LIVE_RUNNER_HARDWARE=intel
+USER transcode
+
+FROM runtime-ubuntu-base AS runtime-amd
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libdrm2 \
+    libva2 \
+    mesa-va-drivers \
+    vainfo \
+    && rm -rf /var/lib/apt/lists/*
+ENV LIVE_RUNNER_HARDWARE=amd
+USER transcode
+
+# NVIDIA Container Toolkit injects the host driver, NVENC libraries and
+# nvidia-smi. Shipping a multi-gigabyte CUDA userspace is unnecessary for this
+# FFmpeg-only runner and can impose a driver constraint unrelated to NVENC.
+FROM runtime-ubuntu-base AS runtime-nvidia
+ENV LIVE_RUNNER_HARDWARE=nvidia \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+USER transcode
