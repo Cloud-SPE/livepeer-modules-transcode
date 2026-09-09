@@ -87,7 +87,7 @@ exist.
 
 The release boundary is `paid-session/v1` schema `1.2.0` with `rtmp-hls/v1`
 schema `1.1.0`, pinned to Modules revision
-`27c498c2fd8a39430018616b1b7d097c0ee4d8d7`. Gateway reconciliation persists
+`d2f36cb984a0880cf82b768cb0f1e2900f491293`. Gateway reconciliation persists
 the broker's safe output-health projection from both HTTP status and advisory
 control events; an older broker is represented explicitly as `unknown`.
 

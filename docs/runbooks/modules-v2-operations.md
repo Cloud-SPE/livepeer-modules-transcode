@@ -4,7 +4,7 @@ This runbook covers the transcode gateway's breaking `paid-job/v1` and
 `paid-session/v1` release. The gateway must be deployed with compatible,
 immutable Modules and LOC revisions; mixed old/new versions are unsupported.
 The live output-health boundary requires Modules revision
-`27c498c2fd8a39430018616b1b7d097c0ee4d8d7`, `paid-session/v1` schema `1.2.0`,
+`d2f36cb984a0880cf82b768cb0f1e2900f491293`, `paid-session/v1` schema `1.2.0`,
 and `rtmp-hls/v1` schema `1.1.0`. Deploy the broker before the updated runner
 and gateway; an older broker yields `output_state: unknown` and provides no
 output-health enforcement.
