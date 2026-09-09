@@ -45,6 +45,9 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
       lastRunnerSequence: "9",
       lastRunnerUsage: "55",
       winddownReason: "customer_end",
+      outputState: "stalled",
+      outputStateSince: "2026-08-26T11:59:40Z",
+      lastFailureCode: "encoder_init_failed",
     },
     retryCount: 2,
     nextRetryAt: new Date("2026-08-26T12:01:00Z"),
@@ -57,10 +60,13 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
 
 test("customer status exposes durable progress and warnings without route or credential material", () => {
   const status = customerOperationStatus(operation(), new Date("2026-08-26T12:00:00Z"));
-  assert.deepEqual(status?.warnings, ["refill_will_be_refused", "funded_balance_exhausted", "lease_expired"]);
+  assert.deepEqual(status?.warnings, ["refill_will_be_refused", "funded_balance_exhausted", "lease_expired", "output_stalled"]);
   assert.equal(status?.state, "winddown_retry");
   assert.equal(status?.recovered, true);
   assert.equal(status?.winddown_reason, "customer_end");
+  assert.equal(status?.output_state, "stalled");
+  assert.equal(status?.output_status, "stalled");
+  assert.equal(status?.last_failure_code, "encoder_init_failed");
   const wire = JSON.stringify(status);
   assert.doesNotMatch(wire, /must-not-leak|settlementKey|broker_url|recoveryOwner/);
 });
@@ -75,4 +81,37 @@ test("admin status adds safe correlation IDs but no signed route metadata", () =
 
 test("missing operation is represented explicitly", () => {
   assert.equal(customerOperationStatus(null), null);
+});
+
+test("output_failed is the terminal output projection", () => {
+  const status = customerOperationStatus(operation({
+    status: "settled",
+    terminalEvidence: {
+      httpStatus: 200,
+      responseSha256: "evidence",
+      workUnit: "output_seconds",
+      workUnits: "0",
+      closeReason: "output_failed",
+    },
+  }));
+  assert.equal(status?.output_status, "output_failed");
+});
+
+test("gateway relay waiting without a publisher is distinguished from encoder waiting", () => {
+  const noIngest = customerOperationStatus(operation({
+    sessionRuntime: {
+      ...operation().sessionRuntime!,
+      relayStatus: "pending",
+      outputState: "waiting",
+    },
+  }));
+  const encoderWaiting = customerOperationStatus(operation({
+    sessionRuntime: {
+      ...operation().sessionRuntime!,
+      relayStatus: "active",
+      outputState: "waiting",
+    },
+  }));
+  assert.equal(noIngest?.output_status, "no_ingest");
+  assert.equal(encoderWaiting?.output_status, "waiting");
 });

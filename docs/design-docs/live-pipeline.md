@@ -77,6 +77,35 @@ events carry the final cumulative claim. An accepted usage event refreshes
 liveness; the runner emits a separate heartbeat when no other event occurs
 inside its declared cadence.
 
+Heartbeat liveness and media health are separate signals. The runner reports
+`output_state` (`waiting`, `producing`, or `stalled`) on status and heartbeats,
+records bounded safe ladder failure codes, and fails a session with
+`output_failed` when authenticated ingest does not yield finalized metering
+segments before the output deadline. A synthesized HLS master lists only
+renditions with playable media and returns `503 output_unavailable` while none
+exist.
+
+The release boundary is `paid-session/v1` schema `1.2.0` with `rtmp-hls/v1`
+schema `1.1.0`, pinned to Modules revision
+`27c498c2fd8a39430018616b1b7d097c0ee4d8d7`. Gateway reconciliation persists
+the broker's safe output-health projection from both HTTP status and advisory
+control events; an older broker is represented explicitly as `unknown`.
+
+Runner callback delivery is a durable ordered outbox with per-head attempt and
+next-retry state. Transport failures, 408, 429, and 5xx responses retry the
+identical event with bounded exponential backoff and stable jitter. Other
+non-2xx responses are permanently rejected: the runner atomically advances the
+outbox and retains a bounded, credential-free dead letter so one incompatible
+event cannot hide later usage or terminal state. Rejection diagnostics remain
+runner-local and are not recursively emitted through the rejected callback
+contract.
+
+Runner-owned Prometheus counters separate ladder start failures, classified
+process exits, output stalls, callback rejections, and GPU telemetry outcomes.
+Their label domains are closed safe sets. NVIDIA starts take a timeout-bounded
+encoder-session and used-memory snapshot; telemetry failure is observable but
+never blocks session execution and raw command output is never logged.
+
 The normative balance object includes `will_refuse_next_refill`. A broker must
 advertise refusal before rejecting the next refill and must not accept funding
 it will not honor with lease extension. The gateway/LOC policy has explicit

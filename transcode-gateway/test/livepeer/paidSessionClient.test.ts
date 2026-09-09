@@ -299,13 +299,40 @@ test("status is authoritative and never has a credential or grant field", async 
       lease: { expires_at: "2026-08-24T00:05:00Z" },
       balance,
       started_at: "2026-08-24T00:00:00Z",
+      output_state: "stalled",
+      output_state_since: "2026-08-24T00:00:20Z",
+      last_failure_code: "encoder_init_failed",
     }),
   });
   const result = await client.status({ opened, brokerSessionId, workId: "work-1", credential: "session-credential" });
   assert.equal(result.gatewaySessionId, gatewaySessionId);
   assert.equal(result.claimedUnits, 12);
+  assert.equal(result.outputState, "stalled");
+  assert.equal(result.outputStateSince, "2026-08-24T00:00:20Z");
+  assert.equal(result.lastFailureCode, "encoder_init_failed");
   assert.equal("credential" in result, false);
   assert.equal("grants" in result, false);
+});
+
+test("status from a pre-output-health broker is represented as unknown", async () => {
+  const client = createPaidSessionClient(fakeLoc().loc, {
+    fetch: async () => Response.json({
+      session_id: brokerSessionId,
+      gateway_session_id: gatewaySessionId,
+      work_id: "work-1",
+      state: "active",
+      runtime: { schema: "rtmp-hls/v1", public: {} },
+      usage: { unit: route.workUnit, claimed_total: 0 },
+      lease: { expires_at: "2026-08-24T00:05:00Z" },
+      balance,
+      started_at: "2026-08-24T00:00:00Z",
+    }),
+  });
+
+  const result = await client.status({ opened, brokerSessionId, workId: "work-1", credential: "session-credential" });
+  assert.equal(result.outputState, "unknown");
+  assert.equal(result.outputStateSince, null);
+  assert.equal(result.lastFailureCode, null);
 });
 
 test("refill keeps its durable request identity and atomically forwards recipient rebind", async () => {
@@ -452,4 +479,25 @@ test("control frames are typed advisory signals for HTTP reconciliation", () => 
     debitedUnits: 3,
   });
   assert.throws(() => parsePaidSessionControlEvent({ type: "session.usage.tick", body: { sequence: 0 } }));
+  assert.deepEqual(parsePaidSessionControlEvent({
+    type: "session.output.health",
+    body: {
+      output_state: "stalled",
+      output_state_since: "2026-09-09T12:00:00Z",
+      last_failure_code: "encoder_init_failed",
+    },
+  }), {
+    type: "session.output.health",
+    outputState: "stalled",
+    outputStateSince: "2026-09-09T12:00:00Z",
+    lastFailureCode: "encoder_init_failed",
+  });
+  assert.throws(() => parsePaidSessionControlEvent({
+    type: "session.output.health",
+    body: { output_state: "broken", output_state_since: "2026-09-09T12:00:00Z" },
+  }));
+  assert.throws(() => parsePaidSessionControlEvent({
+    type: "session.output.health",
+    body: { output_state: "stalled", output_state_since: "not-a-time" },
+  }));
 });

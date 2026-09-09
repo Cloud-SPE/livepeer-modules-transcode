@@ -22,6 +22,7 @@ type HLSHandlerV1 struct {
 	presets map[string]transcode.ABRPreset
 	baseURL string
 	client  *http.Client
+	timeout time.Duration
 	mu      sync.RWMutex
 	cookies map[string][]*http.Cookie
 }
@@ -46,7 +47,7 @@ func NewHLSHandlerV1(store *EncryptedFileSessionStoreV1, presets []transcode.ABR
 		base.DisableCompression = true
 		transport = base
 	}
-	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), cookies: make(map[string][]*http.Cookie), client: &http.Client{
+	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), timeout: timeout, cookies: make(map[string][]*http.Cookie), client: &http.Client{
 		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}, nil
@@ -75,7 +76,7 @@ func (h *HLSHandlerV1) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		asset = "master.m3u8"
 	}
 	if asset == "master.m3u8" {
-		h.serveMaster(writer, request, preset)
+		h.serveMaster(writer, request, record.RunnerSessionID, preset)
 		return
 	}
 	renderPath, ok := renditionAssetPathV1(record.RunnerSessionID, preset, asset)
@@ -86,11 +87,16 @@ func (h *HLSHandlerV1) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	h.proxyAsset(writer, request, record.RunnerSessionID, renderPath)
 }
 
-func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Request, preset transcode.ABRPreset) {
+func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Request, runnerID string, preset transcode.ABRPreset) {
 	var body strings.Builder
 	body.WriteString("#EXTM3U\n#EXT-X-VERSION:9\n")
+	playable := 0
 	for _, rendition := range preset.Renditions {
 		if rendition.Video == nil {
+			continue
+		}
+		renderPath, err := RenditionMediaPathV1(runnerID, rendition.Name)
+		if err != nil || !h.hasFinalizedSegment(request.Context(), runnerID, renderPath) {
 			continue
 		}
 		videoBandwidth, videoErr := bitrateBitsV1(rendition.Video.MaxBitrate)
@@ -101,12 +107,65 @@ func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Req
 			return
 		}
 		fmt.Fprintf(&body, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s,mp4a.40.2\"\n%s/index.m3u8\n", videoBandwidth+audioBandwidth, rendition.Video.Width, rendition.Video.Height, codec, rendition.Name)
+		playable++
+	}
+	if playable == 0 {
+		writer.Header().Set("Retry-After", "1")
+		writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "output_unavailable")
+		return
 	}
 	writer.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	writer.Header().Set("Cache-Control", "no-store")
 	if request.Method == http.MethodGet {
 		_, _ = io.WriteString(writer, body.String())
 	}
+}
+
+func (h *HLSHandlerV1) hasFinalizedSegment(ctx context.Context, runnerID, renderPath string) bool {
+	ctx, cancel := context.WithTimeout(ctx, h.timeout)
+	defer cancel()
+	master, err := h.fetchPlaylist(ctx, runnerID, renderPath+"/index.m3u8")
+	if err != nil {
+		return false
+	}
+	mediaURI, err := mediaPlaylistURIV1(master)
+	if err != nil {
+		return false
+	}
+	media, err := h.fetchPlaylist(ctx, runnerID, renderPath+"/"+mediaURI)
+	if err != nil {
+		return false
+	}
+	segments, err := ParseFinalizedHLSSegmentsV1(strings.NewReader(media))
+	return err == nil && len(segments) > 0
+}
+
+func (h *HLSHandlerV1) fetchPlaylist(ctx context.Context, runnerID, mediaPath string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.baseURL+"/"+mediaPath, nil)
+	if err != nil {
+		return "", errors.New("HLS playlist request failed")
+	}
+	h.addSessionCookies(runnerID, request)
+	response, err := h.client.Do(request)
+	if err != nil {
+		return "", errors.New("HLS playlist request failed")
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		response, err = h.followMediaMTXCookieCheck(ctx, runnerID, request, response)
+		if err != nil {
+			return "", err
+		}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return "", errors.New("HLS playlist is unavailable")
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxMediaPlaylistBytesV1+1))
+	if err != nil || len(body) > maxMediaPlaylistBytesV1 {
+		return "", errors.New("HLS playlist is invalid")
+	}
+	return string(body), nil
 }
 
 func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Request, runnerID, mediaPath string) {

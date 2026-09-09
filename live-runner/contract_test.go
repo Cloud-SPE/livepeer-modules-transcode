@@ -41,6 +41,9 @@ func TestContractFixturesValidate(t *testing.T) {
 	if err := ValidateRunnerContractV1(contract); err != nil {
 		t.Fatal(err)
 	}
+	if contract.SchemaVersions[PaidSessionProtocolV1] != "1.2.0" || contract.SchemaVersions[RuntimeSchemaV1] != "1.1.0" || contract.SchemaVersions[SessionParamsSchemaV1] != "1.0.0" {
+		t.Fatalf("schema versions = %#v", contract.SchemaVersions)
+	}
 }
 
 func TestEventFixtureIsMonotonicAndToleratesExtensions(t *testing.T) {

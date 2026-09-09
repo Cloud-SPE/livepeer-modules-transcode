@@ -32,6 +32,10 @@ type MediaPathStatusV1 struct {
 	Source        *MediaPathSourceV1 `json:"source"`
 }
 
+type MediaPathReaderV1 interface {
+	Path(context.Context, string) (MediaPathStatusV1, error)
+}
+
 type MediaRouterAPIErrorV1 struct {
 	StatusCode int
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -142,13 +143,15 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") {
 		t.Fatalf("real HLS master=%d %q", master.Code, master.Body.String())
 	}
-	meter, err := NewLiveOutputMeterV1(store, handler, 50*time.Millisecond, time.Hour, 5*time.Second)
+	ready := make(chan struct{})
+	close(ready)
+	meter, err := NewLiveOutputMeterV1(store, handler, fakePublisherWaiterV1{ready: ready}, 50*time.Millisecond, time.Hour, 5*time.Second, 20*time.Second, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	usageDeadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(usageDeadline) {
-		meter.poll(context.Background(), SessionRecordV1{BrokerSessionID: request.SessionID, RunnerSessionID: response.RunnerSessionID}, renderPath)
+		meter.poll(context.Background(), SessionRecordV1{BrokerSessionID: request.SessionID, RunnerSessionID: response.RunnerSessionID}, "ingest/"+response.RunnerSessionID, renderPath)
 		metered, _, loadErr := store.Load(request.SessionID)
 		if loadErr != nil {
 			t.Fatal(loadErr)
@@ -172,6 +175,16 @@ func TestHLSHandlerServesMasterAndStrictRenditionAssets(t *testing.T) {
 		if strings.HasSuffix(request.URL.Path, "/redirect.m3u8") {
 			writer.Header().Set("Location", "https://attacker.example/playlist.m3u8")
 			writer.WriteHeader(http.StatusFound)
+			return
+		}
+		if strings.HasSuffix(request.URL.Path, "/video1_stream.m3u8") {
+			writer.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = writer.Write([]byte("#EXTM3U\n#EXTINF:1.0,\nsegment.mp4\n"))
+			return
+		}
+		if request.URL.RawQuery == "" && strings.HasSuffix(request.URL.Path, "/index.m3u8") {
+			writer.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = writer.Write([]byte("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvideo1_stream.m3u8\n"))
 			return
 		}
 		writer.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
@@ -241,6 +254,42 @@ func TestHLSHandlerRejectsUndeclaredTraversalQueryAndTerminalSession(t *testing.
 	}
 	if upstreamCalls != 0 {
 		t.Fatalf("rejected HLS requests reached upstream %d times", upstreamCalls)
+	}
+}
+
+func TestHLSMasterListsOnlyPlayableRenditionsAndReturnsUnavailable(t *testing.T) {
+	var playable atomic.Bool
+	playable.Store(true)
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if !playable.Load() || strings.Contains(request.URL.Path, "/360p/") {
+			http.NotFound(writer, request)
+			return
+		}
+		if strings.HasSuffix(request.URL.Path, "/index.m3u8") {
+			_, _ = io.WriteString(writer, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvideo.m3u8\n")
+			return
+		}
+		if strings.HasSuffix(request.URL.Path, "/video.m3u8") {
+			_, _ = io.WriteString(writer, "#EXTM3U\n#EXTINF:1.0,\nsegment.mp4\n")
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer upstream.Close()
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x7c}, 32))
+	record, _ := createRuntimeSessionV1(t, store, "sess_hls_health", "runner_hls_health")
+	handler, err := NewHLSHandlerV1(store, testLivePresetsV1(), upstream.URL, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := hlsRequestV1(t, handler, record.RunnerSessionID, "master.m3u8", "")
+	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") || strings.Contains(master.Body.String(), "360p/index.m3u8") {
+		t.Fatalf("filtered master=%d %q", master.Code, master.Body.String())
+	}
+	playable.Store(false)
+	unavailable := hlsRequestV1(t, handler, record.RunnerSessionID, "master.m3u8", "")
+	if unavailable.Code != http.StatusServiceUnavailable || unavailable.Header().Get("Retry-After") != "1" || !strings.Contains(unavailable.Body.String(), "output_unavailable") {
+		t.Fatalf("unavailable master=%d headers=%v body=%q", unavailable.Code, unavailable.Header(), unavailable.Body.String())
 	}
 }
 

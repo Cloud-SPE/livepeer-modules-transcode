@@ -3,6 +3,10 @@
 Runner-owned RTMP ingest and LL-HLS output for `paid-session/v1`, using the
 capability-owned `rtmp-hls/v1` runtime descriptor.
 
+The attach document advertises the approved output-health contracts as
+`paid-session/v1` schema version `1.2.0` and `rtmp-hls/v1` schema version
+`1.1.0`. The runner-owned `rtmp-hls-session/v1` input schema remains `1.0.0`.
+
 This component currently pins the runner contract. Runtime implementation is
 tracked by Bead `lmt-65a.4.5`.
 
@@ -26,6 +30,21 @@ and status URLs from those two values. MediaMTX
 listener addresses, its internal auth URL, the state directory, binary path,
 and encoder concurrency have `LIVE_RUNNER_*` overrides; private HLS, API, and
 metrics addresses are still rejected unless loopback-only.
+
+Output health defaults to a 20-second stall deadline and a 60-second failure
+deadline after authenticated ingest appears. Operators may set
+`LIVE_RUNNER_OUTPUT_STALL_DEADLINE` and `LIVE_RUNNER_OUTPUT_FAIL_DEADLINE` as
+positive Go durations, with failure strictly later than stall. Ladder retries
+default to five failures in 60 seconds with exponential backoff from 250 ms to
+5 seconds; `LIVE_RUNNER_LADDER_RESTART_LIMIT`,
+`LIVE_RUNNER_LADDER_FAILURE_WINDOW`, `LIVE_RUNNER_LADDER_RESTART_INITIAL`, and
+`LIVE_RUNNER_LADDER_RESTART_MAX` tune those bounds.
+
+Callback retries use durable exponential backoff with stable jitter, defaulting
+to 500 milliseconds through 30 seconds. Configure the bounds with
+`LIVE_RUNNER_CALLBACK_RETRY_INITIAL` and `LIVE_RUNNER_CALLBACK_RETRY_MAX`.
+Runner-owned Prometheus metrics bind to loopback-only
+`LIVE_RUNNER_METRICS_ADDR` (`127.0.0.1:9090` by default).
 
 `make image-test` runs the Go suite in the same copied module graph used by
 the image. `make image HARDWARE=nvidia` (or `intel`, `amd`, `cpu`) builds one
@@ -80,12 +99,19 @@ MediaMTX with exactly the scoped `ingest/<runner-session-id>` path and token.
 An idempotent runtime coordinator watches the loopback MediaMTX path API for
 the session's authenticated RTMP publisher. Only then does it acquire encoder
 capacity and start one context-bound FFmpeg process that decodes once and
-publishes the selected ladder back to the private rendition paths. Publisher
-disconnects or transient launch failures return to the watch loop; runner
-termination and process shutdown cancel and join the FFmpeg process.
+publishes the selected ladder back to the private rendition paths. Unexpected
+exits while ingest remains online emit durable, safely classified restart
+events and retry with bounded exponential backoff. FFmpeg diagnostics are held
+only in a bounded in-memory tail, stripped of URLs/credentials, and logged at
+warning level. Publisher disconnect is not a ladder failure. Exhausting the
+restart budget moves the session through `stalled` to failed with
+`output_failed`; runner termination and process shutdown cancel and join the
+FFmpeg process.
 
-The advertised public HLS route synthesizes one deterministic master playlist
-from the session's durable output profile. Rendition playlists, parts,
+The advertised public HLS route includes only renditions whose MediaMTX media
+playlist contains a finalized segment. Until one rendition is playable the
+master returns `503 output_unavailable` with `Retry-After`, rather than
+advertising preset entries that have no media. Rendition playlists, parts,
 initialization fragments, and segments are streamed from loopback MediaMTX
 through an allowlisted same-origin proxy. It forwards no customer headers or
 cookies, permits only MediaMTX's exact same-path internal cookie handshake,
@@ -137,6 +163,12 @@ second claim, while a new media epoch's new segment identities continue the
 same cumulative timeline. Unavailable or malformed playlists are retried and
 cannot advance usage.
 
+The runner exposes `output_state` as `waiting`, `producing`, or `stalled` on
+private and public session status. Heartbeats carry the same state and the last
+safe ladder failure code when one exists. Authenticated ingest with no finalized
+metering segment becomes stalled at the configured stall deadline and fails
+closed with `output_failed` at the failure deadline.
+
 Every event has a durable positive sequence and stable event ID. Usage totals
 never decrease. An accepted event is also a heartbeat; otherwise the runner
 emits `session.heartbeat` within the offering's required cadence.
@@ -144,10 +176,29 @@ Callbacks are delivered from the durable outbox in sequence order with the
 per-session callback bearer. Any 2xx broker response acknowledges an event;
 timeouts, 408, 429, and 5xx responses remain retryable. Redirects are never
 followed, preventing callback credentials from crossing the broker-selected
-origin. A process-owned worker resumes pending outboxes after restart. It
-retains permanent callback failures for operator inspection and erases a
-terminal session's encrypted credentials only after the final event has been
-durably acknowledged.
+origin. Other non-2xx responses are atomically parked in a bounded, safe
+dead-letter audit and cannot block later events. Attempt count and next retry
+time survive restart, and retries reuse the identical event envelope. Private
+and public runner status expose the rejection total and latest safe rejection;
+`live_callback_rejected_total{status}` counts them without response-body
+labels. A process-owned worker resumes pending outboxes after restart and
+erases a terminal session's encrypted credentials only after every final event
+has been durably acknowledged or parked.
+
+## Observability
+
+The loopback Prometheus surface reports bounded-cardinality
+`live_ladder_starts_total{code}`, `live_ladder_exits_total{code}`,
+`live_sessions_stalled_total`, `live_callback_rejected_total{status}`, and
+`live_gpu_telemetry_probes_total{result}` counters. Codes and results come from
+closed safe sets; FFmpeg diagnostics and broker response bodies never become
+labels.
+
+Before each NVIDIA ladder start, a one-second-bounded `nvidia-smi` query records
+the aggregate encoder session count and used memory at info level. Probe
+failure records only `unavailable`, never command output or driver details, and
+does not prevent transcoding. Non-NVIDIA targets record `unsupported` without
+running the probe.
 
 ## Credential boundary
 

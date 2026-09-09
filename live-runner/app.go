@@ -14,30 +14,39 @@ import (
 )
 
 type LiveRunnerConfigV1 struct {
-	ListenAddress    string
-	StateDirectory   string
-	MasterKey        []byte
-	BrokerToken      string
-	InternalToken    string
-	PublicRTMPBase   string
-	PublicHTTPBase   string
-	PresetsFile      string
-	MediaMTXBinary   string
-	MediaMTXConfig   string
-	MediaMTX         MediaMTXConfigV1
-	RouterRTMPBase   string
-	MaxConcurrent    int
-	StartupTimeout   time.Duration
-	ShutdownTimeout  time.Duration
-	RouterPoll       time.Duration
-	MeterPoll        time.Duration
-	HeartbeatEvery   time.Duration
-	CallbackPoll     time.Duration
-	RequestTimeout   time.Duration
-	HLSHeaderTimeout time.Duration
-	GrantTTL         time.Duration
-	StreamKeyTTL     time.Duration
-	HardwareTarget   string
+	ListenAddress        string
+	MetricsAddress       string
+	StateDirectory       string
+	MasterKey            []byte
+	BrokerToken          string
+	InternalToken        string
+	PublicRTMPBase       string
+	PublicHTTPBase       string
+	PresetsFile          string
+	MediaMTXBinary       string
+	MediaMTXConfig       string
+	MediaMTX             MediaMTXConfigV1
+	RouterRTMPBase       string
+	MaxConcurrent        int
+	StartupTimeout       time.Duration
+	ShutdownTimeout      time.Duration
+	RouterPoll           time.Duration
+	MeterPoll            time.Duration
+	HeartbeatEvery       time.Duration
+	CallbackPoll         time.Duration
+	CallbackRetryInitial time.Duration
+	CallbackRetryMaximum time.Duration
+	RequestTimeout       time.Duration
+	HLSHeaderTimeout     time.Duration
+	GrantTTL             time.Duration
+	StreamKeyTTL         time.Duration
+	HardwareTarget       string
+	OutputStallAfter     time.Duration
+	OutputFailAfter      time.Duration
+	RestartInitial       time.Duration
+	RestartMaximum       time.Duration
+	RestartWindow        time.Duration
+	RestartLimit         int
 }
 
 func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, error) {
@@ -99,6 +108,49 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
 	}
+	restartLimit, err := integer("LIVE_RUNNER_LADDER_RESTART_LIMIT", 5)
+	if err != nil || restartLimit == 0 {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_LADDER_RESTART_LIMIT must be positive")
+	}
+	duration := func(name string, fallback time.Duration) (time.Duration, error) {
+		value := getenv(name)
+		if value == "" {
+			return fallback, nil
+		}
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("%s must be a positive duration", name)
+		}
+		return parsed, nil
+	}
+	stallAfter, err := duration("LIVE_RUNNER_OUTPUT_STALL_DEADLINE", 20*time.Second)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
+	failAfter, err := duration("LIVE_RUNNER_OUTPUT_FAIL_DEADLINE", 60*time.Second)
+	if err != nil || failAfter <= stallAfter {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_OUTPUT_FAIL_DEADLINE must exceed LIVE_RUNNER_OUTPUT_STALL_DEADLINE")
+	}
+	restartInitial, err := duration("LIVE_RUNNER_LADDER_RESTART_INITIAL", 250*time.Millisecond)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
+	restartMaximum, err := duration("LIVE_RUNNER_LADDER_RESTART_MAX", 5*time.Second)
+	if err != nil || restartMaximum < restartInitial {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_LADDER_RESTART_MAX must not be shorter than LIVE_RUNNER_LADDER_RESTART_INITIAL")
+	}
+	restartWindow, err := duration("LIVE_RUNNER_LADDER_FAILURE_WINDOW", time.Minute)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
+	callbackRetryInitial, err := duration("LIVE_RUNNER_CALLBACK_RETRY_INITIAL", 500*time.Millisecond)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
+	callbackRetryMaximum, err := duration("LIVE_RUNNER_CALLBACK_RETRY_MAX", 30*time.Second)
+	if err != nil || callbackRetryMaximum < callbackRetryInitial {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_CALLBACK_RETRY_MAX must not be shorter than LIVE_RUNNER_CALLBACK_RETRY_INITIAL")
+	}
 	hardwareTarget := valueOrV1(getenv("LIVE_RUNNER_HARDWARE"), "auto")
 	switch hardwareTarget {
 	case "auto", "cpu", string(transcode.VendorNVIDIA), string(transcode.VendorIntel), string(transcode.VendorAMD):
@@ -107,6 +159,7 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	}
 	config := LiveRunnerConfigV1{
 		ListenAddress:  valueOrV1(getenv("LIVE_RUNNER_ADDR"), ":8080"),
+		MetricsAddress: valueOrV1(getenv("LIVE_RUNNER_METRICS_ADDR"), "127.0.0.1:9090"),
 		StateDirectory: valueOrV1(getenv("LIVE_RUNNER_STATE_DIR"), "/var/lib/live-runner"),
 		MasterKey:      masterKey, BrokerToken: brokerToken, InternalToken: internalToken,
 		PublicRTMPBase: publicRTMP, PublicHTTPBase: publicHTTP, PresetsFile: presetsFile,
@@ -117,6 +170,12 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 		RequestTimeout: 2 * time.Second, GrantTTL: time.Hour, StreamKeyTTL: 10 * time.Minute,
 		HLSHeaderTimeout: 15 * time.Second,
 		HardwareTarget:   hardwareTarget,
+		OutputStallAfter: stallAfter, OutputFailAfter: failAfter,
+		RestartInitial: restartInitial, RestartMaximum: restartMaximum, RestartWindow: restartWindow, RestartLimit: restartLimit,
+		CallbackRetryInitial: callbackRetryInitial, CallbackRetryMaximum: callbackRetryMaximum,
+	}
+	if err := validateListenAddressV1(config.MetricsAddress, true); err != nil {
+		return LiveRunnerConfigV1{}, fmt.Errorf("live runner metrics address: %w", err)
 	}
 	config.MediaMTXConfig = config.StateDirectory + "/mediamtx.yml"
 	config.MediaMTX = DefaultMediaMTXConfigV1(valueOrV1(getenv("LIVE_RUNNER_MEDIAMTX_AUTH_URL"), "http://127.0.0.1:8080/internal/mediamtx/auth"))
@@ -152,7 +211,7 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
-	meter, err := NewLiveOutputMeterV1(store, hls, config.MeterPoll, config.HeartbeatEvery, config.RequestTimeout)
+	meter, err := NewLiveOutputMeterV1(store, hls, router, config.MeterPoll, config.HeartbeatEvery, config.RequestTimeout, config.OutputStallAfter, config.OutputFailAfter)
 	if err != nil {
 		return err
 	}
@@ -160,6 +219,11 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
+	metrics := &LiveRunnerMetricsV1{}
+	meter.metrics = metrics
+	dispatcher.retryInitial = config.CallbackRetryInitial
+	dispatcher.retryMaximum = config.CallbackRetryMaximum
+	dispatcher.rejectionCount = metrics.RecordCallbackRejected
 	callbackWorker, err := NewCallbackWorkerV1(store, dispatcher, config.CallbackPoll)
 	if err != nil {
 		return err
@@ -168,6 +232,11 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
+	runtime.restartInitial = config.RestartInitial
+	runtime.restartMax = config.RestartMaximum
+	runtime.failureWindow = config.RestartWindow
+	runtime.maxFailures = uint32(config.RestartLimit)
+	runtime.metrics = metrics
 	supervisor, err := NewMediaMTXSupervisorV1(config.MediaMTXBinary, config.MediaMTXConfig, config.MediaMTX, config.RequestTimeout, config.RouterPoll)
 	if err != nil {
 		return err
@@ -203,6 +272,7 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 		return err
 	}
 	httpServer := &http.Server{Addr: config.ListenAddress, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
+	metricsServer := &http.Server{Addr: config.MetricsAddress, Handler: metrics, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
 	httpExit := make(chan error, 1)
 	go func() {
 		err := httpServer.ListenAndServe()
@@ -210,6 +280,14 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 			err = nil
 		}
 		httpExit <- err
+	}()
+	metricsExit := make(chan error, 1)
+	go func() {
+		err := metricsServer.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		metricsExit <- err
 	}()
 	var runErr error
 	callbackStopped := false
@@ -220,11 +298,13 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	case runErr = <-callbackExit:
 		callbackStopped = true
 	case runErr = <-httpExit:
+	case runErr = <-metricsExit:
 	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer cancelShutdown()
 	cancelCallbacks()
 	serverErr := httpServer.Shutdown(shutdown)
+	metricsErr := metricsServer.Shutdown(shutdown)
 	runtimeErr := runtime.Shutdown(shutdown)
 	var callbackErr error
 	if !callbackStopped {
@@ -235,7 +315,7 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 		}
 	}
 	mediaErr := supervisor.Stop(shutdown)
-	return errors.Join(runErr, serverErr, runtimeErr, callbackErr, mediaErr)
+	return errors.Join(runErr, serverErr, metricsErr, runtimeErr, callbackErr, mediaErr)
 }
 
 func resolveLiveHardwareV1(target string, detect func() transcode.HWProfile) (transcode.HWProfile, error) {

@@ -90,13 +90,24 @@ func TestLiveRunnerCreateReplayStatusAndTerminate(t *testing.T) {
 	if conflict.Code != http.StatusConflict || !bytes.Contains(conflict.Body.Bytes(), []byte(ErrSessionIDReuseV1.Error())) {
 		t.Fatalf("changed create=%d %s", conflict.Code, conflict.Body.String())
 	}
+	rejectedEvent := testEventV1(created.RunnerSessionID, 1, "session.heartbeat", "active", 0, "")
+	if err := store.Advance(create.SessionID, rejectedEvent); err != nil {
+		t.Fatal(err)
+	}
+	rejectedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	if _, err := store.ReserveCallbackAttempt(create.SessionID, rejectedEvent.EventID, rejectedAt, time.Millisecond, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ParkCallbackRejection(create.SessionID, rejectedEvent.EventID, http.StatusConflict, "http_409", rejectedAt); err != nil {
+		t.Fatal(err)
+	}
 
 	status := runnerRequestV1(t, handler, http.MethodGet, "/v1/sessions/"+created.RunnerSessionID, nil, testBrokerTokenV1)
 	if status.Code != http.StatusOK {
 		t.Fatalf("status=%d %s", status.Code, status.Body.String())
 	}
 	var gotStatus RunnerStatusV1
-	if err := json.Unmarshal(status.Body.Bytes(), &gotStatus); err != nil || gotStatus.State != "active" || gotStatus.Usage.Unit != WorkUnitV1 {
+	if err := json.Unmarshal(status.Body.Bytes(), &gotStatus); err != nil || gotStatus.State != "active" || gotStatus.Usage.Unit != WorkUnitV1 || gotStatus.OutputState != OutputStateWaitingV1 || gotStatus.CallbackRejectedTotal != 1 || gotStatus.LastCallbackRejection == nil || gotStatus.LastCallbackRejection.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%+v err=%v", gotStatus, err)
 	}
 	publicStatus := runnerRequestV1(t, handler, http.MethodGet, "/v1/public/sessions/"+created.RunnerSessionID+"/status", nil, "")

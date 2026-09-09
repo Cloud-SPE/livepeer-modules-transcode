@@ -3,6 +3,11 @@
 This runbook covers the transcode gateway's breaking `paid-job/v1` and
 `paid-session/v1` release. The gateway must be deployed with compatible,
 immutable Modules and LOC revisions; mixed old/new versions are unsupported.
+The live output-health boundary requires Modules revision
+`27c498c2fd8a39430018616b1b7d097c0ee4d8d7`, `paid-session/v1` schema `1.2.0`,
+and `rtmp-hls/v1` schema `1.1.0`. Deploy the broker before the updated runner
+and gateway; an older broker yields `output_state: unknown` and provides no
+output-health enforcement.
 
 ## Required boundary
 
@@ -31,6 +36,33 @@ Important nonterminal states include `in_flight`, `accounting_pending`,
 `reconcile_pending`, `winddown_requested`, and `winddown_retry`. A recovered
 operation has a nonzero retry count. `encumbered` or `debit_failed` is not a
 successful product result and must remain visibly unavailable.
+
+For live sessions, treat `output_state` independently from heartbeat liveness.
+The gateway's derived `output_status` adds `no_ingest` when a gateway-relay
+session is waiting and its publisher relay is absent; direct-publisher sessions
+are not inferred from gateway relay state.
+`waiting` is expected only during bounded encoder startup, `producing` means the
+metering rendition has finalized media, and `stalled` means ingest is present
+without playable output. Investigate the runner's safe `last_failure_code`; a
+session that reaches the output failure deadline terminates as
+`failed`/`output_failed` and must not continue holding runway. During `waiting`
+or `stalled`, an HLS master request may correctly return
+`503 output_unavailable` with `Retry-After`.
+
+Inspect `callback_rejected_total` and `last_callback_rejection` when the broker
+view missed an event. A permanent 4xx is parked and later callbacks continue;
+the loopback runner metric `live_callback_rejected_total{status}` identifies
+the response class. Retryable transport/408/429/5xx failures retain their event
+identity and back off, so use the durable callback attempt timestamps rather
+than manually replaying or replacing the session.
+
+Scrape the runner's loopback metrics surface when diagnosing live failures.
+Correlate `live_ladder_starts_total{code}` and
+`live_ladder_exits_total{code}` with `live_sessions_stalled_total`. On NVIDIA
+hosts, the ladder-start log includes bounded `encoder_sessions` and
+`memory_used_mib`; compare those values with co-located ABR/VOD activity.
+`live_gpu_telemetry_probes_total{result="unavailable"}` means the pressure
+snapshot failed, not that the customer session itself failed.
 
 ## Recover VOD jobs
 

@@ -19,6 +19,8 @@ import { routeBindingFor } from "./locClient.js";
 import { classifyV2Failure } from "./v2Outcome.js";
 
 const PROTOCOL = "paid-session/v1";
+const safeFailureCode = /^[a-z][a-z0-9_]{0,63}$/;
+const outputStateWire = z.enum(["waiting", "producing", "stalled"]);
 const grantWire = z.object({
   id: z.string().min(1),
   operations: z.array(z.string().min(1)).min(1),
@@ -73,6 +75,9 @@ const statusWire = z.object({
   rotation: z.unknown().optional(),
   ended_at: z.string().optional(),
   close_reason: z.string().optional(),
+  output_state: z.enum(["unknown", "waiting", "producing", "stalled"]).optional().default("unknown"),
+  output_state_since: z.string().min(1).optional(),
+  last_failure_code: z.string().regex(safeFailureCode).optional(),
 }).strict();
 const topupWire = z.object({
   session_id: z.string().min(1),
@@ -116,6 +121,11 @@ const controlEventWire = z.discriminatedUnion("type", [
     debited_units: z.number().int().nonnegative(),
   }).strict() }).strict(),
   z.object({ type: z.literal("session.balance"), body: balanceWire }).strict(),
+  z.object({ type: z.literal("session.output.health"), body: z.object({
+    output_state: outputStateWire,
+    output_state_since: z.string().refine(validTimestamp),
+    last_failure_code: z.string().regex(safeFailureCode).optional(),
+  }).strict() }).strict(),
   z.object({ type: z.literal("session.ended"), body: z.object({
     state: z.string().min(1), close_reason: z.string().min(1),
   }).strict() }).strict(),
@@ -217,7 +227,8 @@ export function createPaidSessionClient(
         value.work_id !== input.workId ||
         value.runtime.schema !== controlDescriptor(input.opened) ||
         value.usage.unit !== controlWorkUnit(input.opened) ||
-        value.balance.unit !== controlWorkUnit(input.opened)
+        value.balance.unit !== controlWorkUnit(input.opened) ||
+        (value.output_state_since !== undefined && !validTimestamp(value.output_state_since))
       ) throw invalidEvidence();
       return {
         brokerSessionId: value.session_id,
@@ -231,6 +242,9 @@ export function createPaidSessionClient(
         leaseExpiresAt: value.lease.expires_at,
         balance: mapBalance(value.balance),
         closeReason: value.close_reason ?? null,
+        outputState: value.output_state,
+        outputStateSince: value.output_state_since ?? null,
+        lastFailureCode: value.last_failure_code ?? null,
       };
     },
 
@@ -371,6 +385,13 @@ export function parsePaidSessionControlEvent(value: unknown) {
       } as const;
     case "session.balance":
       return { type: frame.data.type, balance: mapBalance(frame.data.body) } as const;
+    case "session.output.health":
+      return {
+        type: frame.data.type,
+        outputState: frame.data.body.output_state,
+        outputStateSince: frame.data.body.output_state_since,
+        lastFailureCode: frame.data.body.last_failure_code ?? null,
+      } as const;
     case "session.ended":
       return { type: frame.data.type, state: frame.data.body.state, closeReason: frame.data.body.close_reason } as const;
     case "session.rebound":

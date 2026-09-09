@@ -109,6 +109,9 @@ export interface PaidSessionStatusResult {
   leaseExpiresAt: string;
   balance: PaidSessionBalance;
   closeReason: string | null;
+  outputState: "unknown" | "waiting" | "producing" | "stalled";
+  outputStateSince: string | null;
+  lastFailureCode: string | null;
 }
 
 export interface PaidSessionEndRequest {
@@ -142,6 +145,12 @@ export interface PaidSessionClient {
 export type PaidSessionControlEvent =
   | { type: "session.usage.tick"; sequence: number; unit: string; claimedTotal: number; debitedUnits: number }
   | { type: "session.balance"; balance: PaidSessionBalance }
+  | {
+    type: "session.output.health";
+    outputState: "waiting" | "producing" | "stalled";
+    outputStateSince: string;
+    lastFailureCode: string | null;
+  }
   | { type: "session.ended"; state: string; closeReason: string }
   | { type: "session.rebound"; rotationGeneration: number; predecessorWorkId: string; workId: string };
 

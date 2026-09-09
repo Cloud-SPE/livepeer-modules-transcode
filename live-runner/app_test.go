@@ -24,8 +24,11 @@ func TestLoadLiveRunnerConfigRequiresSecretsAndPublicCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ListenAddress != ":8080" || config.MediaMTX.APIAddress != "127.0.0.1:9997" || config.MaxConcurrent != 0 || config.CallbackPoll != 250*time.Millisecond || len(config.MasterKey) != 32 || config.HardwareTarget != "auto" {
+	if config.ListenAddress != ":8080" || config.MetricsAddress != "127.0.0.1:9090" || config.MediaMTX.APIAddress != "127.0.0.1:9997" || config.MaxConcurrent != 0 || config.CallbackPoll != 250*time.Millisecond || config.CallbackRetryInitial != 500*time.Millisecond || config.CallbackRetryMaximum != 30*time.Second || len(config.MasterKey) != 32 || config.HardwareTarget != "auto" {
 		t.Fatal("valid configuration did not produce the expected safe defaults")
+	}
+	if config.OutputStallAfter != 20*time.Second || config.OutputFailAfter != time.Minute || config.RestartInitial != 250*time.Millisecond || config.RestartMaximum != 5*time.Second || config.RestartLimit != 5 {
+		t.Fatalf("unexpected output health defaults: %#v", config)
 	}
 	if config.PublicRTMPBase != "rtmps://runner.example:1936" || config.PublicHTTPBase != "https://runner.example/r/live-runner" {
 		t.Fatalf("public origins were not preserved: %#v", config)
@@ -85,6 +88,46 @@ func TestLoadLiveRunnerConfigRejectsMalformedValues(t *testing.T) {
 	values := map[string]string{"LIVE_RUNNER_MASTER_KEY": "not-base64"}
 	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil {
 		t.Fatal("malformed master key was accepted")
+	}
+}
+
+func TestLoadLiveRunnerConfigValidatesOutputHealthPolicy(t *testing.T) {
+	values := map[string]string{
+		"LIVE_RUNNER_MASTER_KEY":            base64.StdEncoding.EncodeToString([]byte(strings.Repeat("m", 32))),
+		"LIVE_RUNNER_INTERNAL_MEDIA_TOKEN":  strings.Repeat("i", 32),
+		"LIVEPEER_PUBLIC_RTMP_URL":          "rtmps://runner.example:1936",
+		"LIVEPEER_PUBLIC_URL":               "https://runner.example",
+		"LIVE_RUNNER_PRESETS_FILE":          "/etc/live-runner/presets.yaml",
+		"LIVE_RUNNER_OUTPUT_STALL_DEADLINE": "30s",
+		"LIVE_RUNNER_OUTPUT_FAIL_DEADLINE":  "20s",
+	}
+	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil || !strings.Contains(err.Error(), "OUTPUT_FAIL_DEADLINE") {
+		t.Fatalf("invalid output deadline policy error=%v", err)
+	}
+	values["LIVE_RUNNER_OUTPUT_FAIL_DEADLINE"] = "90s"
+	values["LIVE_RUNNER_LADDER_RESTART_LIMIT"] = "0"
+	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil || !strings.Contains(err.Error(), "RESTART_LIMIT") {
+		t.Fatalf("invalid restart limit error=%v", err)
+	}
+}
+
+func TestLoadLiveRunnerConfigRequiresPrivateMetricsAndValidCallbackBackoff(t *testing.T) {
+	values := map[string]string{
+		"LIVE_RUNNER_MASTER_KEY":           base64.StdEncoding.EncodeToString([]byte(strings.Repeat("m", 32))),
+		"LIVE_RUNNER_INTERNAL_MEDIA_TOKEN": strings.Repeat("i", 32),
+		"LIVEPEER_PUBLIC_RTMP_URL":         "rtmps://runner.example:1936",
+		"LIVEPEER_PUBLIC_URL":              "https://runner.example",
+		"LIVE_RUNNER_PRESETS_FILE":         "/etc/live-runner/presets.yaml",
+		"LIVE_RUNNER_METRICS_ADDR":         "0.0.0.0:9090",
+	}
+	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil {
+		t.Fatal("public runner metrics address was accepted")
+	}
+	values["LIVE_RUNNER_METRICS_ADDR"] = "127.0.0.1:9090"
+	values["LIVE_RUNNER_CALLBACK_RETRY_INITIAL"] = "5s"
+	values["LIVE_RUNNER_CALLBACK_RETRY_MAX"] = "1s"
+	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil {
+		t.Fatal("inverted callback retry bounds were accepted")
 	}
 }
 

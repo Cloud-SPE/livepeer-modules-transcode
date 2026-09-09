@@ -203,6 +203,9 @@ function lowStatus(willRefuseNextRefill = false) {
       runwaySecondsEstimate: 10, status: "low" as const, willRefuseNextRefill,
     },
     closeReason: null,
+    outputState: "producing" as const,
+    outputStateSince: "2026-08-26T11:59:00Z",
+    lastFailureCode: null,
   };
 }
 
@@ -456,6 +459,61 @@ test("control WebSocket loss never suppresses authoritative HTTP polling", async
 
   assert.equal(statusCalls, 1);
   assert.ok(h.calls.includes("progress:active"));
+});
+
+test("output health from WebSocket and HTTP is durably projected", async () => {
+  const h = harness({
+    controlSource: { async read() {
+      return [{
+        type: "session.output.health",
+        body: {
+          output_state: "stalled",
+          output_state_since: "2026-08-26T11:59:40Z",
+          last_failure_code: "encoder_init_failed",
+        },
+      }];
+    } },
+    client: {
+      async status() {
+        return {
+          ...lowStatus(),
+          outputState: "stalled" as const,
+          outputStateSince: "2026-08-26T11:59:40Z",
+          lastFailureCode: "encoder_init_failed",
+          balance: { ...lowStatus().balance, status: "ok" as const, runwayUnits: 50 },
+        };
+      },
+    },
+  });
+
+  await reconcilePaidLiveSessions(h.deps);
+
+  assert.equal(h.operation().sessionRuntime?.outputState, "stalled");
+  assert.equal(h.operation().sessionRuntime?.outputStateSince, "2026-08-26T11:59:40Z");
+  assert.equal(h.operation().sessionRuntime?.lastFailureCode, "encoder_init_failed");
+});
+
+test("terminal broker output failure enters settlement with the preserved reason", async () => {
+  let endReason = "";
+  const h = harness({
+    client: {
+      async status() {
+        return {
+          ...lowStatus(), state: "failed", closeReason: "output_failed",
+          outputState: "stalled" as const,
+          outputStateSince: "2026-08-26T11:59:00Z",
+          lastFailureCode: "unknown",
+          balance: { ...lowStatus().balance, status: "ok" as const, runwayUnits: 50 },
+        };
+      },
+      async end(input) { endReason = input.reason; return settledEnd("output_failed"); },
+    },
+  });
+
+  await reconcilePaidLiveSessions(h.deps);
+
+  assert.equal(endReason, "output_failed");
+  assert.equal(h.operation().terminalEvidence?.closeReason, "output_failed");
 });
 
 test("durable customer winddown becomes terminal only after broker settlement and LOC close", async () => {

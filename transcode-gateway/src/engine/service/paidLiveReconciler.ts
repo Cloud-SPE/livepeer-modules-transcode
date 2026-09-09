@@ -198,24 +198,33 @@ async function reconcileOne(
       throw new Error("paid session gateway identity drift");
     }
     const runtime = owned.operation.sessionRuntime!;
+    const brokerTerminal = status.state === "closed" || status.state === "ended" || status.state === "failed";
+    const brokerWindingDown = status.state === "winding_down";
     const authoritativeRunway = status.balance.runwayUnits ?? decimalUnits(owned.operation.balanceUnits ?? "0");
     const authoritativeFunded = status.balance.runwayUnits === null
       ? decimalUnits(owned.operation.fundedUnits)
       : status.balance.debitedUnits + status.balance.runwayUnits;
     const progressed = await deps.paidSessionStore.recordProgress(owned, {
-      status: status.state === "closed"
+      status: brokerTerminal
         ? "winddown_pending"
-        : runtime.relayDisconnectedAt ? "reconcile_pending" : "active",
+        : brokerWindingDown || runtime.relayDisconnectedAt ? "reconcile_pending" : "active",
       fundedUnits: String(authoritativeFunded),
       claimedUnits: String(status.claimedUnits),
       balanceUnits: String(authoritativeRunway),
       willRefuseNextRefill: status.balance.willRefuseNextRefill,
       leaseExpiresAt: timestamp(status.leaseExpiresAt),
-      sessionRuntime: { ...runtime, lastHttpReconcileAt: clock().toISOString() },
+      sessionRuntime: {
+        ...runtime,
+        lastHttpReconcileAt: clock().toISOString(),
+        outputState: status.outputState,
+        outputStateSince: status.outputStateSince ?? undefined,
+        lastFailureCode: status.lastFailureCode ?? undefined,
+        ...(brokerTerminal && status.closeReason ? { winddownReason: status.closeReason } : {}),
+      },
     });
     if (!progressed) return;
     owned = progressed;
-    if (status.state === "closed") {
+    if (brokerTerminal) {
       await executeWinddown(
         deps,
         owned,
@@ -225,6 +234,7 @@ async function reconcileOne(
       );
       return;
     }
+    if (brokerWindingDown) return;
     if (runtime.relayDisconnectedAt) return;
 
     const runway = status.balance.runwayUnits;
@@ -360,6 +370,17 @@ async function applyAdvisoryEvent(
       claimedUnits: String(event.balance.claimedUnits),
       balanceUnits: String(event.balance.runwayUnits ?? 0),
       willRefuseNextRefill: event.balance.willRefuseNextRefill,
+    });
+  }
+  if (event.type === "session.output.health") {
+    return deps.paidSessionStore.recordProgress(owned, {
+      status: owned.operation.status,
+      sessionRuntime: {
+        ...runtime,
+        outputState: event.outputState,
+        outputStateSince: event.outputStateSince,
+        lastFailureCode: event.lastFailureCode ?? undefined,
+      },
     });
   }
   if (event.type === "session.ended") {

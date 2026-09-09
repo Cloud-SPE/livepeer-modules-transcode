@@ -53,6 +53,25 @@ policy-bounded and extend the lease. The optional control WebSocket accelerates
 usage/balance/end signals; HTTP is authoritative. Session parameters and
 private credentials are envelope-encrypted and deleted after termination.
 
+The runner also reports output health independently of heartbeat liveness. It
+uses bounded ladder restarts, reports safe failure codes and
+`waiting`/`producing`/`stalled` state, serves only playable HLS renditions, and
+fails authenticated ingest that produces no finalized media with
+`output_failed` inside the configured deadline. Broker consumption and gateway
+projection of these fields are tracked separately in Beads so this runner-side
+contract can land without hiding the remaining cross-repository work.
+
+The live callback outbox parks permanent broker rejections in a bounded safe
+audit and advances to later events. Retryable failures preserve identity and
+durable, jittered backoff across restart; status and runner-local metrics expose
+rejections without recursively depending on broker support for another event
+type.
+
+The runner exposes loopback, bounded-cardinality counters for live ladder
+starts/exits, stalls, callback rejections, and GPU telemetry outcomes. NVIDIA
+ladder starts log a timeout-bounded aggregate encoder-session and memory
+snapshot without making telemetry availability a runtime dependency.
+
 ## Delivery slices
 
 Beads is the live dependency graph and status source; the identifiers below

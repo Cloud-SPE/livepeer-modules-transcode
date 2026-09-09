@@ -16,11 +16,17 @@ import (
 )
 
 const (
-	PaidSessionProtocolV1 = "paid-session/v1"
-	RuntimeSchemaV1       = "rtmp-hls/v1"
-	SessionParamsSchemaV1 = "rtmp-hls-session/v1"
-	WorkUnitV1            = "output_seconds"
-	GrantOperationV1      = "stream-key-issue"
+	PaidSessionProtocolV1  = "paid-session/v1"
+	RuntimeSchemaV1        = "rtmp-hls/v1"
+	SessionParamsSchemaV1  = "rtmp-hls-session/v1"
+	PaidSessionVersionV1   = "1.2.0"
+	RuntimeSchemaVersionV1 = "1.1.0"
+	SessionParamsVersionV1 = "1.0.0"
+	WorkUnitV1             = "output_seconds"
+	GrantOperationV1       = "stream-key-issue"
+	OutputStateWaitingV1   = "waiting"
+	OutputStateProducingV1 = "producing"
+	OutputStateStalledV1   = "stalled"
 )
 
 var (
@@ -31,6 +37,10 @@ var (
 		"runway_exhausted": {}, "refill_refused": {}, "recovery_failed": {},
 		"payment_unrecoverable": {}, "runner_failed": {}, "ingest_failed": {},
 		"output_failed": {},
+	}
+	ladderFailureCodesV1 = map[string]struct{}{
+		"encoder_init_failed": {}, "hwaccel_init_failed": {}, "input_unavailable": {},
+		"output_rejected": {}, "process_killed": {}, "unknown": {},
 	}
 )
 
@@ -94,11 +104,22 @@ type GrantV1 struct {
 }
 
 type RunnerStatusV1 struct {
-	RunnerSessionID string  `json:"runner_session_id"`
-	State           string  `json:"state"`
-	Usage           UsageV1 `json:"usage"`
-	LastSequence    uint64  `json:"last_sequence"`
-	CloseReason     string  `json:"close_reason,omitempty"`
+	RunnerSessionID       string                     `json:"runner_session_id"`
+	State                 string                     `json:"state"`
+	Usage                 UsageV1                    `json:"usage"`
+	LastSequence          uint64                     `json:"last_sequence"`
+	CloseReason           string                     `json:"close_reason,omitempty"`
+	OutputState           string                     `json:"output_state"`
+	LastFailureCode       string                     `json:"last_failure_code,omitempty"`
+	CallbackRejectedTotal uint64                     `json:"callback_rejected_total,omitempty"`
+	LastCallbackRejection *CallbackRejectionStatusV1 `json:"last_callback_rejection,omitempty"`
+}
+
+type CallbackRejectionStatusV1 struct {
+	EventType  string `json:"event_type"`
+	StatusCode int    `json:"status_code"`
+	ErrorCode  string `json:"error_code"`
+	RejectedAt string `json:"rejected_at"`
 }
 
 type UsageV1 struct {
@@ -235,7 +256,7 @@ func ValidateCreateResponseV1(value RunnerCreateResponseV1) error {
 }
 
 func ValidateStatusV1(value RunnerStatusV1) error {
-	if !opaqueIDPattern.MatchString(value.RunnerSessionID) || !validStateV1(value.State) || value.Usage.Unit != WorkUnitV1 {
+	if !opaqueIDPattern.MatchString(value.RunnerSessionID) || !validStateV1(value.State) || value.Usage.Unit != WorkUnitV1 || !validOutputStateV1(value.OutputState) || !validLadderFailureCodeV1(value.LastFailureCode, true) {
 		return errors.New("runner status is invalid")
 	}
 	if (value.State == "ended" || value.State == "failed") != (value.CloseReason != "") {
@@ -243,6 +264,17 @@ func ValidateStatusV1(value RunnerStatusV1) error {
 	}
 	if value.CloseReason != "" && !validCloseReasonV1(value.CloseReason) {
 		return errors.New("terminal status close reason is invalid")
+	}
+	if (value.CallbackRejectedTotal == 0) != (value.LastCallbackRejection == nil) {
+		return errors.New("runner callback rejection status is invalid")
+	}
+	if rejection := value.LastCallbackRejection; rejection != nil {
+		if rejection.EventType == "" || !validCallbackFailureV1(rejection.StatusCode, rejection.ErrorCode, false) {
+			return errors.New("runner callback rejection status is invalid")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, rejection.RejectedAt); err != nil {
+			return errors.New("runner callback rejection time is invalid")
+		}
 	}
 	return nil
 }
@@ -258,7 +290,7 @@ func ValidateEventV1(value RunnerEventV1) error {
 		return errors.New("event state is invalid")
 	}
 	switch value.EventType {
-	case "session.started", "session.heartbeat":
+	case "session.started", "session.heartbeat", "session.ladder.restart", "session.output.stalled":
 		if value.State != "active" {
 			return errors.New("liveness event must be active")
 		}
@@ -406,7 +438,7 @@ func LiveRunnerContractV1() LiveRunnerContractDocumentV1 {
 		Readiness:           RunnerReadinessV1{Type: "http-status", Path: "/ready"},
 		Paths:               RunnerPathsV1{Create: "/v1/sessions", Status: "/v1/sessions/{id}", Terminate: "/v1/sessions/{id}"},
 		Identity:            map[string]string{"provider": "livepeer-live-runner"},
-		SchemaVersions:      map[string]string{PaidSessionProtocolV1: "1.0.0", RuntimeSchemaV1: "1.0.0", SessionParamsSchemaV1: "1.0.0"},
+		SchemaVersions:      map[string]string{PaidSessionProtocolV1: PaidSessionVersionV1, RuntimeSchemaV1: RuntimeSchemaVersionV1, SessionParamsSchemaV1: SessionParamsVersionV1},
 		SessionParamsSchema: json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["schema","publisher_mode","output_profile","metering_rendition","storage"],"properties":{"schema":{"const":"rtmp-hls-session/v1"},"publisher_mode":{"enum":["gateway-relay","direct-publisher"]},"output_profile":{"type":"string"},"metering_rendition":{"type":"string"},"storage":{"type":"object"}}}`),
 	}
 }
@@ -418,7 +450,7 @@ func ValidateRunnerContractV1(value LiveRunnerContractDocumentV1) error {
 	if value.Readiness.Type != "http-status" || value.Readiness.Path != "/ready" || value.Paths.Create != "/v1/sessions" || !strings.Contains(value.Paths.Status, "{id}") || !strings.Contains(value.Paths.Terminate, "{id}") || !json.Valid(value.SessionParamsSchema) {
 		return errors.New("runner paths or parameter schema is invalid")
 	}
-	if value.Identity["provider"] == "" || value.SchemaVersions[PaidSessionProtocolV1] == "" || value.SchemaVersions[RuntimeSchemaV1] == "" {
+	if value.Identity["provider"] == "" || value.SchemaVersions[PaidSessionProtocolV1] != PaidSessionVersionV1 || value.SchemaVersions[RuntimeSchemaV1] != RuntimeSchemaVersionV1 || value.SchemaVersions[SessionParamsSchemaV1] != SessionParamsVersionV1 {
 		return errors.New("runner identity or schema versions are invalid")
 	}
 	return nil
@@ -490,6 +522,18 @@ func validStateV1(value string) bool {
 }
 func validCloseReasonV1(value string) bool {
 	_, ok := closeReasonsV1[value]
+	return ok
+}
+
+func validOutputStateV1(value string) bool {
+	return value == OutputStateWaitingV1 || value == OutputStateProducingV1 || value == OutputStateStalledV1
+}
+
+func validLadderFailureCodeV1(value string, allowEmpty bool) bool {
+	if value == "" {
+		return allowEmpty
+	}
+	_, ok := ladderFailureCodesV1[value]
 	return ok
 }
 func validateHTTPURL(raw string) error { return validateURLScheme(raw, "http", "https") }

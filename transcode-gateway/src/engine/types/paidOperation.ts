@@ -77,6 +77,9 @@ export interface PaidSessionRuntimeState {
   lastHttpReconcileAt?: string;
   relayDisconnectedAt?: string;
   winddownReason?: string;
+  outputState?: "unknown" | "waiting" | "producing" | "stalled";
+  outputStateSince?: string;
+  lastFailureCode?: string;
 }
 
 export interface PaidTerminalEvidence {

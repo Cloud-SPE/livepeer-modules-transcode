@@ -72,6 +72,16 @@ if [ "$smoke_health" != healthy ]; then
   exit 1
 fi
 
+runner_metrics=$(docker exec "$smoke_name" curl --fail --silent http://127.0.0.1:9090/metrics)
+printf '%s\n' "$runner_metrics" | grep -F 'live_ladder_starts_total' >/dev/null || {
+  echo "live-runner metrics surface is missing ladder counters" >&2
+  exit 1
+}
+printf '%s\n' "$runner_metrics" | grep -F 'live_callback_rejected_total' >/dev/null || {
+  echo "live-runner metrics surface is missing callback counters" >&2
+  exit 1
+}
+
 docker stop --timeout 10 "$smoke_name" >/dev/null
 smoke_exit=$(docker inspect --format '{{.State.ExitCode}}' "$smoke_name")
 if [ "$smoke_exit" -ne 0 ]; then

@@ -32,3 +32,12 @@ test("settled operation is terminal and reports verified usage", () => {
   assert.equal(operationTone(value), "ok");
   assert.match(operationSummary(value), /42 video-frame-megapixel/);
 });
+
+test("stalled and failed output remain visibly unhealthy", () => {
+  const stalled = status({ output_status: "stalled", last_failure_code: "encoder_init_failed" });
+  assert.equal(operationTone(stalled), "error");
+  assert.match(operationSummary(stalled), /output is stalled.*encoder init failed/i);
+  const failed = status({ state: "settled", output_status: "output_failed", last_failure_code: "unknown" });
+  assert.equal(operationTone(failed), "error");
+  assert.match(operationSummary(failed), /output failed.*unknown/i);
+});

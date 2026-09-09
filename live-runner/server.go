@@ -200,7 +200,11 @@ func (s *LiveRunnerServerV1) handleStatusV1(writer http.ResponseWriter, request 
 		writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "state_unavailable")
 		return
 	}
-	status := RunnerStatusV1{RunnerSessionID: record.RunnerSessionID, State: record.State, Usage: UsageV1{Unit: WorkUnitV1, Total: record.UsageTotal}, LastSequence: record.LastSequence, CloseReason: record.CloseReason}
+	status := RunnerStatusV1{RunnerSessionID: record.RunnerSessionID, State: record.State, Usage: UsageV1{Unit: WorkUnitV1, Total: record.UsageTotal}, LastSequence: record.LastSequence, CloseReason: record.CloseReason, OutputState: record.OutputState, LastFailureCode: record.LastLadderFailureCode, CallbackRejectedTotal: record.CallbackRejectedTotal}
+	if count := len(record.CallbackDeadLetters); count > 0 {
+		letter := record.CallbackDeadLetters[count-1]
+		status.LastCallbackRejection = &CallbackRejectionStatusV1{EventType: letter.Event.EventType, StatusCode: letter.StatusCode, ErrorCode: letter.ErrorCode, RejectedAt: letter.RejectedAt}
+	}
 	writeRunnerJSONV1(writer, http.StatusOK, status)
 }
 

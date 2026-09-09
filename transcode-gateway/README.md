@@ -125,6 +125,14 @@ requests a refill at 15 remaining units, and permits at most 60 accepted
 refills. Operators can set `LIVEPEER_LIVE_RECONCILE_INTERVAL_MS`,
 `LIVEPEER_LIVE_CONTROL_WINDOW_MS`, `LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS`, and
 `LIVEPEER_LIVE_MAX_REFILLS`; the total-unit ceiling remains authoritative.
+Broker HTTP status and `session.output.health` control events are projected
+durably into `output_state`, `output_state_since`, and the bounded
+`last_failure_code`. Brokers predating paid-session `1.2.0` map to
+`output_state: unknown`; deploy the updated broker first when output-health
+enforcement is required.
+For gateway-relay sessions, a broker-reported `waiting` state is projected as
+`output_status: no_ingest` while the local publisher relay is absent; once the
+relay is active it remains `waiting` until finalized output appears.
 Publisher disconnects receive a 15-second reconnect grace by default through
 `LIVEPEER_LIVE_DISCONNECT_GRACE_MS`. Customer end, grace expiry, lease expiry,
 broker end, and payment winddown remain nonterminal locally until the broker's

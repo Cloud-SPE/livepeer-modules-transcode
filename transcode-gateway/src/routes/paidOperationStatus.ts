@@ -11,11 +11,25 @@ function warnings(operation: PaidOperation, now: Date): string[] {
   if (operation.leaseExpiresAt && operation.leaseExpiresAt <= now && !operation.terminalAt) {
     result.push("lease_expired");
   }
+  if (operation.sessionRuntime?.outputState === "stalled") result.push("output_stalled");
   return result;
 }
 
 export function customerOperationStatus(operation: PaidOperation | null, now = new Date()) {
   if (!operation) return null;
+  const outputState = operation.kind === "session"
+    ? operation.sessionRuntime?.outputState ?? "unknown"
+    : null;
+  const relayHasNoIngest = operation.sessionRuntime?.publisherMode === "gateway-relay" &&
+    operation.sessionRuntime.outputState === "waiting" &&
+    (operation.sessionRuntime.relayStatus === "pending" ||
+      operation.sessionRuntime.relayStatus === "reconnecting" ||
+      operation.sessionRuntime.relayStatus === "stopped" ||
+      operation.sessionRuntime.relayStatus === "failed");
+  const outputStatus = operation.sessionRuntime?.winddownReason === "output_failed" ||
+      operation.terminalEvidence?.closeReason === "output_failed"
+    ? "output_failed"
+    : relayHasNoIngest ? "no_ingest" : outputState;
   return {
     operation_id: operation.id,
     protocol: operation.route.protocol,
@@ -34,6 +48,10 @@ export function customerOperationStatus(operation: PaidOperation | null, now = n
     relay_status: operation.sessionRuntime?.relayStatus ?? null,
     delivered_units: operation.sessionRuntime?.lastRunnerUsage ?? null,
     winddown_reason: operation.sessionRuntime?.winddownReason ?? null,
+    output_state: outputState,
+    output_status: outputStatus,
+    output_state_since: operation.sessionRuntime?.outputStateSince ?? null,
+    last_failure_code: operation.sessionRuntime?.lastFailureCode ?? null,
     terminal_at: iso(operation.terminalAt),
   };
 }

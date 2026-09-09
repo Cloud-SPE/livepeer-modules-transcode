@@ -46,10 +46,10 @@ export class AdminOperations extends LitElement {
         <tbody>${this.items.map((item) => html`<tr>
           <td><code>${item.protocol}</code><br><span class="muted">${item.kind}</span></td>
           <td><code>${item.asset_id ?? item.live_stream_id ?? "—"}</code></td>
-          <td><span class="badge ${item.state === "settled" ? "ok" : item.terminal_at ? "error" : "warn"}">${item.state}</span>${item.recovered ? html`<br><span class="muted">recovered</span>` : nothing}</td>
+          <td><span class="badge ${item.state === "settled" && item.output_status !== "output_failed" ? "ok" : item.terminal_at || item.output_status === "stalled" || item.output_status === "output_failed" ? "error" : "warn"}">${item.state}</span>${item.recovered ? html`<br><span class="muted">recovered</span>` : nothing}${item.output_status ? html`<br><span class="muted">output: ${item.output_status.replaceAll("_", " ")}</span>` : nothing}</td>
           <td>${item.claimed_units ?? item.delivered_units ?? "pending"} ${item.work_unit}</td>
           <td><code>${item.operation_id}</code><br><code>${item.request_id}</code></td>
-          <td>${item.error_code ?? item.winddown_reason ?? (item.warnings.join(", ") || html`<span class="muted">—</span>`)}</td>
+          <td>${item.last_failure_code ?? item.error_code ?? item.winddown_reason ?? (item.warnings.join(", ") || html`<span class="muted">—</span>`)}</td>
         </tr>`)}</tbody></table></div>`}
     </section>`;
   }

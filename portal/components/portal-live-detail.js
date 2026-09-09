@@ -61,6 +61,8 @@ export class PortalLiveDetail extends LitElement {
             <h3>Paid session</h3>
             <p>Status: <span class="badge ${operationTone(s.paid_operation)}">${s.paid_operation.state}</span></p>
             <p>${operationSummary(s.paid_operation)}</p>
+            ${s.paid_operation.output_status ? html`<p>Output: <strong>${s.paid_operation.output_status.replaceAll("_", " ")}</strong>${s.paid_operation.output_state_since ? ` since ${new Date(s.paid_operation.output_state_since).toLocaleString()}` : ""}</p>` : nothing}
+            ${s.paid_operation.last_failure_code ? html`<p class="error">Runner failure: ${s.paid_operation.last_failure_code.replaceAll("_", " ")}</p>` : nothing}
             <p>Delivered: <strong>${s.paid_operation.delivered_units ?? s.paid_operation.claimed_units ?? "0"}</strong> ${s.paid_operation.work_unit}</p>
             ${s.paid_operation.balance_units !== null ? html`<p>Funded balance: ${s.paid_operation.balance_units} ${s.paid_operation.work_unit}</p>` : nothing}
             ${s.paid_operation.lease_expires_at ? html`<p>Lease: ${new Date(s.paid_operation.lease_expires_at).toLocaleString()}</p>` : nothing}

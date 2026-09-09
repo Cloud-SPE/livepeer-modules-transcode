@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -209,6 +210,71 @@ func TestEncryptedStoreHeartbeatUsesDurableEventCadence(t *testing.T) {
 	}
 }
 
+func TestEncryptedStorePersistsOutputHealthAndFailedTerminalAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	key := bytes.Repeat([]byte{0x61}, 32)
+	store := newTestStoreV1(t, dir, key)
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	started := testEventV1(response.RunnerSessionID, 1, "session.started", "active", 0, "")
+	started.EventTime = startedAt.Format(time.RFC3339Nano)
+	if err := store.Advance(request.SessionID, started); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordIngestPresence(request.SessionID, true, startedAt); err != nil {
+		t.Fatal(err)
+	}
+	if failed, stalled, err := store.EvaluateOutputHealth(request.SessionID, startedAt.Add(20*time.Second), 20*time.Second, time.Minute); err != nil || failed || !stalled {
+		t.Fatalf("stall evaluation failed=%v stalled=%v err=%v", failed, stalled, err)
+	}
+	restarted := newTestStoreV1(t, dir, key)
+	record, _, err := restarted.Load(request.SessionID)
+	if err != nil || record.OutputState != OutputStateStalledV1 || record.IngestOnlineAt == "" || len(record.PendingEvents) != 2 || record.PendingEvents[1].EventType != "session.output.stalled" {
+		t.Fatalf("stalled record=%+v err=%v", record, err)
+	}
+	if failed, stalled, err := restarted.EvaluateOutputHealth(request.SessionID, startedAt.Add(time.Minute), 20*time.Second, time.Minute); err != nil || !failed || stalled {
+		t.Fatalf("failure deadline failed=%v stalled=%v err=%v", failed, stalled, err)
+	}
+	stopping, began, err := restarted.BeginFailure(request.SessionID, "output_failed")
+	if err != nil || !began || stopping.PendingTerminalState != "failed" {
+		t.Fatalf("begin failure began=%v record=%+v err=%v", began, stopping, err)
+	}
+	final, err := FinalizeLiveTerminationV1(restarted, request.SessionID, startedAt.Add(time.Minute))
+	if err != nil || final.State != "failed" || final.CloseReason != "output_failed" || final.PendingEvents[len(final.PendingEvents)-1].EventType != "session.failed" {
+		t.Fatalf("failed terminal=%+v err=%v", final, err)
+	}
+}
+
+func TestEncryptedStoreLadderRestartWindowResetsAfterOutput(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x62}, 32))
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	started := testEventV1(response.RunnerSessionID, 1, "session.started", "active", 0, "")
+	started.EventTime = startedAt.Format(time.RFC3339Nano)
+	if err := store.Advance(request.SessionID, started); err != nil {
+		t.Fatal(err)
+	}
+	if attempt, err := store.RecordLadderRestart(request.SessionID, "encoder_init_failed", startedAt.Add(time.Second), time.Minute); err != nil || attempt != 1 {
+		t.Fatalf("first restart attempt=%d err=%v", attempt, err)
+	}
+	if _, err := store.RecordFinalizedSegments(request.SessionID, []FinalizedHLSSegmentV1{{URI: "segment.mp4", DurationMicroseconds: 1_000_000}}, startedAt.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if attempt, err := store.RecordLadderRestart(request.SessionID, "unknown", startedAt.Add(3*time.Second), time.Minute); err != nil || attempt != 1 {
+		t.Fatalf("restart after output attempt=%d err=%v", attempt, err)
+	}
+	record, _, err := store.Load(request.SessionID)
+	if err != nil || record.FirstFinalizedSegmentAt == "" || record.LastFinalizedSegmentAt == "" || record.OutputState != OutputStateProducingV1 || record.LastLadderFailureCode != "unknown" {
+		t.Fatalf("output health record=%+v err=%v", record, err)
+	}
+}
+
 func TestEncryptedStoreRejectsTamperedState(t *testing.T) {
 	dir := t.TempDir()
 	store := newTestStoreV1(t, dir, bytes.Repeat([]byte{0x6e}, 32))
@@ -304,6 +370,35 @@ func TestEncryptedStorePinsTerminationReasonBeforeTerminalEvent(t *testing.T) {
 	terminal := testEventV1(response.RunnerSessionID, 1, "session.ended", "ended", 0, "gateway_close")
 	if err := store.Advance(request.SessionID, terminal); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEncryptedStoreBoundsCallbackDeadLettersWithoutLosingTotal(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x55}, 32))
+	request, response := testCreatePairV1(t)
+	if _, _, _, err := store.CreateOrReplay(request, response); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	for sequence := uint64(1); sequence <= uint64(maxCallbackDeadLettersV1+2); sequence++ {
+		event := testEventV1(response.RunnerSessionID, sequence, "session.heartbeat", "active", 0, "")
+		if err := store.Advance(request.SessionID, event); err != nil {
+			t.Fatal(err)
+		}
+		at := base.Add(time.Duration(sequence) * time.Second)
+		if _, err := store.ReserveCallbackAttempt(request.SessionID, event.EventID, at, time.Millisecond, time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ParkCallbackRejection(request.SessionID, event.EventID, http.StatusConflict, "http_409", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, _, err := store.Load(request.SessionID)
+	if err != nil || len(record.CallbackDeadLetters) != maxCallbackDeadLettersV1 || record.CallbackRejectedTotal != uint64(maxCallbackDeadLettersV1+2) {
+		t.Fatalf("dead letters=%d total=%d err=%v", len(record.CallbackDeadLetters), record.CallbackRejectedTotal, err)
+	}
+	if record.CallbackDeadLetters[0].Event.Sequence != 3 {
+		t.Fatalf("oldest retained callback sequence=%d", record.CallbackDeadLetters[0].Event.Sequence)
 	}
 }
 

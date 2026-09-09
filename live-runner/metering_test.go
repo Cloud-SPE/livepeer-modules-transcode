@@ -89,15 +89,49 @@ func TestLiveOutputMeterReadsDeclaredMediaPlaylistAndAdvancesOnce(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err := NewLiveOutputMeterV1(store, hls, time.Millisecond, time.Hour, time.Second)
+	ready := make(chan struct{})
+	close(ready)
+	meter, err := NewLiveOutputMeterV1(store, hls, fakePublisherWaiterV1{ready: ready}, time.Millisecond, time.Hour, time.Second, 20*time.Second, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	meter.now = func() time.Time { return time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC) }
-	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
-	meter.poll(context.Background(), record, "renditions/runner_meter_001/720p")
+	meter.poll(context.Background(), record, "ingest/runner_meter_001", "renditions/runner_meter_001/720p")
+	meter.poll(context.Background(), record, "ingest/runner_meter_001", "renditions/runner_meter_001/720p")
 	persisted, _, err := store.Load(record.BrokerSessionID)
 	if err != nil || persisted.UsageTotal != 1 || persisted.LastSequence != 3 || len(persisted.PendingEvents) != 3 || persisted.PendingEvents[1].EventType != "session.heartbeat" || len(persisted.MeteredSegmentSHA256) != 1 {
 		t.Fatalf("metered record=%+v err=%v", persisted, err)
+	}
+}
+
+func TestLiveOutputMeterCountsStalledTransitionOnce(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	defer upstream.Close()
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x6f}, 32))
+	record, _ := createRuntimeSessionV1(t, store, "sess_meter_stalled", "runner_meter_stalled")
+	startedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	started := testEventV1(record.RunnerSessionID, 1, "session.started", "active", 0, "")
+	started.EventTime = startedAt.Format(time.RFC3339Nano)
+	if err := store.Advance(record.BrokerSessionID, started); err != nil {
+		t.Fatal(err)
+	}
+	hls, err := NewHLSHandlerV1(store, testLivePresetsV1(), upstream.URL, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan struct{})
+	close(ready)
+	meter, err := NewLiveOutputMeterV1(store, hls, fakePublisherWaiterV1{ready: ready}, time.Millisecond, time.Hour, time.Second, 20*time.Second, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := startedAt
+	meter.now = func() time.Time { return now }
+	meter.poll(context.Background(), record, "ingest/runner_meter_stalled", "renditions/runner_meter_stalled/720p")
+	now = startedAt.Add(20 * time.Second)
+	meter.poll(context.Background(), record, "ingest/runner_meter_stalled", "renditions/runner_meter_stalled/720p")
+	meter.poll(context.Background(), record, "ingest/runner_meter_stalled", "renditions/runner_meter_stalled/720p")
+	if meter.metrics.sessionsStalled.Load() != 1 {
+		t.Fatalf("stalled metric=%d", meter.metrics.sessionsStalled.Load())
 	}
 }

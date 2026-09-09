@@ -55,7 +55,7 @@ components:
   schemas:
     PaidOperationStatus:
       type: object
-      required: [operation_id, protocol, state, request_id, work_unit, funded_units, warnings, recovered, retry_count]
+      required: [operation_id, protocol, state, request_id, work_unit, funded_units, warnings, recovered, retry_count, output_state, output_status, output_state_since, last_failure_code]
       properties:
         operation_id: { type: string }
         protocol: { type: string, enum: [paid-job/v1, paid-session/v1] }
@@ -68,7 +68,7 @@ components:
         lease_expires_at: { type: [string, "null"], format: date-time }
         warnings:
           type: array
-          items: { type: string, enum: [refill_will_be_refused, funded_balance_exhausted, lease_expired] }
+          items: { type: string, enum: [refill_will_be_refused, funded_balance_exhausted, lease_expired, output_stalled] }
         recovered: { type: boolean }
         retry_count: { type: integer, minimum: 0 }
         next_retry_at: { type: [string, "null"], format: date-time }
@@ -76,6 +76,10 @@ components:
         relay_status: { type: [string, "null"] }
         delivered_units: { type: [string, "null"], pattern: "^(0|[1-9][0-9]*)$" }
         winddown_reason: { type: [string, "null"] }
+        output_state: { type: [string, "null"], enum: [unknown, waiting, producing, stalled, null] }
+        output_status: { type: [string, "null"], enum: [unknown, no_ingest, waiting, producing, stalled, output_failed, null] }
+        output_state_since: { type: [string, "null"], format: date-time }
+        last_failure_code: { type: [string, "null"], pattern: "^[a-z][a-z0-9_]{0,63}$" }
         terminal_at: { type: [string, "null"], format: date-time }
     AdminPaidOperationStatus:
       allOf:

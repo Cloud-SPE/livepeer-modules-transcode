@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,15 @@ func (f fakePublisherWaiterV1) KickPublisher(_ context.Context, path string) err
 	return f.kickErr
 }
 
+func (f fakePublisherWaiterV1) Path(_ context.Context, path string) (MediaPathStatusV1, error) {
+	select {
+	case <-f.ready:
+		return MediaPathStatusV1{Name: path, Online: true, Source: &MediaPathSourceV1{Type: "rtmpConn"}}, nil
+	default:
+		return MediaPathStatusV1{}, ErrMediaPathNotFoundV1
+	}
+}
+
 func (f fakePublisherWaiterV1) WaitForRTMPPublisher(ctx context.Context, path string, _ time.Duration) (MediaPathStatusV1, error) {
 	select {
 	case <-ctx.Done():
@@ -38,10 +48,30 @@ type fakeLiveProcessV1 struct {
 	ctx context.Context
 }
 
+type failedLiveProcessV1 struct{ exit LiveLadderExitV1 }
+
+func (p failedLiveProcessV1) Wait() LiveLadderExitV1 { return p.exit }
+
+type failedLiveLauncherV1 struct{ code string }
+
+type fakeGPUPressureSamplerV1 struct {
+	pressure GPUPressureV1
+	err      error
+}
+
+func (f fakeGPUPressureSamplerV1) Sample(context.Context) (GPUPressureV1, error) {
+	return f.pressure, f.err
+}
+
+func (f failedLiveLauncherV1) Start(context.Context, string, []transcode.LiveRTMPOutput, transcode.HWProfile, transcode.ProbeResult) (LiveLadderProcessV1, error) {
+	return failedLiveProcessV1{exit: LiveLadderExitV1{Code: f.code, Err: errors.New("safe test failure"), DiagnosticTail: []string{"safe diagnostic"}}}, nil
+}
+
 type noopLiveMeterV1 struct{}
 
-func (noopLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) {
+func (noopLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) string {
 	<-ctx.Done()
+	return ""
 }
 
 type trackingLiveMeterV1 struct {
@@ -49,15 +79,16 @@ type trackingLiveMeterV1 struct {
 	stopped chan struct{}
 }
 
-func (m trackingLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) {
+func (m trackingLiveMeterV1) Run(ctx context.Context, _ SessionRecordV1, _ SessionSecretsV1) string {
 	close(m.started)
 	<-ctx.Done()
 	close(m.stopped)
+	return ""
 }
 
-func (p fakeLiveProcessV1) Wait() error {
+func (p fakeLiveProcessV1) Wait() LiveLadderExitV1 {
 	<-p.ctx.Done()
-	return p.ctx.Err()
+	return LiveLadderExitV1{Code: "process_killed", Err: p.ctx.Err()}
 }
 
 type liveLaunchV1 struct {
@@ -241,6 +272,87 @@ func TestLiveRuntimeConstructorRejectsNonRTMPRouter(t *testing.T) {
 	_, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "http://127.0.0.1:1935", strings.Repeat("x", 32), time.Millisecond, 1)
 	if err == nil {
 		t.Fatal("non-RTMP internal router URL was accepted")
+	}
+}
+
+func TestLiveRuntimeBoundsRestartsAndFailsOutput(t *testing.T) {
+	ready := make(chan struct{})
+	close(ready)
+	kicked := make(chan string, 2)
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x78}, 32))
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: ready, kicked: kicked}, failedLiveLauncherV1{code: "encoder_init_failed"}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator.restartInitial = time.Millisecond
+	coordinator.restartMax = time.Millisecond
+	coordinator.maxFailures = 2
+	record, secrets := createRuntimeSessionV1(t, store, "sess_runtime_failed", "runner_runtime_failed")
+	if err := coordinator.EnsureSession(context.Background(), record, secrets); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		persisted, _, loadErr := store.Load(record.BrokerSessionID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if persisted.State == "failed" {
+			if persisted.CloseReason != "output_failed" || persisted.OutputState != OutputStateStalledV1 || len(persisted.PendingEvents) != 5 {
+				t.Fatalf("failed session=%+v", persisted)
+			}
+			if persisted.PendingEvents[1].EventType != "session.ladder.restart" || persisted.PendingEvents[2].EventType != "session.ladder.restart" || persisted.PendingEvents[3].EventType != "session.output.stalled" || persisted.PendingEvents[4].EventType != "session.failed" {
+				t.Fatalf("failure events=%+v", persisted.PendingEvents)
+			}
+			codeIndex := ladderMetricCodeIndexV1("encoder_init_failed")
+			startedIndex := ladderMetricCodeIndexV1("started")
+			if coordinator.metrics.ladderStarts[startedIndex].Load() != 2 || coordinator.metrics.ladderExits[codeIndex].Load() != 2 || coordinator.metrics.sessionsStalled.Load() != 1 || coordinator.metrics.gpuProbes[2].Load() != 2 {
+				t.Fatalf("runtime metrics starts=%d exits=%d stalled=%d unsupported=%d", coordinator.metrics.ladderStarts[startedIndex].Load(), coordinator.metrics.ladderExits[codeIndex].Load(), coordinator.metrics.sessionsStalled.Load(), coordinator.metrics.gpuProbes[2].Load())
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("runtime did not fail after bounded ladder restarts")
+}
+
+func TestLiveLadderDiagnosticsAreSanitizedAndClassified(t *testing.T) {
+	unsafe := "Error opening input rtmp://runner.example/ingest/id?token=super-secret"
+	safe := sanitizeFFmpegDiagnosticV1(unsafe)
+	if strings.Contains(safe, "super-secret") || !strings.Contains(safe, "rtmp://[redacted]") {
+		t.Fatalf("unsafe diagnostic=%q", safe)
+	}
+	tests := map[string]string{
+		"Error while opening encoder - maybe incorrect parameters": "encoder_init_failed",
+		"Cannot load libcuda.so.1":                                 "hwaccel_init_failed",
+		"Error opening input: Connection refused":                  "input_unavailable",
+		"Error writing trailer: Broken pipe":                       "output_rejected",
+		"unrecognized failure":                                     "unknown",
+	}
+	for diagnostic, want := range tests {
+		if got := classifyLiveLadderExitV1(errors.New("exit status 1"), []string{diagnostic}); got != want {
+			t.Fatalf("diagnostic=%q code=%q want=%q", diagnostic, got, want)
+		}
+	}
+}
+
+func TestLiveRuntimeLogsSafeNVIDIAPressureAndDegradesTelemetryFailure(t *testing.T) {
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x72}, 32))
+	coordinator := newTestRuntimeCoordinatorV1(t, store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, 1)
+	coordinator.hardware = transcode.HWProfile{Vendor: transcode.VendorNVIDIA}
+	coordinator.metrics = &LiveRunnerMetricsV1{}
+	var logs bytes.Buffer
+	coordinator.log = slog.New(slog.NewTextHandler(&logs, nil))
+	coordinator.gpuPressure = fakeGPUPressureSamplerV1{pressure: GPUPressureV1{GPUCount: 1, EncoderSessions: 4, MemoryUsedMiB: 8192}}
+	coordinator.observeGPUPressure(context.Background(), "runner_gpu_metrics")
+	if text := logs.String(); !strings.Contains(text, "encoder_sessions=4") || !strings.Contains(text, "memory_used_mib=8192") || coordinator.metrics.gpuProbes[0].Load() != 1 {
+		t.Fatalf("available GPU telemetry log=%q metric=%d", text, coordinator.metrics.gpuProbes[0].Load())
+	}
+	logs.Reset()
+	coordinator.gpuPressure = fakeGPUPressureSamplerV1{err: errors.New("token=unsafe-driver-detail")}
+	coordinator.observeGPUPressure(context.Background(), "runner_gpu_metrics")
+	if text := logs.String(); strings.Contains(text, "unsafe-driver-detail") || !strings.Contains(text, "pressure unavailable") || coordinator.metrics.gpuProbes[1].Load() != 1 {
+		t.Fatalf("unavailable GPU telemetry log=%q metric=%d", text, coordinator.metrics.gpuProbes[1].Load())
 	}
 }
 
