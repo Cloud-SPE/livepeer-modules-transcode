@@ -8,7 +8,6 @@ import type {
 import type { JsonValue, SelectedWorkerRoute } from "../types/index.js";
 
 export interface PaidSessionOpenRequest {
-  gatewaySessionId: string;
   requestId: string;
   route: SelectedWorkerRoute;
   descriptorSchema: string;
@@ -29,6 +28,13 @@ export interface PaidSessionBalance {
   claimedUnits: number;
   debitedUnits: number;
   unit: string;
+  authorizationId: string;
+  authorizationMaxUnits: number;
+  authorizationCapRemainingUnits: number;
+  authorizationReservedValueWei: string;
+  cumulativeBilledValueWei: string;
+  accountAvailableValueWei: string | null;
+  accountVersion: number | null;
   runwayUnits: number | null;
   runwaySecondsEstimate: number | null;
   status: "ok" | "low" | "exhausted";
@@ -73,8 +79,11 @@ export interface PaidSessionOpenResult {
 export interface PaidSessionRecoveryHandle {
   operationId: string;
   brokerUrl: string;
+  gatewaySessionId: string;
   descriptorSchema: string;
   workUnit: string;
+  settlementDomainId: string;
+  maxTotalUnits: number;
 }
 
 export type PaidSessionControlHandle = LocOpenSessionResult | PaidSessionRecoveryHandle;
@@ -85,8 +94,7 @@ export interface PaidSessionRefillRequest {
   credential: string;
   requestId: string;
   observedConsumedUnits?: number;
-  rebindFrom?: string;
-  replacesRequestId?: string;
+  maxTotalUnits: number;
 }
 
 export interface PaidSessionRefillResult {

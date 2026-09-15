@@ -23,6 +23,7 @@ export interface PaidRouteSnapshot {
   quoteVersion: string;
   constraintFingerprint: string;
   routeFingerprint: string;
+  settlementDomainId?: string;
   settlementKey: string;
   raw: JsonValue;
 }

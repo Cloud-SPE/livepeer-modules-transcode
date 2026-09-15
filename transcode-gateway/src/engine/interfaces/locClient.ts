@@ -12,6 +12,7 @@ export interface LocRouteBinding {
   quoteVersion: string;
   constraintFingerprint: string;
   routeFingerprint: string;
+  settlementDomainId: string;
 }
 
 export interface LocRouteSnapshot {
@@ -25,6 +26,7 @@ export interface LocRouteSnapshot {
   pricePerWorkUnitWei: string;
   unitsPerPrice: string;
   binding: LocRouteBinding;
+  settlementDomainId: string;
   settlementKeys: SettlementKey[];
   workUnitEstimator: WorkUnitEstimator | null;
   job: PaidJobAxes | null;
@@ -41,6 +43,8 @@ export interface LocOpenJobInput {
   estimatedUnits: number;
   maxTotalUnits?: number;
   routeBinding: LocRouteBinding;
+  workloadRequestDigest: string;
+  callerPublicKey: string;
 }
 
 export interface LocOpenJobResult {
@@ -52,7 +56,10 @@ export interface LocOpenJobResult {
   transport: PaidJobTransport;
   workUnit: string;
   routeSnapshot: LocRouteSnapshot;
-  paymentEnvelope: string;
+  spendAuthorization: string;
+  paymentEnvelope: string | null;
+  expectedValueWei: string;
+  fundedValueWei: string;
   settleEndpoint: string;
   openedAt: string;
 }
@@ -79,8 +86,8 @@ export interface LocSettleJobResult {
   operationId: string;
   workId: string;
   actualUnits: number;
-  billedValueWei: number;
-  refundWei: number;
+  billedValueWei: string;
+  refundWei: string;
   outcome: string;
   closedAt: string;
 }
@@ -94,17 +101,41 @@ export interface LocOpenSessionInput {
   estimatedRunwayUnits: number;
   maxTotalUnits: number;
   routeBinding: LocRouteBinding;
+  gatewaySessionId: string;
+  preparationToken: string;
+  workloadRequestDigest: string;
+  callerPublicKey: string;
+}
+
+export interface LocPrepareSessionInput {
+  requestId: string;
+  capability: string;
+  offering: string;
+  descriptorSchema: string;
+  routeBinding: LocRouteBinding;
+}
+
+export interface LocPrepareSessionResult {
+  gatewaySessionId: string;
+  routeBinding: LocRouteBinding;
+  brokerUrl: string;
+  preparationToken: string;
+  expiresAt: string;
 }
 
 export interface LocOpenSessionResult {
   operationId: string;
+  gatewaySessionId: string;
   requestId: string;
   workId: string;
   brokerUrl: string;
   protocol: "paid-session/v1";
   session: PaidSessionAxes;
   routeSnapshot: LocRouteSnapshot;
-  paymentEnvelope: string;
+  spendAuthorization: string;
+  paymentEnvelope: string | null;
+  expectedValueWei: string;
+  fundedValueWei: string;
   refillEndpoint: string;
   closeEndpoint: string;
   openedAt: string;
@@ -123,26 +154,27 @@ export interface LocRefillSessionInput {
   operationId: string;
   requestId: string;
   observedConsumedUnits?: number;
-  rebindFrom?: string;
-  replacesRequestId?: string;
+  maxTotalUnits: number;
+  workloadRequestDigest: string;
 }
 
 export interface LocRefillSessionResult {
   workId: string;
   requestId: string;
   refillSequence: number;
-  paymentEnvelope: string;
-  fundedValueWei: number;
+  spendAuthorization: string;
+  paymentEnvelope: string | null;
+  expectedValueWei: string;
+  fundedValueWei: string;
   capStatus: LocCapStatus;
-  rebindFrom: string | null;
 }
 
 export interface LocSessionStatus {
   operationId: string;
   workId: string;
   state: string;
-  fundedValueWei: number;
-  billedValueWei: number;
+  fundedValueWei: string;
+  billedValueWei: string;
   refillCount: number;
   capStatus: LocCapStatus | null;
   actualUnits: number | null;
@@ -161,8 +193,8 @@ export interface LocCloseSessionResult {
   operationId: string;
   workId: string;
   actualUnits: number;
-  billedValueWei: number;
-  refundWei: number;
+  billedValueWei: string;
+  refundWei: string;
   outcome: string;
   closedAt: string;
 }
@@ -170,6 +202,7 @@ export interface LocCloseSessionResult {
 export interface LocClient {
   openJob(input: LocOpenJobInput): Promise<LocOpenJobResult>;
   settleJob(input: LocSettleJobInput): Promise<LocSettleJobResult>;
+  prepareSession(input: LocPrepareSessionInput): Promise<LocPrepareSessionResult>;
   openSession(input: LocOpenSessionInput): Promise<LocOpenSessionResult>;
   refillSession(input: LocRefillSessionInput): Promise<LocRefillSessionResult>;
   getSession(operationId: string): Promise<LocSessionStatus>;

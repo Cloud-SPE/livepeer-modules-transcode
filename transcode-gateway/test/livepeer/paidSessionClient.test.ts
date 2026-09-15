@@ -16,8 +16,10 @@ import {
 } from "../../src/livepeer/paidSessionClient.js";
 
 const operationId = "ae67b8f5-e381-4f01-9302-1957f26d82f2";
-const gatewaySessionId = "live-operation-1";
+const gatewaySessionId = "f00ac946-92f7-4b47-9231-ecc360ef4c68";
 const brokerSessionId = "broker-session-1";
+const settlementDomainId = `0x${"55".repeat(32)}`;
+const caller = { publicKey: `02${"66".repeat(32)}`, signAuthorization: () => "caller-proof" };
 const route = {
   workerUrl: "https://broker.example",
   ethAddress: `0x${"33".repeat(20)}`,
@@ -33,7 +35,6 @@ const route = {
     attachment: "external",
     metering: "runner-reported",
     refill: "extensible",
-    maxRotations: 3,
     heartbeat: { intervalSeconds: 10, missedThreshold: 3 },
     lease: { policy: "funding-tracking" },
   },
@@ -43,9 +44,11 @@ const route = {
   quoteVersion: "1",
   constraintFingerprint: Buffer.from("11".repeat(32), "hex"),
   routeFingerprint: Buffer.from("22".repeat(32), "hex"),
+  settlementDomainId,
 } satisfies SelectedWorkerRoute;
 const opened: LocOpenSessionResult = {
   operationId,
+  gatewaySessionId,
   requestId: "broker-open-request-1",
   workId: "work-1",
   brokerUrl: route.workerUrl,
@@ -66,7 +69,9 @@ const opened: LocOpenSessionResult = {
       quoteVersion: route.quoteVersion,
       constraintFingerprint: "11".repeat(32),
       routeFingerprint: "22".repeat(32),
+      settlementDomainId,
     },
+    settlementDomainId,
     settlementKeys: [],
     workUnitEstimator: null,
     job: null,
@@ -74,7 +79,10 @@ const opened: LocOpenSessionResult = {
     extra: {},
     raw: {},
   },
-  paymentEnvelope: "open-payment",
+  spendAuthorization: Buffer.from("open-authorization").toString("base64"),
+  paymentEnvelope: null,
+  expectedValueWei: "0",
+  fundedValueWei: "0",
   refillEndpoint: `/v1/sessions/${operationId}/refill`,
   closeEndpoint: `/v1/sessions/${operationId}/close`,
   openedAt: "2026-08-24T00:00:00Z",
@@ -83,6 +91,13 @@ const balance = {
   claimed_units: 12,
   debited_units: 12,
   unit: route.workUnit,
+  authorization_id: "work-1",
+  authorization_max_units: 60,
+  authorization_cap_remaining_units: 48,
+  authorization_reserved_value_wei: "48",
+  cumulative_billed_value_wei: "12",
+  account_available_value_wei: "1000",
+  account_version: 1,
   runway_units: 48,
   runway_seconds_estimate: 48,
   status: "ok",
@@ -107,6 +122,8 @@ function signedSettlement(overrides: Record<string, unknown> = {}) {
       session_id: brokerSessionId,
       gateway_session_id: gatewaySessionId,
       work_id: "work-1",
+      authorization_id: "work-1",
+      settlement_domain_id: settlementDomainId,
       predecessor_work_id: "",
       rotation_generation: 0,
       settlement_seq: "1",
@@ -130,6 +147,15 @@ function fakeLoc() {
   const refills: LocRefillSessionInput[] = [];
   const closes: LocCloseSessionInput[] = [];
   const loc: LocClient = {
+    async prepareSession(input) {
+      return {
+        gatewaySessionId,
+        routeBinding: input.routeBinding,
+        brokerUrl: route.workerUrl,
+        preparationToken: "prepared-token",
+        expiresAt: "2026-08-24T00:05:00Z",
+      };
+    },
     async openSession(input) {
       opens.push(input);
       return opened;
@@ -137,11 +163,13 @@ function fakeLoc() {
     async refillSession(input) {
       refills.push(input);
       return {
-        workId: input.rebindFrom ? "work-2" : "work-1",
+        workId: "work-2",
         requestId: "broker-refill-request-1",
         refillSequence: 1,
-        paymentEnvelope: "refill-payment",
-        fundedValueWei: 100,
+        spendAuthorization: Buffer.from("refill-authorization").toString("base64"),
+        paymentEnvelope: null,
+        expectedValueWei: "0",
+        fundedValueWei: "0",
         capStatus: {
           sessionPctUsed: 0.5,
           spendPeriodPctUsed: null,
@@ -150,7 +178,6 @@ function fakeLoc() {
           willRefuseNextRefill: false,
           winddownReason: null,
         },
-        rebindFrom: input.rebindFrom ?? null,
       };
     },
     async getSession() {
@@ -162,8 +189,8 @@ function fakeLoc() {
         operationId,
         workId: "work-1",
         actualUnits: input.actualUnits,
-        billedValueWei: 12,
-        refundWei: 88,
+        billedValueWei: "12",
+        refundWei: "88",
         outcome: input.outcome,
         closedAt: "2026-08-24T00:10:00Z",
       };
@@ -205,13 +232,13 @@ test("paid session open replays identical LOC and broker content while returning
   const { loc, opens } = fakeLoc();
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = createPaidSessionClient(loc, {
+    caller,
     fetch: async (url, init) => {
       calls.push({ url: String(url), init });
       return Response.json(openResponse(), { status: 201 });
     },
   });
   const input = {
-    gatewaySessionId,
     requestId: "gateway-open-1",
     route,
     descriptorSchema: "rtmp-hls/v1",
@@ -230,12 +257,56 @@ test("paid session open replays identical LOC and broker content while returning
   const headers = new Headers(calls[0]?.init?.headers);
   assert.equal(headers.get(HEADER.PROTOCOL), "paid-session/v1");
   assert.equal(headers.get(HEADER.REQUEST_ID), opened.requestId);
-  assert.equal(headers.get(HEADER.PAYMENT), opened.paymentEnvelope);
+  assert.equal(headers.get(HEADER.AUTHORIZATION), opened.spendAuthorization);
+  assert.equal(headers.get(HEADER.CALLER_PROOF), "caller-proof");
+  assert.equal(headers.has(HEADER.PAYMENT), false);
+});
+
+test("post-admission live capacity settles zero with LOC before surfacing the refusal", async () => {
+  const { loc, closes } = fakeLoc();
+  const client = createPaidSessionClient(loc, {
+    caller,
+    fetch: async () => Response.json({
+      error: { code: "capacity_exhausted", message: "no runner capacity" },
+      session_id: brokerSessionId,
+      gateway_session_id: gatewaySessionId,
+      work_id: "work-1",
+      settlement_url: `https://broker.example/v1/settlement/${brokerSessionId}`,
+    }, {
+      status: 503,
+      headers: {
+        [HEADER.ERROR]: "capacity_exhausted",
+        [HEADER.WORK_UNITS]: "0",
+        [HEADER.SETTLEMENT]: encodedSettlement({
+          actual_units: "0",
+          billed_units: "0",
+          claimed_units: "0",
+          debited_units: "0",
+        }),
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.open({
+      requestId: "gateway-open-1",
+      route,
+      descriptorSchema: "rtmp-hls/v1",
+      sessionParams: { publisher_mode: "gateway-relay" },
+      estimatedRunwayUnits: 60,
+      maxTotalUnits: 3_600,
+    }),
+    (error: unknown) => error instanceof PaidSessionClientError &&
+      error.code === "capacity_exhausted" && error.retryable,
+  );
+  assert.equal(closes.length, 1);
+  assert.equal(closes[0]?.actualUnits, 0);
 });
 
 test("stream-key issuance consumes only its scoped grant and replays byte-identically", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = createPaidSessionClient(fakeLoc().loc, {
+    caller,
     fetch: async (url, init) => {
       calls.push({ url: String(url), init });
       return Response.json({
@@ -270,6 +341,7 @@ test("stream-key issuance consumes only its scoped grant and replays byte-identi
 test("stream-key issuance rejects malformed or unscoped grant evidence", async () => {
   let fetched = false;
   const client = createPaidSessionClient(fakeLoc().loc, {
+    caller,
     fetch: async () => {
       fetched = true;
       return Response.json({});
@@ -289,10 +361,12 @@ test("stream-key issuance rejects malformed or unscoped grant evidence", async (
 
 test("status is authoritative and never has a credential or grant field", async () => {
   const client = createPaidSessionClient(fakeLoc().loc, {
+    caller,
     fetch: async () => Response.json({
       session_id: brokerSessionId,
       gateway_session_id: gatewaySessionId,
       work_id: "work-1",
+      authorization_id: "work-1",
       state: "active",
       runtime: { schema: "rtmp-hls/v1", public: { hls_url: "https://runner.example/live/index.m3u8" } },
       usage: { unit: route.workUnit, claimed_total: 12 },
@@ -316,10 +390,12 @@ test("status is authoritative and never has a credential or grant field", async 
 
 test("status from a pre-output-health broker is represented as unknown", async () => {
   const client = createPaidSessionClient(fakeLoc().loc, {
+    caller,
     fetch: async () => Response.json({
       session_id: brokerSessionId,
       gateway_session_id: gatewaySessionId,
       work_id: "work-1",
+      authorization_id: "work-1",
       state: "active",
       runtime: { schema: "rtmp-hls/v1", public: {} },
       usage: { unit: route.workUnit, claimed_total: 0 },
@@ -335,10 +411,11 @@ test("status from a pre-output-health broker is represented as unknown", async (
   assert.equal(result.lastFailureCode, null);
 });
 
-test("refill keeps its durable request identity and atomically forwards recipient rebind", async () => {
+test("refill keeps its durable request identity and forwards a successor authorization", async () => {
   const { loc, refills } = fakeLoc();
   const calls: RequestInit[] = [];
   const client = createPaidSessionClient(loc, {
+    caller,
     fetch: async (_url, init) => {
       calls.push(init ?? {});
       return Response.json({
@@ -355,28 +432,30 @@ test("refill keeps its durable request identity and atomically forwards recipien
     credential: "session-credential",
     requestId: "gateway-refill-1",
     observedConsumedUnits: 12,
-    rebindFrom: "work-1",
-    replacesRequestId: "broker-refill-old",
+    maxTotalUnits: 120,
   };
   await client.refill(input);
   await client.refill(input);
   assert.deepEqual(refills[0], refills[1]);
   const headers = new Headers(calls[0]?.headers);
   assert.equal(headers.get(HEADER.REQUEST_ID), "broker-refill-request-1");
-  assert.equal(headers.get(HEADER.REBIND_FROM), "work-1");
-  assert.equal(headers.get(HEADER.PAYMENT), "refill-payment");
+  assert.equal(headers.get(HEADER.AUTHORIZATION), Buffer.from("refill-authorization").toString("base64"));
+  assert.equal(headers.get(HEADER.CALLER_PROOF), "caller-proof");
+  assert.equal(headers.has(HEADER.PAYMENT), false);
+  assert.equal(calls[0]?.body, "{}");
 });
 
-test("refill exposes LOC recipient rotation as a typed recoverable session outcome", async () => {
+test("refill exposes a typed LOC refusal without calling the broker", async () => {
   const { loc } = fakeLoc();
   loc.refillSession = async () => {
     throw new LocTransportError("loc_http_error", {
       status: 409,
-      remoteCode: "INVALID_RECIPIENT_RAND",
-      retryable: true,
+      remoteCode: "session_cap_exceeded",
+      retryable: false,
     });
   };
   const client = createPaidSessionClient(loc, {
+    caller,
     fetch: async () => { throw new Error("broker must not receive an invalid payment"); },
   });
 
@@ -387,11 +466,12 @@ test("refill exposes LOC recipient rotation as a typed recoverable session outco
       credential: "session-credential",
       requestId: "gateway-refill-1",
       observedConsumedUnits: 12,
+      maxTotalUnits: 120,
     }),
     (error: unknown) =>
       error instanceof PaidSessionClientError &&
-      error.code === "INVALID_RECIPIENT_RAND" &&
-      error.retryable,
+      error.code === "session_cap_exceeded" &&
+      !error.retryable,
   );
 });
 
@@ -399,6 +479,7 @@ test("end retrieves the authoritative settlement by gateway id and closes LOC on
   const { loc, closes } = fakeLoc();
   const urls: string[] = [];
   const client = createPaidSessionClient(loc, {
+    caller,
     fetch: async (url) => {
       urls.push(String(url));
       if (String(url).includes("/settlement/")) {
@@ -406,6 +487,7 @@ test("end retrieves the authoritative settlement by gateway id and closes LOC on
           session_id: brokerSessionId,
           gateway_session_id: gatewaySessionId,
           work_id: "work-1",
+          authorization_id: "work-1",
           predecessor_work_id: "",
           rotation_generation: 0,
           state: "closed",
@@ -438,14 +520,21 @@ test("end retrieves the authoritative settlement by gateway id and closes LOC on
 });
 
 test("terminal identity drift and debit failure are rejected before LOC close", async () => {
-  for (const overrides of [{ gateway_session_id: "other" }, { outcome: "DEBIT_FAILED" }]) {
+  for (const overrides of [
+    { gateway_session_id: "other" },
+    { outcome: "DEBIT_FAILED" },
+    { authorization_id: "other" },
+    { settlement_domain_id: `0x${"77".repeat(32)}` },
+  ]) {
     const { loc, closes } = fakeLoc();
     const client = createPaidSessionClient(loc, {
+      caller,
       fetch: async (url) => String(url).includes("/settlement/")
         ? Response.json({
             session_id: brokerSessionId,
             gateway_session_id: gatewaySessionId,
             work_id: "work-1",
+            authorization_id: "work-1",
             predecessor_work_id: "",
             rotation_generation: 0,
             state: "closed",

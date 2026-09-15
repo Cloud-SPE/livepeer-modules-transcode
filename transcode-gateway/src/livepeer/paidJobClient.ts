@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type {
   LocClient,
   LocOpenJobResult,
@@ -13,6 +14,7 @@ import { PaidJobClientError } from "../engine/interfaces/index.js";
 import { HEADER } from "./headers.js";
 import { routeBindingFor } from "./locClient.js";
 import { classifyV2Failure } from "./v2Outcome.js";
+import type { CallerProofIdentity } from "./callerProof.js";
 
 const PROTOCOL = "paid-job/v1";
 const UINT64 = /^(0|[1-9][0-9]*)$/;
@@ -50,6 +52,7 @@ const settlementWire = z
 
 export interface PaidJobClientOptions {
   fetch?: typeof globalThis.fetch;
+  caller: CallerProofIdentity;
   accountingPollAttempts?: number;
   accountingPollDelayMs?: number;
   delay?: (milliseconds: number) => Promise<void>;
@@ -57,7 +60,7 @@ export interface PaidJobClientOptions {
 
 export function createPaidJobClient(
   loc: LocClient,
-  options: PaidJobClientOptions = {},
+  options: PaidJobClientOptions,
 ): PaidJobClient {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const pollAttempts = options.accountingPollAttempts ?? 8;
@@ -79,15 +82,19 @@ export function createPaidJobClient(
         estimatedUnits: input.estimatedUnits,
         ...(input.maxTotalUnits === undefined ? {} : { maxTotalUnits: input.maxTotalUnits }),
         routeBinding: routeBindingFor(input.route),
+        workloadRequestDigest: createHash("sha256").update(input.body).digest("hex"),
+        callerPublicKey: options.caller.publicKey,
       });
       const headers = new Headers({
         [HEADER.CAPABILITY]: opened.routeSnapshot.capability,
         [HEADER.OFFERING]: opened.routeSnapshot.offering,
-        [HEADER.PAYMENT]: opened.paymentEnvelope,
+        [HEADER.AUTHORIZATION]: opened.spendAuthorization,
+        [HEADER.CALLER_PROOF]: options.caller.signAuthorization(opened.spendAuthorization),
         [HEADER.PROTOCOL]: PROTOCOL,
         [HEADER.REQUEST_ID]: opened.requestId,
         "Content-Type": input.contentType,
       });
+      if (opened.paymentEnvelope) headers.set(HEADER.PAYMENT, opened.paymentEnvelope);
       if (input.transport === "stream") headers.set("Accept", "text/event-stream");
 
       let response: Response;
@@ -117,6 +124,26 @@ export function createPaidJobClient(
       const brokerBody = new Uint8Array(await response.arrayBuffer());
       if (!response.ok) {
         const error = brokerError(response, brokerBody);
+        if (error.code === "capacity_exhausted") {
+          const brokerJobId = response.headers.get(HEADER.JOB_ID);
+          const encodedSettlement = response.headers.get(HEADER.SETTLEMENT);
+          const units = response.headers.get(HEADER.WORK_UNITS);
+          const unit = response.headers.get(HEADER.WORK_UNIT);
+          if (brokerJobId && encodedSettlement && units === "0" && unit) {
+            await settle(loc, opened, {
+              brokerJobId,
+              actualUnits: 0,
+              workUnit: unit,
+              envelope: decodeSettlement(encodedSettlement),
+            }, undefined, brokerBody);
+          } else {
+            const recovered = await recover(opened);
+            if (recovered.kind !== "settled" || recovered.settlement.actualUnits !== 0) {
+              throw new PaidJobClientError("paid_job_outcome_unknown", { retryable: true });
+            }
+          }
+          throw error;
+        }
         if (error.code === "job_in_flight" || error.code === "accounting_pending") {
           const recovered = await recover(opened);
           return recovered.kind === "settled"
@@ -282,6 +309,8 @@ function validateSettlement(
     requiredString(payload.request_id) !== opened.requestId ||
     requiredString(payload.job_id) !== claim.brokerJobId ||
     requiredString(payload.work_id) !== opened.workId ||
+    requiredString(payload.authorization_id) !== opened.workId ||
+    requiredString(payload.settlement_domain_id) !== opened.routeSnapshot.settlementDomainId ||
     requiredString(payload.work_unit_name) !== opened.workUnit ||
     claim.workUnit !== opened.workUnit ||
     actualUnits !== claim.actualUnits ||

@@ -147,6 +147,7 @@ function route(): SelectedWorkerRoute {
     pricePerWorkUnitWei: "1",
     unitsPerPrice: "1",
     workUnit: "video-frame-megapixel",
+    settlementDomainId: `0x${"ab".repeat(32)}`,
     protocol: "paid-job/v1",
     job: { transports: ["stream"] },
     session: null,

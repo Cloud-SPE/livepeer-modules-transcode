@@ -90,14 +90,19 @@ for 32 random bytes held outside Postgres) and an operator-visible
 paid work fails closed before route selection until durable encrypted operation
 storage is configured.
 
-The LOC boundary is enabled only when `LIVEPEER_LOC_URL` and
-`LIVEPEER_LOC_API_KEY` are both set; partial configuration fails startup.
+The LOC boundary is enabled only when `LIVEPEER_LOC_URL`,
+`LIVEPEER_LOC_API_KEY`, and `LIVEPEER_CALLER_PRIVATE_KEY` are set; partial
+configuration fails startup. The caller key is a lowercase 32-byte secp256k1
+private scalar delegated to this gateway. Keep it in the secret manager and
+stable across restart so replayed operations retain the same caller identity;
+drain paid work before rotating it.
 `LIVEPEER_LOC_TIMEOUT_MS` defaults to 15 seconds and
 `LIVEPEER_LOC_CLIENT_ID` defaults to `livepeer-modules-transcode/0.0.0`.
 The gateway sends the credential only to `/v1/*` paths on the configured
 origin, refuses redirects, requires a caller-owned idempotency key for every
-mutation, and never includes LOC response bodies or credentials in transport
-errors.
+mutation, and signs each opaque LOC authorization with the delegated caller
+key. It never includes LOC response bodies, authorizations, proofs, or
+credentials in transport errors.
 
 The v2 cutover has no direct payer compatibility path. Startup rejects
 `LIVEPEER_PAYER_SOCKET`, `LIVEPEER_PAYER_PROTO_ROOT`,
@@ -113,10 +118,14 @@ default to 5 seconds, 60 seconds, and 2 seconds respectively and are controlled
 by `VOD_RECOVERY_INTERVAL_MS`, `VOD_RECOVERY_LEASE_MS`, and
 `VOD_RECOVERY_RETRY_MS`.
 
+VOD creation selects the Modules catalog's `video:transcode.abr` /
+`abr-default` route unless the caller or deployment explicitly chooses another
+offering.
+
 Live creation uses only `paid-session/v1` with gateway-owned public RTMP
 ingest. Set `LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL`, keep `RTMP_RELAY_ENABLED`
 enabled, and configure LOC plus the operation-secrets key. The default live
-offering is `live-standard`; finite funding defaults to 60 initial
+offering is `gateway-ingest`; finite funding defaults to 60 initial
 `output_seconds` and a 3,600-unit lifetime ceiling through
 `LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS` and `LIVEPEER_LIVE_MAX_TOTAL_UNITS`.
 Authoritative live reconciliation defaults to every 5 seconds. The gateway

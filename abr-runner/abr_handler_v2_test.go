@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -261,7 +263,7 @@ func newTestABRHandlerV2(t *testing.T, executor *fakeABRExecutorV2) (*ABRHandler
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := NewABRExecutionCoordinatorV2(store, executor, 2)
+	coordinator, err := NewABRExecutionCoordinatorV2(store, executor, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,6 +273,42 @@ func newTestABRHandlerV2(t *testing.T, executor *fakeABRExecutorV2) (*ABRHandler
 	}
 	handler.keepalive = 10 * time.Millisecond
 	return handler, executor, store
+}
+
+func TestABRSharedGPUAdmissionRejectsActiveLiveCohort(t *testing.T) {
+	directory := t.TempDir()
+	gate, err := transcode.NewGPUAdmissionGate(filepath.Join(directory, "gpu.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveLease, err := gate.Acquire(transcode.GPUAdmissionLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveLease.Close()
+	store, err := NewFileWorkloadStoreV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeABRExecutorV2{}
+	coordinator, err := NewABRExecutionCoordinatorV2(store, executor, 4, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testABRRequestV2("gpu-admission")
+	hash, err := RequestContentSHA256V2(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LoadOrCreate(request.WorkloadID, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := coordinator.Subscribe(request, hash, testABRPresetV2()); !errors.Is(err, errABRExecutionCapacityV2) {
+		t.Fatalf("subscribe error=%v, want capacity", err)
+	}
+	if coordinator.gpuAdmissionRejected.Load() != 1 || coordinator.Active() != 0 {
+		t.Fatalf("rejections=%d active=%d", coordinator.gpuAdmissionRejected.Load(), coordinator.Active())
+	}
 }
 
 func performABRRequestV2(t *testing.T, handler http.Handler, req ABRWorkloadRequestV2) *httptest.ResponseRecorder {

@@ -5,6 +5,8 @@ import type {
   LocOpenJobResult,
   LocOpenSessionInput,
   LocOpenSessionResult,
+  LocPrepareSessionInput,
+  LocPrepareSessionResult,
   LocRouteBinding,
   LocRouteSnapshot,
   LocCloseSessionInput,
@@ -30,6 +32,7 @@ const canonicalUint64 = z
   .regex(/^(0|[1-9][0-9]*)$/)
   .refine((value) => BigInt(value) <= UINT64_MAX);
 const positiveUint64 = canonicalUint64.refine((value) => value !== "0");
+const weiDecimal = z.string().regex(/^(0|[1-9][0-9]*)$/);
 const fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
 const httpUrl = z.string().url().refine((value) => {
   const url = new URL(value);
@@ -45,6 +48,7 @@ const routeBindingWire = z
     quote_version: positiveUint64,
     constraint_fingerprint: fingerprint,
     route_fingerprint: fingerprint,
+    settlement_domain_id: z.string().regex(/^0x[0-9a-f]{64}$/),
   })
   .strict();
 const settlementKeyWire = z
@@ -79,6 +83,7 @@ const routeSnapshotWire = z
     quote_version: positiveUint64,
     constraint_fingerprint: fingerprint,
     route_fingerprint: fingerprint,
+    settlement_domain_id: z.string().regex(/^0x[0-9a-f]{64}$/),
     settlement_keys: z.array(settlementKeyWire).min(1),
     work_unit_estimator: estimatorWire.nullable().optional(),
     job: z.unknown().nullable().optional(),
@@ -91,11 +96,20 @@ const commonOpen = {
   work_id: z.string().min(1),
   broker_url: httpUrl,
   route_snapshot: routeSnapshotWire,
-  payment_envelope: z.string().min(1),
-  expected_value_wei: z.number().int().nonnegative(),
-  funded_value_wei: z.number().int().nonnegative(),
+  spend_authorization: z.string().min(1),
+  payment_envelope: z.string().min(1).nullable().optional(),
+  accounting_mode: z.literal("wholesale_account"),
+  expected_value_wei: weiDecimal,
+  funded_value_wei: weiDecimal,
   opened_at: z.string().min(1),
 };
+const prepareSessionWire = z.object({
+  gateway_session_id: z.string().uuid(),
+  route_binding: routeBindingWire,
+  broker_url: httpUrl,
+  preparation_token: z.string().min(1),
+  expires_at: z.string().min(1),
+}).strict();
 const jobOpenWire = z
   .object({
     ...commonOpen,
@@ -133,8 +147,8 @@ const settleJobWire = z
     job_id: z.string().uuid(),
     work_id: z.string().min(1),
     actual_units: z.number().int().nonnegative(),
-    billed_value_wei: z.number().int().nonnegative(),
-    refund_wei: z.number().int().nonnegative(),
+    billed_value_wei: weiDecimal,
+    refund_wei: weiDecimal,
     outcome: z.string().min(1),
     closed_at: z.string().min(1),
     cap_status: z.unknown(),
@@ -155,11 +169,12 @@ const refillSessionWire = z
     work_id: z.string().min(1),
     request_id: z.string().min(1),
     refill_seq: z.number().int().nonnegative(),
-    payment_envelope: z.string().min(1),
-    expected_value_wei: z.number().int().nonnegative(),
-    funded_value_wei: z.number().int().nonnegative(),
+    spend_authorization: z.string().min(1),
+    payment_envelope: z.string().min(1).nullable().optional(),
+    accounting_mode: z.literal("wholesale_account"),
+    expected_value_wei: weiDecimal,
+    funded_value_wei: weiDecimal,
     cap_status: capStatusWire,
-    rebind_from: z.string().nullable().optional(),
   })
   .strict();
 const sessionStatusWire = z
@@ -172,8 +187,8 @@ const sessionStatusWire = z
     state: z.string().min(1),
     estimated_units: z.number().int().positive(),
     max_total_units: z.number().int().positive(),
-    funded_value_wei: z.number().int().nonnegative(),
-    billed_value_wei: z.number().int().nonnegative(),
+    funded_value_wei: weiDecimal,
+    billed_value_wei: weiDecimal,
     refill_count: z.number().int().nonnegative(),
     cap_status: capStatusWire.nullable(),
     opened_at: z.string().min(1),
@@ -187,8 +202,8 @@ const closeSessionWire = z
     session_id: z.string().uuid(),
     work_id: z.string().min(1),
     actual_units: z.number().int().nonnegative(),
-    billed_value_wei: z.number().int().nonnegative(),
-    refund_wei: z.number().int().nonnegative(),
+    billed_value_wei: weiDecimal,
+    refund_wei: weiDecimal,
     outcome: z.string().min(1),
     closed_at: z.string().min(1),
   })
@@ -199,7 +214,8 @@ export function routeBindingFor(route: SelectedWorkerRoute): LocRouteBinding {
     !route.quoteId ||
     !route.quoteVersion ||
     !route.constraintFingerprint ||
-    !route.routeFingerprint
+    !route.routeFingerprint ||
+    !route.settlementDomainId
   ) {
     throw invalidRequest();
   }
@@ -208,6 +224,7 @@ export function routeBindingFor(route: SelectedWorkerRoute): LocRouteBinding {
     quote_version: route.quoteVersion,
     constraint_fingerprint: hexFingerprint(route.constraintFingerprint),
     route_fingerprint: hexFingerprint(route.routeFingerprint),
+    settlement_domain_id: route.settlementDomainId,
   };
   const parsed = routeBindingWire.safeParse(candidate);
   if (!parsed.success) throw invalidRequest();
@@ -232,10 +249,28 @@ export function createLocClient(transport: LocTransport): LocClient {
             ? {}
             : { max_total_units: input.maxTotalUnits }),
           route_binding: routeBinding,
+          workload_request_digest: input.workloadRequestDigest,
+          caller_public_key: input.callerPublicKey,
         },
         schema: jobOpenWire,
       });
       return mapJobOpen(response, input);
+    },
+
+    async prepareSession(input) {
+      const response = await transport.request({
+        method: "POST",
+        path: "/v1/sessions/prepare",
+        idempotencyKey: `${input.requestId}:prepare`,
+        body: {
+          capability: input.capability,
+          offering: input.offering,
+          descriptor_schema: input.descriptorSchema,
+          route_binding: bindingToWire(input.routeBinding),
+        },
+        schema: prepareSessionWire,
+      });
+      return mapPreparedSession(response, input);
     },
 
     async settleJob(input) {
@@ -271,6 +306,10 @@ export function createLocClient(transport: LocTransport): LocClient {
           estimated_runway_units: input.estimatedRunwayUnits,
           max_total_units: input.maxTotalUnits,
           route_binding: routeBinding,
+          gateway_session_id: input.gatewaySessionId,
+          preparation_token: input.preparationToken,
+          workload_request_digest: input.workloadRequestDigest,
+          caller_public_key: input.callerPublicKey,
         },
         schema: sessionOpenWire,
       });
@@ -287,12 +326,8 @@ export function createLocClient(transport: LocTransport): LocClient {
           ...(input.observedConsumedUnits === undefined
             ? {}
             : { observed_consumed_units: input.observedConsumedUnits }),
-          ...(input.rebindFrom === undefined
-            ? {}
-            : {
-                rebind_from: input.rebindFrom,
-                replaces_request_id: input.replacesRequestId,
-              }),
+          max_total_units: input.maxTotalUnits,
+          workload_request_digest: input.workloadRequestDigest,
         },
         schema: refillSessionWire,
       });
@@ -331,17 +366,29 @@ function mapRefill(
   value: z.infer<typeof refillSessionWire>,
   input: LocRefillSessionInput,
 ): LocRefillSessionResult {
-  if (
-    (value.rebind_from ?? null) !== (input.rebindFrom ?? null)
-  ) throw invalidResponse();
   return {
     workId: value.work_id,
     requestId: value.request_id,
     refillSequence: value.refill_seq,
-    paymentEnvelope: value.payment_envelope,
+    spendAuthorization: value.spend_authorization,
+    paymentEnvelope: value.payment_envelope ?? null,
+    expectedValueWei: value.expected_value_wei,
     fundedValueWei: value.funded_value_wei,
     capStatus: mapCapStatus(value.cap_status),
-    rebindFrom: value.rebind_from ?? null,
+  };
+}
+
+function mapPreparedSession(
+  value: z.infer<typeof prepareSessionWire>,
+  input: LocPrepareSessionInput,
+): LocPrepareSessionResult {
+  if (!sameBinding(bindingFromWire(value.route_binding), input.routeBinding)) throw invalidResponse();
+  return {
+    gatewaySessionId: value.gateway_session_id,
+    routeBinding: bindingFromWire(value.route_binding),
+    brokerUrl: value.broker_url,
+    preparationToken: value.preparation_token,
+    expiresAt: value.expires_at,
   };
 }
 
@@ -441,7 +488,10 @@ function mapJobOpen(
     transport: value.transport,
     workUnit: value.work_unit,
     routeSnapshot,
-    paymentEnvelope: value.payment_envelope,
+    spendAuthorization: value.spend_authorization,
+    paymentEnvelope: value.payment_envelope ?? null,
+    expectedValueWei: value.expected_value_wei,
+    fundedValueWei: value.funded_value_wei,
     settleEndpoint: value.settle_endpoint,
     openedAt: value.opened_at,
   };
@@ -468,13 +518,17 @@ function mapSessionOpen(
   }
   return {
     operationId: value.session_id,
+    gatewaySessionId: input.gatewaySessionId,
     requestId: value.request_id,
     workId: value.work_id,
     brokerUrl: value.broker_url,
     protocol: value.protocol,
     session: declaration.session,
     routeSnapshot,
-    paymentEnvelope: value.payment_envelope,
+    spendAuthorization: value.spend_authorization,
+    paymentEnvelope: value.payment_envelope ?? null,
+    expectedValueWei: value.expected_value_wei,
+    fundedValueWei: value.funded_value_wei,
     refillEndpoint: value.refill_endpoint,
     closeEndpoint: value.close_endpoint,
     openedAt: value.opened_at,
@@ -518,7 +572,9 @@ function mapRouteSnapshot(value: z.infer<typeof routeSnapshotWire>): LocRouteSna
       quote_version: value.quote_version,
       constraint_fingerprint: value.constraint_fingerprint,
       route_fingerprint: value.route_fingerprint,
+      settlement_domain_id: value.settlement_domain_id,
     }),
+    settlementDomainId: value.settlement_domain_id,
     settlementKeys,
     workUnitEstimator: estimator,
     job: axes.job,
@@ -549,6 +605,7 @@ function bindingToWire(value: LocRouteBinding): z.infer<typeof routeBindingWire>
     quote_version: value.quoteVersion,
     constraint_fingerprint: value.constraintFingerprint,
     route_fingerprint: value.routeFingerprint,
+    settlement_domain_id: value.settlementDomainId,
   });
   if (!parsed.success) throw invalidRequest();
   return parsed.data;
@@ -560,6 +617,7 @@ function bindingFromWire(value: z.infer<typeof routeBindingWire>): LocRouteBindi
     quoteVersion: value.quote_version,
     constraintFingerprint: value.constraint_fingerprint,
     routeFingerprint: value.route_fingerprint,
+    settlementDomainId: value.settlement_domain_id,
   };
 }
 
@@ -594,9 +652,9 @@ function validateRefill(input: LocRefillSessionInput): void {
     input.requestId.length === 0 ||
     (input.observedConsumedUnits !== undefined &&
       (!Number.isSafeInteger(input.observedConsumedUnits) || input.observedConsumedUnits < 0)) ||
-    ((input.rebindFrom === undefined) !== (input.replacesRequestId === undefined)) ||
-    (input.rebindFrom !== undefined && input.rebindFrom.length === 0) ||
-    (input.replacesRequestId !== undefined && input.replacesRequestId.length === 0)
+    !Number.isSafeInteger(input.maxTotalUnits) ||
+    input.maxTotalUnits < 1 ||
+    !fingerprint.safeParse(input.workloadRequestDigest).success
   ) throw invalidRequest();
 }
 
@@ -671,7 +729,8 @@ function sameBinding(left: LocRouteBinding, right: LocRouteBinding): boolean {
     left.quoteId === right.quoteId &&
     left.quoteVersion === right.quoteVersion &&
     left.constraintFingerprint === right.constraintFingerprint &&
-    left.routeFingerprint === right.routeFingerprint
+    left.routeFingerprint === right.routeFingerprint &&
+    left.settlementDomainId === right.settlementDomainId
   );
 }
 

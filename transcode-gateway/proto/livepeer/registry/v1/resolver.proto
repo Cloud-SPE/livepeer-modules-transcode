@@ -78,6 +78,7 @@ message SelectedRoute {
 
   // Client-side funding-ceiling estimator, when the route declares one.
   Estimator work_unit_estimator = 16;
+  string settlement_domain_id = 17;
 }
 
 message SettlementKey {

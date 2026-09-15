@@ -29,17 +29,47 @@ x-nvidia: &nvidia
             capabilities: [gpu]
 
 services:
+  gpu-admission-init:
+    platform: linux/amd64
+    image: ${LIVE_NVIDIA_IMAGE}
+    pull_policy: always
+    user: "0:0"
+    read_only: true
+    restart: "no"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - |
+        mkdir -p /var/lib/livepeer-gpu-admission
+        touch "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.mutex"
+        touch "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.batch"
+        touch "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.live"
+        chmod 0666 "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.mutex" "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.batch" "/var/lib/livepeer-gpu-admission/$${NVIDIA_GPU_ID}.live"
+    environment:
+      NVIDIA_GPU_ID: ${NVIDIA_GPU_ID}
+    volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
+
   transcode-runner:
     <<: [*runner, *nvidia]
     image: tztcloud/transcode-runner-nvidia:v2.0.0@sha256:7f92ba9b6f9c04f77279cf2f0ddd7aad48ec1704c65e3ee87ed9898777e5e6bc
     environment:
       MAX_QUEUE_SIZE: ${VOD_MAX_QUEUE_SIZE:-1}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/${NVIDIA_GPU_ID}
       METRICS_ENABLED: "true"
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
     ports:
       - "${VOD_BIND_IP:-0.0.0.0}:${VOD_PORT:-18080}:8080"
     volumes:
       - transcode-runner-state:/var/lib/transcode-runner
+      - gpu-admission:/var/lib/livepeer-gpu-admission
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     networks: [runners]
 
   abr-runner:
@@ -47,12 +77,17 @@ services:
     image: tztcloud/abr-runner-nvidia:v2.0.0@sha256:abbbab2e145f1910c68debd83a3bb60da0a8ff8d6b6d456b279bb06d6992386d
     environment:
       MAX_QUEUE_SIZE: ${ABR_MAX_QUEUE_SIZE:-1}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/${NVIDIA_GPU_ID}
       METRICS_ENABLED: "true"
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
     ports:
       - "${ABR_BIND_IP:-0.0.0.0}:${ABR_PORT:-18180}:8080"
     volumes:
       - abr-runner-state:/var/lib/abr-runner
+      - gpu-admission:/var/lib/livepeer-gpu-admission
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     networks: [runners]
 
   live-runner:
@@ -63,6 +98,7 @@ services:
       LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN}
       LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN}
       LIVE_RUNNER_MAX_CONCURRENT: "1"
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/${NVIDIA_GPU_ID}
       LIVE_RUNNER_HARDWARE: nvidia
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL}
       LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL}
@@ -72,6 +108,10 @@ services:
       - "${LIVE_RTMP_BIND_IP:-0.0.0.0}:${LIVE_RTMP_PORT:-1935}:1935"
     volumes:
       - live-runner-state:/var/lib/live-runner
+      - gpu-admission:/var/lib/livepeer-gpu-admission
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     networks: [runners]
 
 networks:
@@ -82,3 +122,4 @@ volumes:
   transcode-runner-state:
   abr-runner-state:
   live-runner-state:
+  gpu-admission:

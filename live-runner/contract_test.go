@@ -46,6 +46,29 @@ func TestContractFixturesValidate(t *testing.T) {
 	}
 }
 
+func TestCreateRequestAcceptsBoundedOpaqueAuthorizationWorkID(t *testing.T) {
+	request := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	request.WorkID = "loc-auth:ce3fa091-844e-4004-b532-39d7d935061f"
+	if err := ValidateCreateRequestV1(request); err != nil {
+		t.Fatalf("valid LOC authorization id rejected: %v", err)
+	}
+
+	for name, workID := range map[string]string{
+		"empty":     "",
+		"oversized": "a" + strings.Repeat("b", 128),
+		"space":     "loc-auth:unsafe id",
+		"slash":     "loc-auth/unsafe",
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := request
+			invalid.WorkID = workID
+			if err := ValidateCreateRequestV1(invalid); err == nil {
+				t.Fatalf("invalid authorization id %q was accepted", workID)
+			}
+		})
+	}
+}
+
 func TestEventFixtureIsMonotonicAndToleratesExtensions(t *testing.T) {
 	file, err := os.Open(fixturePathV1("events.ndjson"))
 	if err != nil {

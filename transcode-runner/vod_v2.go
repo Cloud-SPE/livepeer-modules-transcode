@@ -297,25 +297,28 @@ func (s *VODStoreV2) terminal(id, state, event string, value any) error {
 }
 
 type vodRunV2 struct {
-	hash string
-	done chan struct{}
+	hash     string
+	done     chan struct{}
+	gpuLease *transcode.GPUAdmissionLease
 }
 
 type VODServiceV2 struct {
-	store   *VODStoreV2
-	presets []transcode.Preset
-	hw      transcode.HWProfile
-	limit   int
-	mu      sync.Mutex
-	runs    map[string]*vodRunV2
-	active  atomic.Int32
+	store                *VODStoreV2
+	presets              []transcode.Preset
+	hw                   transcode.HWProfile
+	limit                int
+	gpuAdmission         *transcode.GPUAdmissionGate
+	mu                   sync.Mutex
+	runs                 map[string]*vodRunV2
+	active               atomic.Int32
+	gpuAdmissionRejected atomic.Uint64
 }
 
-func NewVODServiceV2(store *VODStoreV2, presets []transcode.Preset, hw transcode.HWProfile, limit int) (*VODServiceV2, error) {
+func NewVODServiceV2(store *VODStoreV2, presets []transcode.Preset, hw transcode.HWProfile, limit int, admission *transcode.GPUAdmissionGate) (*VODServiceV2, error) {
 	if store == nil || len(presets) == 0 || limit < 1 {
 		return nil, errors.New("store, presets, and positive limit are required")
 	}
-	return &VODServiceV2{store: store, presets: presets, hw: hw, limit: limit, runs: map[string]*vodRunV2{}}, nil
+	return &VODServiceV2{store: store, presets: presets, hw: hw, limit: limit, gpuAdmission: admission, runs: map[string]*vodRunV2{}}, nil
 }
 
 func (s *VODServiceV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +434,15 @@ func (s *VODServiceV2) subscribe(req VODRequestV2, preset transcode.Preset, hash
 	if len(s.runs) >= s.limit {
 		return nil, errVODCapacity
 	}
-	run := &vodRunV2{hash: hash, done: make(chan struct{})}
+	lease, err := s.gpuAdmission.Acquire(transcode.GPUAdmissionBatch)
+	if errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+		s.gpuAdmissionRejected.Add(1)
+		return nil, errVODCapacity
+	}
+	if err != nil {
+		return nil, err
+	}
+	run := &vodRunV2{hash: hash, done: make(chan struct{}), gpuLease: lease}
 	s.runs[req.WorkloadID] = run
 	s.active.Add(1)
 	go s.execute(req, preset, hash, run)
@@ -439,7 +450,14 @@ func (s *VODServiceV2) subscribe(req VODRequestV2, preset transcode.Preset, hash
 }
 
 func (s *VODServiceV2) execute(req VODRequestV2, preset transcode.Preset, hash string, run *vodRunV2) {
-	defer func() { s.mu.Lock(); delete(s.runs, req.WorkloadID); close(run.done); s.active.Add(-1); s.mu.Unlock() }()
+	defer func() {
+		_ = run.gpuLease.Close()
+		s.mu.Lock()
+		delete(s.runs, req.WorkloadID)
+		close(run.done)
+		s.active.Add(-1)
+		s.mu.Unlock()
+	}()
 	result, err := s.doExecute(context.Background(), req, preset, hash)
 	if err == nil {
 		_ = s.store.terminal(req.WorkloadID, "succeeded", "result", result)

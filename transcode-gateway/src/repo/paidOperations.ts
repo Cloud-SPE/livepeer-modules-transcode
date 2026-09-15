@@ -42,6 +42,7 @@ interface Row {
   quote_version: string;
   constraint_fingerprint: string;
   route_fingerprint: string;
+  settlement_domain_id: string | null;
   settlement_key: string;
   route_snapshot: JsonValue;
   status: string;
@@ -81,7 +82,7 @@ const SELECT_COLUMNS = `id, operation_kind, api_key_id, asset_id, live_stream_id
   request_id, request_content_sha256, work_id, rotation_generation, protocol,
   transport, capability, offering, request_descriptor, response_descriptor,
   work_unit, estimator, price_per_unit_wei, units_per_price, quote_id,
-  quote_version, constraint_fingerprint, route_fingerprint, settlement_key,
+  quote_version, constraint_fingerprint, route_fingerprint, settlement_domain_id, settlement_key,
   route_snapshot, status, loc_operation_id, broker_job_id, broker_session_id,
   funded_units, claimed_units, balance_units, will_refuse_next_refill,
   lease_expires_at, settlement_sequence, retry_count, next_retry_at,
@@ -105,6 +106,7 @@ function routeFromRow(row: Row): PaidRouteSnapshot {
     quoteVersion: row.quote_version,
     constraintFingerprint: row.constraint_fingerprint,
     routeFingerprint: row.route_fingerprint,
+    settlementDomainId: row.settlement_domain_id ?? undefined,
     settlementKey: row.settlement_key,
     raw: row.route_snapshot,
   };
@@ -197,6 +199,7 @@ function insertStatement(
     "quote_version",
     "constraint_fingerprint",
     "route_fingerprint",
+    "settlement_domain_id",
     "settlement_key",
     "route_snapshot",
     "status",
@@ -230,6 +233,7 @@ function insertStatement(
     value.route.quoteVersion,
     value.route.constraintFingerprint,
     value.route.routeFingerprint,
+    value.route.settlementDomainId ?? null,
     value.route.settlementKey,
     value.route.raw,
     value.status,

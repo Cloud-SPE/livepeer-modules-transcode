@@ -19,9 +19,11 @@ const storedContextWire = z.object({
     control_handle: z.object({
       operation_id: z.string().min(1),
       broker_url: z.string().url(),
+      gateway_session_id: z.string().uuid(),
       descriptor_schema: z.string().min(1),
       work_unit: z.string().min(1),
-      max_rotations: z.number().int().nonnegative(),
+      settlement_domain_id: z.string().regex(/^0x[0-9a-f]{64}$/),
+      max_total_units: z.number().int().positive(),
     }).strict(),
   }).passthrough(),
   control: z.object({ eventsWs: z.string().url() }).passthrough(),
@@ -29,15 +31,13 @@ const storedContextWire = z.object({
   refillIntent: z.object({
     request_id: z.string().min(1),
     observed_consumed_units: z.number().int().nonnegative(),
-    rebind_from: z.string().min(1).optional(),
-    replaces_request_id: z.string().min(1).optional(),
+    max_total_units: z.number().int().positive(),
   }).strict().optional(),
 }).passthrough();
 
 type RefillIntent = NonNullable<z.infer<typeof storedContextWire>["refillIntent"]>;
 
 const openingIntentWire = z.object({
-  gateway_session_id: z.string().min(1),
   request_id: z.string().min(1),
   key_request_id: z.string().min(1),
   descriptor_schema: z.string().min(1),
@@ -48,7 +48,6 @@ const sessionAxesWire = z.object({
   descriptorSchema: z.string().min(1),
   attachment: z.enum(["external", "inband-ws"]),
   metering: z.enum(["runner-reported", "broker-observed"]),
-  maxRotations: z.number().int().nonnegative(),
   refill: z.enum(["extensible", "bounded"]),
   heartbeat: z.object({ intervalSeconds: z.number().int().positive(), missedThreshold: z.number().int().positive() }),
   lease: z.object({ policy: z.enum(["funding-tracking", "fixed"]), maxSeconds: z.number().int().positive().optional() }),
@@ -67,6 +66,7 @@ const recoveryRouteWire = z.object({
     introducedInPublicationSeq: z.string(),
   })).min(1),
   work_unit_estimator: z.unknown().nullable(),
+  settlement_domain_id: z.string().regex(/^0x[0-9a-f]{64}$/),
 }).strict();
 const recoveredRuntimeWire = z.object({
   rtmp_url: z.string().url(),
@@ -194,7 +194,7 @@ async function reconcileOne(
       workId: owned.operation.workId,
       credential: context.credentials.broker_session_credential,
     });
-    if (status.gatewaySessionId !== liveStreamId) {
+    if (status.gatewaySessionId !== context.loc.control_handle.gateway_session_id) {
       throw new Error("paid session gateway identity drift");
     }
     const runtime = owned.operation.sessionRuntime!;
@@ -253,6 +253,10 @@ async function reconcileOne(
     const intent: RefillIntent = {
       request_id: (deps.newRequestId ?? createRequestId)(),
       observed_consumed_units: status.balance.debitedUnits,
+      max_total_units: Math.min(
+        deps.maxTotalUnits,
+        Math.max(status.balance.authorizationMaxUnits + 1, status.balance.authorizationMaxUnits * 2),
+      ),
     };
     const persisted = await deps.paidSessionStore.putSecrets(owned, {
       ...secrets,
@@ -290,11 +294,9 @@ async function executeRefill(
       credential,
       requestId: intent.request_id,
       observedConsumedUnits: intent.observed_consumed_units,
-      ...(intent.rebind_from
-        ? { rebindFrom: intent.rebind_from, replacesRequestId: intent.replaces_request_id! }
-        : {}),
+      maxTotalUnits: intent.max_total_units,
     });
-    const fundedUnits = result.balance.debitedUnits + (result.balance.runwayUnits ?? 0);
+    const fundedUnits = result.balance.authorizationMaxUnits;
     if (fundedUnits > deps.maxTotalUnits) {
       await requestWinddown(deps, owned, "refill_total_exceeded");
       return;
@@ -305,9 +307,6 @@ async function executeRefill(
     await deps.paidSessionStore.recordProgress(owned, {
       status: "active",
       workId: result.workId,
-      rotationGeneration: intent.rebind_from
-        ? owned.operation.rotationGeneration + 1
-        : owned.operation.rotationGeneration,
       fundedUnits: String(fundedUnits),
       claimedUnits: String(result.balance.claimedUnits),
       balanceUnits: String(result.balance.runwayUnits ?? 0),
@@ -319,29 +318,8 @@ async function executeRefill(
       },
     });
   } catch (error) {
-    const code = error instanceof PaidSessionClientError ? error.code.toLowerCase() : "";
-    if (
-      error instanceof PaidSessionClientError &&
-      (code === "recipient_rotated" || code === "invalid_recipient_rand") &&
-      !intent.rebind_from
-    ) {
-      const maxRotations = storedContextWire.parse(secrets).loc.control_handle.max_rotations;
-      if (owned.operation.rotationGeneration >= maxRotations) {
-        await requestWinddown(deps, owned, "rotation_limit_exhausted");
-        return;
-      }
-      const rebind: RefillIntent = {
-        request_id: (deps.newRequestId ?? createRequestId)(),
-        observed_consumed_units: intent.observed_consumed_units,
-        rebind_from: owned.operation.workId,
-        replaces_request_id: intent.request_id,
-      };
-      if (!await deps.paidSessionStore.putSecrets(owned, { ...secrets, refillIntent: rebind as JsonValue })) return;
-      await executeRefill(deps, owned, { ...secrets, refillIntent: rebind as JsonValue }, rebind, handle, credential);
-      return;
-    }
     if (error instanceof PaidSessionClientError && error.retryable) return;
-    await requestWinddown(deps, owned, intent.rebind_from ? "rotation_unrecoverable" : "refill_refused");
+    await requestWinddown(deps, owned, "refill_refused");
   }
 }
 
@@ -402,12 +380,11 @@ async function resumeOpeningSession(
   const sessionParams = sessionParamsWire.parse(secrets.sessionParams);
   const credentials = initialCredentialsWire.parse(secrets.credentials);
   const liveStreamId = initial.operation.liveStreamId;
-  if (!liveStreamId || intent.gateway_session_id !== liveStreamId) {
+  if (!liveStreamId) {
     throw new Error("paid session opening identity drift");
   }
   let owned = initial;
   const opened = await deps.paidSessionClient.open({
-    gatewaySessionId: liveStreamId,
     requestId: intent.request_id,
     route: recoveryRoute(initial.operation, routeIntent),
     descriptorSchema: intent.descriptor_schema,
@@ -427,7 +404,7 @@ async function resumeOpeningSession(
     requestId: opened.opened.requestId,
     locOperationId: opened.opened.operationId,
     brokerSessionId: opened.brokerSessionId,
-    fundedUnits: String(intent.estimated_runway_units),
+    fundedUnits: String(opened.balance.authorizationMaxUnits),
     claimedUnits: String(opened.balance.claimedUnits),
     balanceUnits: String(opened.balance.runwayUnits ?? 0),
     willRefuseNextRefill: opened.balance.willRefuseNextRefill,
@@ -455,9 +432,11 @@ async function resumeOpeningSession(
       control_handle: {
         operation_id: opened.opened.operationId,
         broker_url: opened.opened.brokerUrl,
+        gateway_session_id: opened.gatewaySessionId,
         descriptor_schema: opened.opened.session.descriptorSchema,
         work_unit: opened.opened.routeSnapshot.workUnit,
-        max_rotations: opened.opened.session.maxRotations,
+        settlement_domain_id: opened.opened.routeSnapshot.settlementDomainId,
+        max_total_units: opened.balance.authorizationMaxUnits,
       },
     },
     runnerIngestUrl: runtime.rtmp_url,
@@ -544,6 +523,7 @@ function recoveryRoute(
     session: value.session,
     workUnitEstimator: value.work_unit_estimator as SelectedWorkerRoute["workUnitEstimator"],
     settlementKeys: value.settlement_keys,
+    settlementDomainId: operation.route.settlementDomainId ?? value.settlement_domain_id,
     quoteId: operation.route.quoteId,
     quoteVersion: operation.route.quoteVersion,
     constraintFingerprint: Buffer.from(operation.route.constraintFingerprint, "hex"),
@@ -582,7 +562,7 @@ async function executeWinddown(
   try {
     const result = await deps.paidSessionClient.end({
       opened: handle,
-      gatewaySessionId: liveStreamId,
+      gatewaySessionId: handle.gatewaySessionId,
       brokerSessionId,
       credential,
       reason,
@@ -630,8 +610,11 @@ function controlHandle(value: z.infer<typeof storedContextWire>["loc"]["control_
   return {
     operationId: value.operation_id,
     brokerUrl: value.broker_url,
+    gatewaySessionId: value.gateway_session_id,
     descriptorSchema: value.descriptor_schema,
     workUnit: value.work_unit,
+    settlementDomainId: value.settlement_domain_id,
+    maxTotalUnits: value.max_total_units,
   };
 }
 

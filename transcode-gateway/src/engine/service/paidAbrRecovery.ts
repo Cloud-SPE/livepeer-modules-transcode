@@ -155,6 +155,7 @@ function routeFrom(operation: PaidOperation): SelectedWorkerRoute {
     session: null,
     workUnitEstimator: estimator === null ? null : estimator as unknown as WorkUnitEstimator,
     settlementKeys: [{ publicKey: operation.route.settlementKey, notBefore: "", expiresAt: "", introducedInPublicationSeq: "0" }],
+    settlementDomainId: operation.route.settlementDomainId ?? string(raw, "settlement_domain_id"),
     quoteId: operation.route.quoteId,
     quoteVersion: operation.route.quoteVersion,
     constraintFingerprint: Buffer.from(operation.route.constraintFingerprint, "hex"),

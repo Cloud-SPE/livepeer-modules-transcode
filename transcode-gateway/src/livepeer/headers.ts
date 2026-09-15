@@ -4,6 +4,8 @@ export const HEADER = {
   CAPABILITY:   "Livepeer-Capability",
   OFFERING:     "Livepeer-Offering",
   PAYMENT:      "Livepeer-Payment",
+  AUTHORIZATION:"Livepeer-Authorization",
+  CALLER_PROOF: "Livepeer-Caller-Proof",
   PROTOCOL:     "Livepeer-Protocol",
   REQUEST_ID:   "Livepeer-Request-Id",
   BACKOFF:      "Livepeer-Backoff",

@@ -46,13 +46,11 @@ test("paid-session declaration applies normative defaults and gates descriptor a
       descriptor_schema: "rtmp-hls/v1",
       attachment: "external",
       metering: "runner-reported",
-      max_rotations: 0,
       session_params_schema: { type: "object", required: ["ingest_url"] },
     },
   });
   assert.ok(declaration?.session);
   assert.equal(declaration.session.refill, "extensible");
-  assert.equal(declaration.session.maxRotations, 3);
   assert.deepEqual(declaration.session.heartbeat, {
     intervalSeconds: 10,
     missedThreshold: 3,

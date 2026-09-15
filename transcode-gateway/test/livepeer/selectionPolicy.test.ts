@@ -16,6 +16,7 @@ function candidate(extra: VideoRouteCandidate["extra"]): VideoRouteCandidate {
     session: null,
     workUnitEstimator: null,
     settlementKeys: [],
+    settlementDomainId: null,
     quoteId: null,
     quoteVersion: null,
     constraintFingerprint: null,

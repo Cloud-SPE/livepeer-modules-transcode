@@ -204,7 +204,7 @@ type RunnerPathsV1 struct {
 }
 
 func ValidateCreateRequestV1(value RunnerCreateRequestV1) error {
-	if !opaqueIDPattern.MatchString(value.SessionID) || !workIDPattern.MatchString(value.WorkID) {
+	if !opaqueIDPattern.MatchString(value.SessionID) || !validAuthorizationIDV1(value.WorkID) {
 		return errors.New("session or work identity is invalid")
 	}
 	if strings.TrimSpace(value.Capability) == "" || strings.TrimSpace(value.Offering) == "" {
@@ -223,6 +223,14 @@ func ValidateCreateRequestV1(value RunnerCreateRequestV1) error {
 		return errors.New("callback coordinates are invalid")
 	}
 	return nil
+}
+
+// A paid-session/v1 work_id mirrors SpendAuthorization.authorization_id. It
+// is bounded opaque correlation state, not a request-body or integrity hash.
+// Keep this semantic check separate from workIDPattern, which is deliberately
+// restricted to lowercase SHA-256 hex used elsewhere in the runner.
+func validAuthorizationIDV1(value string) bool {
+	return opaqueIDPattern.MatchString(value)
 }
 
 func ValidateCreateResponseV1(value RunnerCreateResponseV1) error {

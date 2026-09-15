@@ -29,6 +29,7 @@ var (
 	hw           transcode.HWProfile
 	presets      []transcode.Preset
 	vodService   *VODServiceV2
+	gpuAdmission *transcode.GPUAdmissionGate
 )
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -86,7 +87,11 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	if vodService != nil {
 		active = vodService.active.Load()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "gpu": hw.GPUName, "vram_mb": hw.VRAM_MB, "active_jobs": active, "max_jobs": maxQueueSize, "presets": len(presets)})
+	rejections := uint64(0)
+	if vodService != nil {
+		rejections = vodService.gpuAdmissionRejected.Load()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "gpu": hw.GPUName, "vram_mb": hw.VRAM_MB, "active_jobs": active, "max_jobs": maxQueueSize, "presets": len(presets), "gpu_admission_configured": gpuAdmission != nil && gpuAdmission.Configured(), "gpu_admission_rejections": rejections})
 }
 
 func checkRunnerHealth(ctx context.Context, addr string) error {
@@ -143,7 +148,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("initialize workload state: %v", err)
 	}
-	vodService, err = NewVODServiceV2(store, presets, hw, maxQueueSize)
+	gpuAdmission, err = transcode.NewGPUAdmissionGate(os.Getenv("GPU_ADMISSION_LOCK"))
+	if err != nil {
+		log.Fatalf("initialize GPU admission: %v", err)
+	}
+	vodService, err = NewVODServiceV2(store, presets, hw, maxQueueSize, gpuAdmission)
 	if err != nil {
 		log.Fatalf("initialize VOD service: %v", err)
 	}

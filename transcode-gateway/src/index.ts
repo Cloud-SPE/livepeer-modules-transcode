@@ -18,6 +18,7 @@ import {
   createOperationSecretCipher,
   createPaidJobClient,
   createPaidSessionClient,
+  createCallerProofIdentity,
   decodeWrappingKey,
 } from "./livepeer/index.js";
 import { createS3StorageProvider, loadS3ConfigFromEnv } from "./storage/index.js";
@@ -117,14 +118,15 @@ async function main(): Promise<void> {
   let paidOperationRepo: PaidOperationRepo | null = null;
   let paidSessionStore: PaidSessionStore | null = null;
   if (config.LIVEPEER_LOC_URL && config.LIVEPEER_LOC_API_KEY) {
+    const caller = createCallerProofIdentity(config.LIVEPEER_CALLER_PRIVATE_KEY!);
     const loc = createLocClient(createLocHttpTransport({
       baseUrl: config.LIVEPEER_LOC_URL,
       apiKey: config.LIVEPEER_LOC_API_KEY,
       clientId: config.LIVEPEER_LOC_CLIENT_ID,
       timeoutMs: config.LIVEPEER_LOC_TIMEOUT_MS,
     }));
-    paidJobClient = createPaidJobClient(loc);
-    paidSessionClient = createPaidSessionClient(loc);
+    paidJobClient = createPaidJobClient(loc, { caller });
+    paidSessionClient = createPaidSessionClient(loc, { caller });
     if (config.LIVEPEER_OPERATION_SECRETS_KEK) {
       const cipher = createOperationSecretCipher(
         config.LIVEPEER_OPERATION_SECRETS_KEY_ID,

@@ -47,6 +47,7 @@ type LiveRunnerConfigV1 struct {
 	RestartMaximum       time.Duration
 	RestartWindow        time.Duration
 	RestartLimit         int
+	GPUAdmissionLock     string
 }
 
 func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, error) {
@@ -173,6 +174,7 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 		OutputStallAfter: stallAfter, OutputFailAfter: failAfter,
 		RestartInitial: restartInitial, RestartMaximum: restartMaximum, RestartWindow: restartWindow, RestartLimit: restartLimit,
 		CallbackRetryInitial: callbackRetryInitial, CallbackRetryMaximum: callbackRetryMaximum,
+		GPUAdmissionLock: getenv("GPU_ADMISSION_LOCK"),
 	}
 	if err := validateListenAddressV1(config.MetricsAddress, true); err != nil {
 		return LiveRunnerConfigV1{}, fmt.Errorf("live runner metrics address: %w", err)
@@ -228,7 +230,11 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
-	runtime, err := NewLiveRuntimeCoordinatorV1(store, router, FFmpegLiveLadderLauncherV1{}, meter, presets, hardware, config.RouterRTMPBase, config.InternalToken, config.RouterPoll, config.MaxConcurrent)
+	gpuAdmission, err := transcode.NewGPUAdmissionGate(config.GPUAdmissionLock)
+	if err != nil {
+		return fmt.Errorf("initialize GPU admission: %w", err)
+	}
+	runtime, err := NewLiveRuntimeCoordinatorV1(store, router, FFmpegLiveLadderLauncherV1{}, meter, presets, hardware, config.RouterRTMPBase, config.InternalToken, config.RouterPoll, config.MaxConcurrent, gpuAdmission)
 	if err != nil {
 		return err
 	}

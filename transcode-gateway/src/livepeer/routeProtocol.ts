@@ -143,9 +143,6 @@ function parseSessionAxes(value: unknown): PaidSessionAxes | null {
   if (metering === "broker-observed" && attachment !== "inband-ws") return null;
   const refill = raw.refill ?? "extensible";
   if (refill !== "extensible" && refill !== "bounded") return null;
-  const declaredMaxRotations = positiveSafeInteger(raw.max_rotations ?? 3, true);
-  if (declaredMaxRotations === null) return null;
-  const maxRotations = declaredMaxRotations === 0 ? 3 : declaredMaxRotations;
   const heartbeat = parseHeartbeat(raw.heartbeat);
   const lease = parseLease(raw.lease);
   if (!heartbeat || !lease) return null;
@@ -163,7 +160,6 @@ function parseSessionAxes(value: unknown): PaidSessionAxes | null {
     descriptorSchema,
     attachment,
     metering,
-    maxRotations,
     refill,
     heartbeat,
     lease,

@@ -197,7 +197,12 @@ function operationFor(requestContentSha256: string): PaidOperation {
       constraintFingerprint: "01".repeat(32),
       routeFingerprint: "02".repeat(32),
       settlementKey: "key-1",
-      raw: { broker_url: "https://broker.example", eth_address: "0x1111111111111111111111111111111111111111" },
+      settlementDomainId: `0x${"ab".repeat(32)}`,
+      raw: {
+        broker_url: "https://broker.example",
+        eth_address: "0x1111111111111111111111111111111111111111",
+        settlement_domain_id: `0x${"ab".repeat(32)}`,
+      },
     },
     status: "in_flight",
     fundedUnits: "100",

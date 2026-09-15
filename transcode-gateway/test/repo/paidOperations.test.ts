@@ -129,6 +129,18 @@ test("paid session recovery migration adds a fenced multi-instance claim without
   );
 });
 
+test("settlement-domain migration preserves historical rows and validates new identities", async () => {
+  const sql = await readFile(
+    resolve(process.cwd(), "migrations/0005_settlement_domain_identity.sql"),
+    "utf8",
+  );
+  assert.doesNotMatch(sql, /\b(?:DROP|TRUNCATE)\b/i);
+  assert.match(sql, /ADD COLUMN settlement_domain_id TEXT/);
+  assert.match(sql, /\^0x\[0-9a-f\]\{64\}\$/);
+  assert.match(sql, /repeat\('0', 64\)/);
+  assert.doesNotMatch(sql, /settlement_domain_id TEXT NOT NULL/);
+});
+
 test("paid operation recovery is restart-safe and customer reads are owner-scoped", async () => {
   const calls: Array<{ sql: string; params?: unknown[] }> = [];
   const pool = {

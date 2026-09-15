@@ -50,13 +50,12 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     storage: { kind: "runner-local" },
   } as const;
   const openIntent = {
-    gateway_session_id: input.streamId,
     request_id: requestId,
     key_request_id: keyRequestId,
     descriptor_schema: RUNTIME_SCHEMA,
     session_params: sessionParams,
     estimated_runway_units: deps.estimatedRunwayUnits,
-    max_total_units: deps.maxTotalUnits,
+    max_total_units: Math.min(deps.maxTotalUnits, deps.estimatedRunwayUnits),
   };
   const requestContentSha256 = createHash("sha256")
     .update(JSON.stringify(openIntent))
@@ -99,13 +98,12 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     credentials: { customer_stream_key: customerStreamKey },
   });
   const opened = await deps.paidSessionClient.open({
-    gatewaySessionId: input.streamId,
     requestId,
     route: input.route,
     descriptorSchema: RUNTIME_SCHEMA,
     sessionParams,
     estimatedRunwayUnits: deps.estimatedRunwayUnits,
-    maxTotalUnits: deps.maxTotalUnits,
+    maxTotalUnits: openIntent.max_total_units,
   });
   const runtime = runtimePublicWire.parse(opened.runtimePublic);
   const grant = opened.grants.length === 1 && opened.grants[0]?.operations.length === 1 && opened.grants[0].operations[0] === "stream-key-issue"
@@ -117,7 +115,7 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     requestId: opened.opened.requestId,
     locOperationId: opened.opened.operationId,
     brokerSessionId: opened.brokerSessionId,
-    fundedUnits: String(deps.estimatedRunwayUnits),
+    fundedUnits: String(opened.balance.authorizationMaxUnits),
     claimedUnits: String(opened.balance.claimedUnits),
     balanceUnits: String(opened.balance.runwayUnits ?? Math.max(0, deps.estimatedRunwayUnits - opened.balance.debitedUnits)),
     willRefuseNextRefill: opened.balance.willRefuseNextRefill,
@@ -147,9 +145,11 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
       control_handle: {
         operation_id: opened.opened.operationId,
         broker_url: opened.opened.brokerUrl,
+        gateway_session_id: opened.gatewaySessionId,
         descriptor_schema: opened.opened.session.descriptorSchema,
         work_unit: opened.opened.routeSnapshot.workUnit,
-        max_rotations: opened.opened.session.maxRotations,
+        settlement_domain_id: opened.opened.routeSnapshot.settlementDomainId,
+        max_total_units: opened.balance.authorizationMaxUnits,
       },
     },
     runnerIngestUrl: runtime.rtmp_url,
@@ -213,7 +213,7 @@ function validateRoute(route: SelectedWorkerRoute): void {
 }
 
 function paidRoute(route: SelectedWorkerRoute): PaidRouteSnapshot {
-  if (!route.quoteId || !route.quoteVersion || !route.constraintFingerprint || !route.routeFingerprint || !route.unitsPerPrice) {
+  if (!route.quoteId || !route.quoteVersion || !route.constraintFingerprint || !route.routeFingerprint || !route.unitsPerPrice || !route.settlementDomainId) {
     throw new Error("paid live route binding is incomplete");
   }
   const key = route.settlementKeys[0];
@@ -231,8 +231,9 @@ function paidRoute(route: SelectedWorkerRoute): PaidRouteSnapshot {
     quoteVersion: route.quoteVersion,
     constraintFingerprint: Buffer.from(route.constraintFingerprint).toString("hex"),
     routeFingerprint: Buffer.from(route.routeFingerprint).toString("hex"),
+    settlementDomainId: route.settlementDomainId,
     settlementKey: key.publicKey,
-    raw: { broker_url: route.workerUrl, eth_address: route.ethAddress, protocol: route.protocol },
+    raw: { broker_url: route.workerUrl, eth_address: route.ethAddress, protocol: route.protocol, settlement_domain_id: route.settlementDomainId },
   };
 }
 
@@ -249,5 +250,6 @@ function recoveryRoute(route: SelectedWorkerRoute): JsonValue {
     session: route.session as unknown as JsonValue,
     settlement_keys: route.settlementKeys as unknown as JsonValue,
     work_unit_estimator: (route.workUnitEstimator ?? null) as unknown as JsonValue,
+    settlement_domain_id: route.settlementDomainId!,
   };
 }

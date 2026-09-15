@@ -2,6 +2,7 @@
 // dev environments without peer services still boot.
 
 export * from "./headers.js";
+export * from "./callerProof.js";
 export * from "./capabilityMap.js";
 export * from "./requestId.js";
 export * from "./operationSecrets.js";

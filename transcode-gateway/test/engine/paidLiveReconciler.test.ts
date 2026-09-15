@@ -8,12 +8,16 @@ import { reconcilePaidLiveSessions, type PaidLiveReconcilerDeps } from "../../sr
 import type { OwnedPaidSession, PaidSessionStore } from "../../src/livepeer/paidSessionStore.js";
 
 const now = new Date("2026-08-26T12:00:00Z");
+const gatewaySessionId = "f00ac946-92f7-4b47-9231-ecc360ef4c68";
+const settlementDomainId = `0x${"03".repeat(32)}`;
 const handle = {
   operation_id: "loc-operation-1",
   broker_url: "https://broker.example",
   descriptor_schema: "rtmp-hls/v1",
   work_unit: "output_seconds",
-  max_rotations: 3,
+  settlement_domain_id: settlementDomainId,
+  gateway_session_id: gatewaySessionId,
+  max_total_units: 60,
 };
 
 function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
@@ -26,7 +30,7 @@ function operation(overrides: Partial<PaidOperation> = {}): PaidOperation {
       requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1",
       workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1",
       quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32),
-      routeFingerprint: "02".repeat(32), settlementKey: "settlement-1", raw: {},
+      routeFingerprint: "02".repeat(32), settlementDomainId, settlementKey: "settlement-1", raw: {},
     },
     status: "active", locOperationId: "loc-operation-1", brokerSessionId: "broker-session-1",
     fundedUnits: "60", claimedUnits: "50", balanceUnits: "10", willRefuseNextRefill: false,
@@ -60,7 +64,6 @@ function baseSecrets(refillIntent?: PaidOperationSecrets["refillIntent"]): PaidO
 function openingSecrets(): PaidOperationSecrets {
   return {
     openIntent: {
-      gateway_session_id: "live-1",
       request_id: "stable-open-request",
       key_request_id: "stable-key-request",
       descriptor_schema: "rtmp-hls/v1",
@@ -72,7 +75,7 @@ function openingSecrets(): PaidOperationSecrets {
       eth_address: `0x${"11".repeat(20)}`,
       session: {
         descriptorSchema: "rtmp-hls/v1", attachment: "external",
-        metering: "runner-reported", maxRotations: 3, refill: "extensible",
+        metering: "runner-reported", refill: "extensible",
         heartbeat: { intervalSeconds: 5, missedThreshold: 3 },
         lease: { policy: "funding-tracking" },
       },
@@ -81,6 +84,7 @@ function openingSecrets(): PaidOperationSecrets {
         expiresAt: "2030-01-01T00:00:00Z", introducedInPublicationSeq: "1",
       }],
       work_unit_estimator: null,
+      settlement_domain_id: settlementDomainId,
     },
     sessionParams: {
       schema: "rtmp-hls-session/v1", publisher_mode: "gateway-relay",
@@ -195,11 +199,14 @@ function harness(options: {
 
 function lowStatus(willRefuseNextRefill = false) {
   return {
-    brokerSessionId: "broker-session-1", gatewaySessionId: "live-1", workId: "work-1",
+    brokerSessionId: "broker-session-1", gatewaySessionId, workId: "work-1",
     state: "active", runtimeSchema: "rtmp-hls/v1", runtimePublic: {},
     claimedUnits: 50, workUnit: "output_seconds", leaseExpiresAt: "2026-08-26T12:02:00Z",
     balance: {
       claimedUnits: 50, debitedUnits: 50, unit: "output_seconds", runwayUnits: 10,
+      authorizationId: "work-1", authorizationMaxUnits: 60, authorizationCapRemainingUnits: 10,
+      authorizationReservedValueWei: "10", cumulativeBilledValueWei: "50",
+      accountAvailableValueWei: "1000", accountVersion: 1,
       runwaySecondsEstimate: 10, status: "low" as const, willRefuseNextRefill,
     },
     closeReason: null,
@@ -212,16 +219,20 @@ function lowStatus(willRefuseNextRefill = false) {
 function acceptedRefill(workId = "work-1") {
   return {
     loc: {
-      workId, requestId: "refill-1", refillSequence: 1, paymentEnvelope: "payment",
-      fundedValueWei: 1, capStatus: {
+      workId, requestId: "refill-1", refillSequence: 1,
+      spendAuthorization: Buffer.from("authorization").toString("base64"), paymentEnvelope: null,
+      expectedValueWei: "0", fundedValueWei: "0", capStatus: {
         sessionPctUsed: 1, spendPeriodPctUsed: null, userBalancePctUsed: null,
         operatorPoolPctUsed: null, willRefuseNextRefill: false, winddownReason: null,
-      }, rebindFrom: null,
+      },
     },
     brokerSessionId: "broker-session-1", workId,
     leaseExpiresAt: "2026-08-26T12:03:00Z",
     balance: {
       claimedUnits: 50, debitedUnits: 50, unit: "output_seconds", runwayUnits: 70,
+      authorizationId: workId, authorizationMaxUnits: 120, authorizationCapRemainingUnits: 70,
+      authorizationReservedValueWei: "70", cumulativeBilledValueWei: "50",
+      accountAvailableValueWei: "1000", accountVersion: 2,
       runwaySecondsEstimate: 70, status: "ok" as const, willRefuseNextRefill: false,
     },
   };
@@ -241,7 +252,7 @@ function settledEnd(closeReason = "customer_end") {
     },
     accounting: {
       operationId: "loc-operation-1", workId: "work-1", actualUnits: 55,
-      billedValueWei: 55, refundWei: 5, outcome: "EXACT",
+      billedValueWei: "55", refundWei: "5", outcome: "EXACT",
       closedAt: "2026-08-26T12:04:00Z",
     },
   };
@@ -250,13 +261,13 @@ function settledEnd(closeReason = "customer_end") {
 function recoveredOpenResult(): Awaited<ReturnType<PaidSessionClient["open"]>> {
   const session = {
     descriptorSchema: "rtmp-hls/v1", attachment: "external" as const,
-    metering: "runner-reported" as const, maxRotations: 3, refill: "extensible" as const,
+    metering: "runner-reported" as const, refill: "extensible" as const,
     heartbeat: { intervalSeconds: 5, missedThreshold: 3 },
     lease: { policy: "funding-tracking" as const },
   };
   return {
     opened: {
-      operationId: "loc-operation-1", requestId: "broker-open-request",
+      operationId: "loc-operation-1", gatewaySessionId, requestId: "broker-open-request",
       workId: "work-1", brokerUrl: "https://broker.example",
       protocol: "paid-session/v1", session,
       routeSnapshot: {
@@ -267,13 +278,15 @@ function recoveredOpenResult(): Awaited<ReturnType<PaidSessionClient["open"]>> {
         binding: {
           quoteId: "quote-1", quoteVersion: "1",
           constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32),
+          settlementDomainId,
         },
-        settlementKeys: [], workUnitEstimator: null, job: null, session, extra: {}, raw: {},
+        settlementDomainId, settlementKeys: [], workUnitEstimator: null, job: null, session, extra: {}, raw: {},
       },
-      paymentEnvelope: "payment", refillEndpoint: "/refill", closeEndpoint: "/close",
+      spendAuthorization: Buffer.from("authorization").toString("base64"), paymentEnvelope: null,
+      expectedValueWei: "0", fundedValueWei: "0", refillEndpoint: "/refill", closeEndpoint: "/close",
       openedAt: "2026-08-26T12:00:00Z",
     },
-    gatewaySessionId: "live-1", brokerSessionId: "broker-session-1", workId: "work-1",
+    gatewaySessionId, brokerSessionId: "broker-session-1", workId: "work-1",
     state: "active", credential: "broker-secret", runtimeSchema: "rtmp-hls/v1",
     runtimePublic: {
       rtmp_url: "rtmps://runner.example/ingest",
@@ -287,6 +300,9 @@ function recoveredOpenResult(): Awaited<ReturnType<PaidSessionClient["open"]>> {
     leaseExpiresAt: "2030-01-01T00:00:00Z",
     balance: {
       claimedUnits: 0, debitedUnits: 0, unit: "output_seconds", runwayUnits: 60,
+      authorizationId: "work-1", authorizationMaxUnits: 60, authorizationCapRemainingUnits: 60,
+      authorizationReservedValueWei: "60", cumulativeBilledValueWei: "0",
+      accountAvailableValueWei: "1000", accountVersion: 1,
       runwaySecondsEstimate: 60, status: "ok", willRefuseNextRefill: false,
     },
     control: {
@@ -356,7 +372,7 @@ test("low balance persists the refill identity before funding and advances lease
 
 test("an ambiguous refill remains durable and replays the exact identity without another status decision", async () => {
   const attempted: string[] = [];
-  const pending = { request_id: "stable-refill", observed_consumed_units: 50 };
+  const pending = { request_id: "stable-refill", observed_consumed_units: 50, max_total_units: 120 };
   const h = harness({
     secrets: baseSecrets(pending),
     client: {
@@ -375,18 +391,13 @@ test("an ambiguous refill remains durable and replays the exact identity without
   assert.deepEqual(h.secrets().refillIntent, pending);
 });
 
-test("recipient rotation persists one linked rebind and preserves the broker session", async () => {
-  const requests: Array<{ id: string; rebind?: string; replaces?: string; broker: string }> = [];
+test("a successor authorization may advance work identity without changing the broker session", async () => {
+  const requests: Array<{ id: string; maximum: number; broker: string }> = [];
   const h = harness({
     client: {
       async status() { return lowStatus(); },
       async refill(input) {
-        requests.push({
-          id: input.requestId,
-          ...(input.rebindFrom ? { rebind: input.rebindFrom, replaces: input.replacesRequestId } : {}),
-          broker: input.brokerSessionId,
-        });
-        if (!input.rebindFrom) throw new PaidSessionClientError("recipient_rotated", { retryable: true });
+        requests.push({ id: input.requestId, maximum: input.maxTotalUnits, broker: input.brokerSessionId });
         return acceptedRefill("work-2");
       },
     },
@@ -395,14 +406,13 @@ test("recipient rotation persists one linked rebind and preserves the broker ses
   await reconcilePaidLiveSessions(h.deps);
 
   assert.deepEqual(requests, [
-    { id: "refill-1", broker: "broker-session-1" },
-    { id: "refill-2", rebind: "work-1", replaces: "refill-1", broker: "broker-session-1" },
+    { id: "refill-1", maximum: 120, broker: "broker-session-1" },
   ]);
   assert.equal(h.operation().workId, "work-2");
-  assert.equal(h.operation().rotationGeneration, 1);
+  assert.equal(h.operation().rotationGeneration, 0);
 });
 
-test("preannounced refill refusal and failed rebind both request bounded winddown", async () => {
+test("preannounced and nonretryable refill refusals request bounded winddown", async () => {
   let refillCalls = 0;
   const refused = harness({
     client: {
@@ -414,36 +424,16 @@ test("preannounced refill refusal and failed rebind both request bounded winddow
   assert.equal(refillCalls, 0);
   assert.equal(refused.operation().status, "winddown_requested");
 
-  const rotated = harness({
+  const rejected = harness({
     secrets: baseSecrets({
-      request_id: "rebind-1", observed_consumed_units: 50,
-      rebind_from: "work-1", replaces_request_id: "refill-1",
+      request_id: "revision-1", observed_consumed_units: 50, max_total_units: 120,
     }),
     client: {
-      async refill() { throw new PaidSessionClientError("rebind_refused", { retryable: false }); },
+      async refill() { throw new PaidSessionClientError("refill_refused", { retryable: false }); },
     },
   });
-  await reconcilePaidLiveSessions(rotated.deps);
-  assert.equal(rotated.operation().status, "winddown_requested");
-});
-
-test("recipient rotation cannot exceed the route's persisted rotation bound", async () => {
-  let refillCalls = 0;
-  const h = harness({
-    operation: operation({ rotationGeneration: 3 }),
-    client: {
-      async status() { return lowStatus(); },
-      async refill() {
-        refillCalls += 1;
-        throw new PaidSessionClientError("INVALID_RECIPIENT_RAND", { retryable: true });
-      },
-    },
-  });
-
-  await reconcilePaidLiveSessions(h.deps);
-
-  assert.equal(refillCalls, 1);
-  assert.equal(h.operation().status, "winddown_requested");
+  await reconcilePaidLiveSessions(rejected.deps);
+  assert.equal(rejected.operation().status, "winddown_requested");
 });
 
 test("control WebSocket loss never suppresses authoritative HTTP polling", async () => {

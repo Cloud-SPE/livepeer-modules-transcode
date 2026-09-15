@@ -17,7 +17,8 @@ In Portainer:
 3. Add every variable from `stack.env.example` under **Environment variables**.
 4. Replace the GPU UUID, all three live secrets, and both public URLs.
 5. Replace `LIVE_NVIDIA_IMAGE` with its qualified immutable reference.
-6. Deploy the stack.
+6. Deploy the stack. The one-shot `gpu-admission-init` service must complete
+   successfully before the three runners start.
 
 The Docker host must return the card from:
 
@@ -43,13 +44,25 @@ curl --fail http://SERVER:18180/healthz
 curl --fail http://SERVER:18280/ready
 ```
 
-The three containers reserve the same physical GPU. They may remain online,
-but the broker/pool must not admit VOD or ABR work during an active live
-broadcast. A GTX 1080 has no AV1 encoder; use H.264 or HEVC presets only.
+The three containers reserve the same physical GPU and mount one admission
+volume keyed by `NVIDIA_GPU_ID`. Multiple VOD and ABR jobs may coexist within
+the batch cohort, and multiple live streams may coexist within the live cohort,
+subject to their individual queue limits. The runners atomically reject a new
+cross-cohort request with `capacity_reached`, so VOD/ABR and live cannot overlap
+on this GPU even if the broker sees all three services as ready. Kernel lock
+release makes a stopped or crashed runner relinquish its cohort membership.
+
+Queue limits still matter inside a cohort. Increase them only after measuring
+encoder-session and memory use on this exact GPU; the shared admission volume
+does not make four simultaneous ladders safe by itself. A GTX 1080 has no AV1
+encoder; use H.264 or HEVC presets only.
 Before admitting live work, run
 `live-runner/scripts/hardware-smoke.sh tztcloud/live-runner-nvidia:v2.0.0
 nvidia` from a checkout on this host, followed by the Modules real-publish
 certification. Encoder enumeration alone is not sufficient.
 
-Named volumes preserve request replay and live-session state across Portainer
-redeployments. Never select **Remove volumes** during an ordinary update.
+Named volumes preserve request replay, live-session state, and the admission
+files across Portainer redeployments. The lock files contain no durable
+ownership state—the kernel owns active leases—but keeping the volume gives
+every replacement container the same inode namespace. Never select **Remove
+volumes** during an ordinary update.

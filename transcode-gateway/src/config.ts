@@ -22,8 +22,8 @@ const envSchema = z.object({
   LIVEPEER_RESOLVER_SNAPSHOT_TTL_MS: z.coerce.number().int().positive().default(15_000),
   LIVEPEER_ROUTE_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
   LIVEPEER_ROUTE_COOLDOWN_MS: z.coerce.number().int().positive().default(30_000),
-  LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("default"),
-  LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("live-standard"),
+  LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("abr-default"),
+  LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("gateway-ingest"),
   LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: z.coerce.number().int().positive().default(60),
   LIVEPEER_LIVE_MAX_TOTAL_UNITS: z.coerce.number().int().positive().default(3_600),
   LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS: z.coerce.number().int().nonnegative().default(15),
@@ -38,6 +38,9 @@ const envSchema = z.object({
   LIVEPEER_OPERATION_SECRETS_KEY_ID: z.string().min(1).default("local-v1"),
   LIVEPEER_LOC_URL: z.string().url().optional(),
   LIVEPEER_LOC_API_KEY: z.string().min(1).optional(),
+  // Stable delegated-caller identity used for LOC spend authorizations.
+  // Lowercase raw secp256k1 scalar; keep it outside Postgres.
+  LIVEPEER_CALLER_PRIVATE_KEY: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   LIVEPEER_LOC_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   LIVEPEER_LOC_CLIENT_ID: z
     .string()
@@ -74,6 +77,13 @@ const envSchema = z.object({
       code: "custom",
       path: [value.LIVEPEER_LOC_URL ? "LIVEPEER_LOC_API_KEY" : "LIVEPEER_LOC_URL"],
       message: "LIVEPEER_LOC_URL and LIVEPEER_LOC_API_KEY must be set together",
+    });
+  }
+  if (value.LIVEPEER_LOC_URL && !value.LIVEPEER_CALLER_PRIVATE_KEY) {
+    context.addIssue({
+      code: "custom",
+      path: ["LIVEPEER_CALLER_PRIVATE_KEY"],
+      message: "LIVEPEER_CALLER_PRIVATE_KEY is required when LOC is configured",
     });
   }
   if (value.LIVEPEER_LIVE_MAX_TOTAL_UNITS < value.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS) {

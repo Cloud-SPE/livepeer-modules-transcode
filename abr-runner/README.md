@@ -30,6 +30,13 @@ The runner-owned attach contract is served at
 `GET /.well-known/livepeer-runner` and declares the response-trailer
 extractor for `X-Livepeer-Work-Units`.
 
+On a host shared with the other transcode runners, `GPU_ADMISSION_LOCK` names
+the same clean, absolute lock-file base path mounted into every container. ABR
+joins the batch cohort for an execution; an active live cohort makes a request
+return `429 capacity_reached` before FFmpeg starts. Invalid configured paths
+fail startup. `/healthz` exposes only configured state and rejection count,
+never the filesystem path.
+
 ### Request and output safety
 
 The request contains a caller-stable `workload_id`, presigned input/output

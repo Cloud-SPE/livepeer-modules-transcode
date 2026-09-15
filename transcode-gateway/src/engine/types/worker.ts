@@ -23,7 +23,6 @@ export interface PaidSessionAxes {
   descriptorSchema: string;
   attachment: "external" | "inband-ws";
   metering: "runner-reported" | "broker-observed";
-  maxRotations: number;
   refill: "extensible" | "bounded";
   heartbeat: PaidSessionHeartbeat;
   lease: PaidSessionLease;
@@ -59,6 +58,7 @@ export interface SelectedWorkerRoute {
   session: PaidSessionAxes | null;
   workUnitEstimator: WorkUnitEstimator | null;
   settlementKeys: SettlementKey[];
+  settlementDomainId?: string;
   unitsPerPrice?: string;
   quoteId?: string;
   quoteVersion?: string;

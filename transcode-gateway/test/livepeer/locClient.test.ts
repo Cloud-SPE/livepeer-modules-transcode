@@ -7,11 +7,13 @@ import { createLocClient, routeBindingFor } from "../../src/livepeer/locClient.j
 
 const JOB_ID = "b728b1a9-1ad8-4598-9382-92fca5d3bdf8";
 const SESSION_ID = "ae67b8f5-e381-4f01-9302-1957f26d82f2";
+const SETTLEMENT_DOMAIN_ID = `0x${"55".repeat(32)}`;
 const binding = {
   quoteId: "quote-1",
   quoteVersion: "18446744073709551615",
   constraintFingerprint: "11".repeat(32),
   routeFingerprint: "22".repeat(32),
+  settlementDomainId: SETTLEMENT_DOMAIN_ID,
 };
 
 function snapshot(protocol: "paid-job/v1" | "paid-session/v1") {
@@ -20,7 +22,6 @@ function snapshot(protocol: "paid-job/v1" | "paid-session/v1") {
     attachment: "external",
     metering: "runner-reported",
     refill: "extensible",
-    max_rotations: 3,
     heartbeat: { interval_seconds: 10, missed_threshold: 3 },
     lease: { policy: "funding-tracking" },
   };
@@ -38,6 +39,7 @@ function snapshot(protocol: "paid-job/v1" | "paid-session/v1") {
     quote_version: binding.quoteVersion,
     constraint_fingerprint: binding.constraintFingerprint,
     route_fingerprint: binding.routeFingerprint,
+    settlement_domain_id: SETTLEMENT_DOMAIN_ID,
     settlement_keys: [
       {
         public_key: `0x04${"44".repeat(64)}`,
@@ -68,9 +70,10 @@ function jobResponse() {
     transport: "unary",
     work_unit: "frame_megapixel",
     route_snapshot: snapshot("paid-job/v1"),
-    payment_envelope: "payment-envelope",
-    expected_value_wei: 1,
-    funded_value_wei: 1,
+    spend_authorization: Buffer.from("job-authorization").toString("base64"),
+    accounting_mode: "wholesale_account",
+    expected_value_wei: "1",
+    funded_value_wei: "1",
     settle_endpoint: `/v1/jobs/${JOB_ID}/settle`,
     opened_at: "2026-08-24T00:00:00Z",
   };
@@ -104,6 +107,7 @@ test("route binding preserves resolver uint64 identity without JavaScript number
     quoteVersion: binding.quoteVersion,
     constraintFingerprint: Buffer.from(binding.constraintFingerprint, "hex"),
     routeFingerprint: Buffer.from(binding.routeFingerprint, "hex"),
+    settlementDomainId: SETTLEMENT_DOMAIN_ID,
   } satisfies SelectedWorkerRoute;
   assert.deepEqual(routeBindingFor(route), binding);
 });
@@ -119,6 +123,8 @@ test("LOC client opens and replays an exact bound paid job", async () => {
     estimatedUnits: 100,
     maxTotalUnits: 200,
     routeBinding: binding,
+    workloadRequestDigest: "44".repeat(32),
+    callerPublicKey: `02${"66".repeat(32)}`,
   };
   const first = await client.openJob(input);
   const replay = await client.openJob(input);
@@ -145,7 +151,10 @@ test("LOC client opens and replays an exact bound paid job", async () => {
       quote_version: binding.quoteVersion,
       constraint_fingerprint: binding.constraintFingerprint,
       route_fingerprint: binding.routeFingerprint,
+      settlement_domain_id: SETTLEMENT_DOMAIN_ID,
     },
+    workload_request_digest: "44".repeat(32),
+    caller_public_key: `02${"66".repeat(32)}`,
   });
 });
 
@@ -163,6 +172,8 @@ test("LOC client fails closed when the recorded route differs from the binding",
         transport: "unary",
         estimatedUnits: 1,
         routeBinding: binding,
+        workloadRequestDigest: "44".repeat(32),
+        callerPublicKey: `02${"66".repeat(32)}`,
       }),
     (error: unknown) =>
       error instanceof LocTransportError && error.code === "loc_response_invalid",
@@ -179,9 +190,10 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
     protocol: "paid-session/v1",
     session: route.session,
     route_snapshot: route,
-    payment_envelope: "session-envelope",
-    expected_value_wei: 1,
-    funded_value_wei: 1,
+    spend_authorization: Buffer.from("session-authorization").toString("base64"),
+    accounting_mode: "wholesale_account",
+    expected_value_wei: "1",
+    funded_value_wei: "1",
     refill_endpoint: `/v1/sessions/${SESSION_ID}/refill`,
     close_endpoint: `/v1/sessions/${SESSION_ID}/close`,
     opened_at: "2026-08-24T00:00:00Z",
@@ -197,11 +209,15 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
     estimatedRunwayUnits: 60,
     maxTotalUnits: 3_600,
     routeBinding: binding,
+    gatewaySessionId: SESSION_ID,
+    preparationToken: "prepared-token",
+    workloadRequestDigest: "44".repeat(32),
+    callerPublicKey: `02${"66".repeat(32)}`,
   });
 
   assert.equal(opened.protocol, "paid-session/v1");
   assert.equal(opened.session.descriptorSchema, "rtmp-hls/v1");
-  assert.equal(opened.routeSnapshot.session?.maxRotations, 3);
+  assert.equal(opened.gatewaySessionId, SESSION_ID);
   assert.deepEqual(requests[0]?.body, {
     capability: "video:transcode.live",
     offering: "default",
@@ -214,7 +230,12 @@ test("LOC client opens a bound paid session and preserves its declared axes", as
       quote_version: binding.quoteVersion,
       constraint_fingerprint: binding.constraintFingerprint,
       route_fingerprint: binding.routeFingerprint,
+      settlement_domain_id: SETTLEMENT_DOMAIN_ID,
     },
+    gateway_session_id: SESSION_ID,
+    preparation_token: "prepared-token",
+    workload_request_digest: "44".repeat(32),
+    caller_public_key: `02${"66".repeat(32)}`,
   });
 });
 
@@ -231,8 +252,8 @@ test("LOC client submits the decoded broker settlement to the recorded job endpo
     job_id: JOB_ID,
     work_id: "work-1",
     actual_units: 12,
-    billed_value_wei: 10,
-    refund_wei: 2,
+    billed_value_wei: "10",
+    refund_wei: "2",
     outcome: "OVERFUNDED",
     closed_at: "2026-08-24T00:01:00Z",
     cap_status: {
@@ -253,7 +274,7 @@ test("LOC client submits the decoded broker settlement to the recorded job endpo
     settlement,
   });
 
-  assert.equal(result.refundWei, 2);
+  assert.equal(result.refundWei, "2");
   assert.equal(requests[0]?.path, `/v1/jobs/${JOB_ID}/settle`);
   assert.equal(requests[0]?.idempotencyKey, `settle:${JOB_ID}`);
   assert.deepEqual(requests[0]?.body, {
@@ -265,14 +286,15 @@ test("LOC client submits the decoded broker settlement to the recorded job endpo
   });
 });
 
-test("LOC session refill preserves its idempotency and recipient rebind identities", async () => {
+test("LOC session refill preserves its idempotency and cumulative authorization scope", async () => {
   const { transport, requests } = fakeTransport({
     work_id: "work-2",
     request_id: "broker-refill-request-1",
     refill_seq: 2,
-    payment_envelope: "refill-envelope",
-    expected_value_wei: 10,
-    funded_value_wei: 20,
+    spend_authorization: Buffer.from("refill-authorization").toString("base64"),
+    accounting_mode: "wholesale_account",
+    expected_value_wei: "10",
+    funded_value_wei: "20",
     cap_status: {
       session_pct_used: 0.5,
       spend_period_pct_used: null,
@@ -281,21 +303,45 @@ test("LOC session refill preserves its idempotency and recipient rebind identiti
       will_refuse_next_refill: false,
       winddown_reason: null,
     },
-    rebind_from: "work-1",
   });
   const result = await createLocClient(transport).refillSession({
     operationId: SESSION_ID,
     requestId: "gateway-refill-1",
     observedConsumedUnits: 12,
-    rebindFrom: "work-1",
-    replacesRequestId: "broker-refill-old",
+    maxTotalUnits: 120,
+    workloadRequestDigest: "44".repeat(32),
   });
 
   assert.equal(result.workId, "work-2");
   assert.equal(requests[0]?.idempotencyKey, "gateway-refill-1");
   assert.deepEqual(requests[0]?.body, {
     observed_consumed_units: 12,
-    rebind_from: "work-1",
-    replaces_request_id: "broker-refill-old",
+    max_total_units: 120,
+    workload_request_digest: "44".repeat(32),
   });
+});
+
+test("LOC session preparation preserves the signed route binding", async () => {
+  const { transport, requests } = fakeTransport({
+    gateway_session_id: SESSION_ID,
+    route_binding: {
+      quote_id: binding.quoteId,
+      quote_version: binding.quoteVersion,
+      constraint_fingerprint: binding.constraintFingerprint,
+      route_fingerprint: binding.routeFingerprint,
+      settlement_domain_id: binding.settlementDomainId,
+    },
+    broker_url: "https://broker.example/livepeer",
+    preparation_token: "prepared-token",
+    expires_at: "2026-08-24T00:05:00Z",
+  });
+  const result = await createLocClient(transport).prepareSession({
+    requestId: "session-request-1",
+    capability: "video:transcode.live",
+    offering: "default",
+    descriptorSchema: "rtmp-hls/v1",
+    routeBinding: binding,
+  });
+  assert.equal(result.gatewaySessionId, SESSION_ID);
+  assert.equal(requests[0]?.idempotencyKey, "session-request-1:prepare");
 });

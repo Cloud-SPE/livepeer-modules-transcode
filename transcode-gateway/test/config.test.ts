@@ -12,9 +12,11 @@ test("LOC configuration is disabled only when URL and API key are both absent", 
   const config = loadConfig(required);
   assert.equal(config.LIVEPEER_LOC_URL, undefined);
   assert.equal(config.LIVEPEER_LOC_API_KEY, undefined);
+  assert.equal(config.LIVEPEER_CALLER_PRIVATE_KEY, undefined);
   assert.equal(config.LIVEPEER_LOC_TIMEOUT_MS, 15_000);
   assert.equal(config.LIVEPEER_LOC_CLIENT_ID, "livepeer-modules-transcode/0.0.0");
-  assert.equal(config.LIVEPEER_LIVE_OFFERING_DEFAULT, "live-standard");
+  assert.equal(config.LIVEPEER_VOD_OFFERING_DEFAULT, "abr-default");
+  assert.equal(config.LIVEPEER_LIVE_OFFERING_DEFAULT, "gateway-ingest");
   assert.equal(config.LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS, 60);
   assert.equal(config.LIVEPEER_LIVE_MAX_TOTAL_UNITS, 3_600);
   assert.equal(config.LIVEPEER_LIVE_REFILL_THRESHOLD_UNITS, 15);
@@ -64,11 +66,26 @@ test("LOC configuration accepts a complete explicit boundary", () => {
     ...required,
     LIVEPEER_LOC_URL: "https://loc.example.com",
     LIVEPEER_LOC_API_KEY: "loc-secret",
+    LIVEPEER_CALLER_PRIVATE_KEY: "11".repeat(32),
     LIVEPEER_LOC_TIMEOUT_MS: "2500",
     LIVEPEER_LOC_CLIENT_ID: "transcode/test",
   });
   assert.equal(config.LIVEPEER_LOC_TIMEOUT_MS, 2_500);
   assert.equal(config.LIVEPEER_LOC_CLIENT_ID, "transcode/test");
+});
+
+test("LOC configuration requires a valid delegated caller key", () => {
+  assert.throws(() => loadConfig({
+    ...required,
+    LIVEPEER_LOC_URL: "https://loc.example.com",
+    LIVEPEER_LOC_API_KEY: "loc-secret",
+  }), /LIVEPEER_CALLER_PRIVATE_KEY is required/);
+  assert.throws(() => loadConfig({
+    ...required,
+    LIVEPEER_LOC_URL: "https://loc.example.com",
+    LIVEPEER_LOC_API_KEY: "loc-secret",
+    LIVEPEER_CALLER_PRIVATE_KEY: "not-a-key",
+  }), /LIVEPEER_CALLER_PRIVATE_KEY/);
 });
 
 test("removed direct-payer configuration fails instead of falling back", () => {

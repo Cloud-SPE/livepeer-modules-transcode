@@ -48,6 +48,9 @@ export function createResolverWorkerResolver(
         session: first.session,
         workUnitEstimator: first.workUnitEstimator,
         settlementKeys: first.settlementKeys,
+        ...(first.settlementDomainId !== null
+          ? { settlementDomainId: first.settlementDomainId }
+          : {}),
         ...(first.unitsPerPrice !== null ? { unitsPerPrice: first.unitsPerPrice } : {}),
         ...(first.quoteId !== null ? { quoteId: first.quoteId } : {}),
         ...(first.quoteVersion !== null ? { quoteVersion: first.quoteVersion } : {}),

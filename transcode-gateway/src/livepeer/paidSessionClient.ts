@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   LocClient,
@@ -17,6 +18,7 @@ import type { JsonValue } from "../engine/types/index.js";
 import { HEADER } from "./headers.js";
 import { routeBindingFor } from "./locClient.js";
 import { classifyV2Failure } from "./v2Outcome.js";
+import type { CallerProofIdentity } from "./callerProof.js";
 
 const PROTOCOL = "paid-session/v1";
 const safeFailureCode = /^[a-z][a-z0-9_]{0,63}$/;
@@ -32,6 +34,13 @@ const balanceWire = z.object({
   claimed_units: z.number().int().nonnegative(),
   debited_units: z.number().int().nonnegative(),
   unit: z.string().min(1),
+  authorization_id: z.string().min(1),
+  authorization_max_units: z.number().int().positive(),
+  authorization_cap_remaining_units: z.number().int().nonnegative(),
+  authorization_reserved_value_wei: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  cumulative_billed_value_wei: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  account_available_value_wei: z.string().regex(/^(0|[1-9][0-9]*)$/).optional(),
+  account_version: z.number().int().nonnegative().optional(),
   runway_units: z.number().int().nonnegative().optional(),
   runway_seconds_estimate: z.number().int().nonnegative().optional(),
   status: z.enum(["ok", "low", "exhausted"]),
@@ -57,6 +66,12 @@ const openWire = z.object({
   credential: z.string().min(1),
   balance: balanceWire,
 }).strict();
+const capacityOpenWire = z.object({
+  session_id: z.string().min(1),
+  gateway_session_id: z.string().min(1),
+  work_id: z.string().min(1),
+  settlement_url: z.string().url(),
+}).passthrough();
 const streamKeyWire = z.object({
   request_id: z.string().min(1),
   stream_key: z.string().min(1).max(512),
@@ -66,6 +81,7 @@ const statusWire = z.object({
   session_id: z.string().min(1),
   gateway_session_id: z.string().min(1),
   work_id: z.string().min(1),
+  authorization_id: z.string().min(1),
   state: z.string().min(1),
   runtime: z.object({ schema: z.string().min(1), public: z.json() }).strict(),
   usage: z.object({ unit: z.string().min(1), claimed_total: z.number().int().nonnegative() }).strict(),
@@ -96,6 +112,7 @@ const settlementLookupWire = z.object({
   session_id: z.string().min(1),
   gateway_session_id: z.string().min(1),
   work_id: z.string().min(1),
+  authorization_id: z.string().min(1),
   predecessor_work_id: z.string(),
   rotation_generation: z.number().int().nonnegative(),
   state: z.string().min(1),
@@ -138,16 +155,30 @@ const controlEventWire = z.discriminatedUnion("type", [
 
 export interface PaidSessionClientOptions {
   fetch?: typeof globalThis.fetch;
+  caller: CallerProofIdentity;
 }
 
 export function createPaidSessionClient(
   loc: LocClient,
-  options: PaidSessionClientOptions = {},
+  options: PaidSessionClientOptions,
 ): PaidSessionClient {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   return {
     async open(input) {
       validateOpen(input);
+      const routeBinding = routeBindingFor(input.route);
+      const prepared = await loc.prepareSession({
+        requestId: input.requestId,
+        capability: input.route.capability,
+        offering: input.route.offering,
+        descriptorSchema: input.descriptorSchema,
+        routeBinding,
+      });
+      const brokerOpenBody = JSON.stringify({
+        gateway_session_id: prepared.gatewaySessionId,
+        session_params: input.sessionParams,
+      });
+      if (prepared.brokerUrl !== input.route.workerUrl) throw invalidEvidence();
       const opened = await loc.openSession({
         requestId: input.requestId,
         capability: input.route.capability,
@@ -156,16 +187,22 @@ export function createPaidSessionClient(
         sessionParams: input.sessionParams,
         estimatedRunwayUnits: input.estimatedRunwayUnits,
         maxTotalUnits: input.maxTotalUnits,
-        routeBinding: routeBindingFor(input.route),
+        routeBinding,
+        gatewaySessionId: prepared.gatewaySessionId,
+        preparationToken: prepared.preparationToken,
+        workloadRequestDigest: createHash("sha256").update(brokerOpenBody).digest("hex"),
+        callerPublicKey: options.caller.publicKey,
       });
-      const value = await jsonRequest(fetchImpl, `${opened.brokerUrl.replace(/\/$/, "")}/v1/session`, {
+      const response = await fetchImpl(`${opened.brokerUrl.replace(/\/$/, "")}/v1/session`, {
         method: "POST",
-        headers: brokerOpenHeaders(opened),
-        body: JSON.stringify({
-          gateway_session_id: input.gatewaySessionId,
-          session_params: input.sessionParams,
-        }),
-      }, openWire);
+        headers: brokerOpenHeaders(opened, options.caller),
+        body: brokerOpenBody,
+      });
+      if (response.status === 503 && response.headers.get(HEADER.ERROR) === "capacity_exhausted") {
+        await settleCapacityOpen(loc, opened, prepared.gatewaySessionId, response);
+        throw new PaidSessionClientError("capacity_exhausted", { retryable: true });
+      }
+      const value = await parseResponse(response, openWire);
       if (
         value.work_id !== opened.workId ||
         value.runtime.schema !== input.descriptorSchema ||
@@ -173,7 +210,7 @@ export function createPaidSessionClient(
       ) throw invalidEvidence();
       return {
         opened,
-        gatewaySessionId: input.gatewaySessionId,
+        gatewaySessionId: prepared.gatewaySessionId,
         brokerSessionId: value.session_id,
         workId: value.work_id,
         state: value.state,
@@ -225,6 +262,8 @@ export function createPaidSessionClient(
       if (
         value.session_id !== input.brokerSessionId ||
         value.work_id !== input.workId ||
+        value.authorization_id !== value.work_id ||
+        value.balance.authorization_id !== value.authorization_id ||
         value.runtime.schema !== controlDescriptor(input.opened) ||
         value.usage.unit !== controlWorkUnit(input.opened) ||
         value.balance.unit !== controlWorkUnit(input.opened) ||
@@ -256,9 +295,8 @@ export function createPaidSessionClient(
           operationId: input.opened.operationId,
           requestId: input.requestId,
           ...(input.observedConsumedUnits === undefined ? {} : { observedConsumedUnits: input.observedConsumedUnits }),
-          ...(input.rebindFrom === undefined
-            ? {}
-            : { rebindFrom: input.rebindFrom, replacesRequestId: input.replacesRequestId }),
+          maxTotalUnits: input.maxTotalUnits,
+          workloadRequestDigest: createHash("sha256").update("{}").digest("hex"),
         });
       } catch (error) {
         if (error instanceof LocTransportError) {
@@ -270,13 +308,15 @@ export function createPaidSessionClient(
         throw error;
       }
       const headers = authHeaders(input.credential);
-      headers.set(HEADER.PAYMENT, refill.paymentEnvelope);
+      headers.set(HEADER.AUTHORIZATION, refill.spendAuthorization);
+      headers.set(HEADER.CALLER_PROOF, options.caller.signAuthorization(refill.spendAuthorization));
       headers.set(HEADER.REQUEST_ID, refill.requestId);
-      if (refill.rebindFrom) headers.set(HEADER.REBIND_FROM, refill.rebindFrom);
+      headers.set("Content-Type", "application/json");
+      if (refill.paymentEnvelope) headers.set(HEADER.PAYMENT, refill.paymentEnvelope);
       const value = await jsonRequest(
         fetchImpl,
         brokerControlUrl(input.opened, input.brokerSessionId, "/topup"),
-        { method: "POST", headers },
+        { method: "POST", headers, body: "{}" },
         topupWire,
       );
       if (
@@ -315,6 +355,7 @@ export function createPaidSessionClient(
         lookup.wire.session_id !== input.brokerSessionId ||
         lookup.wire.gateway_session_id !== input.gatewaySessionId ||
         lookup.wire.work_id !== body.work_id ||
+        lookup.wire.authorization_id !== lookup.wire.work_id ||
         lookup.wire.unit !== controlWorkUnit(input.opened) ||
         lookup.wire.claimed_units !== lookup.wire.debited_units ||
         lookup.wire.state !== "closed"
@@ -327,6 +368,8 @@ export function createPaidSessionClient(
         requiredString(payload.gateway_session_id) !== input.gatewaySessionId ||
         requiredString(payload.session_id) !== input.brokerSessionId ||
         requiredString(payload.work_id) !== lookup.wire.work_id ||
+        requiredString(payload.authorization_id) !== lookup.wire.authorization_id ||
+        requiredString(payload.settlement_domain_id) !== controlSettlementDomain(input.opened) ||
         requiredString(payload.work_unit_name) !== lookup.wire.unit ||
         actualUnits !== lookup.wire.claimed_units ||
         safeUnits(payload.claimed_units) !== actualUnits ||
@@ -404,6 +447,55 @@ export function parsePaidSessionControlEvent(value: unknown) {
   }
 }
 
+async function settleCapacityOpen(
+  loc: LocClient,
+  opened: LocOpenSessionResult,
+  gatewaySessionId: string,
+  response: Response,
+): Promise<void> {
+  let body: z.infer<typeof capacityOpenWire>;
+  try {
+    body = capacityOpenWire.parse(await response.json());
+  } catch (cause) {
+    throw new PaidSessionClientError("paid_session_response_invalid", { retryable: false, cause });
+  }
+  const encoded = response.headers.get(HEADER.SETTLEMENT);
+  if (!encoded) throw invalidEvidence();
+  const envelope = decodeEnvelope(encoded);
+  const payload = envelope.payload;
+  const outcome = requiredString(payload.outcome);
+  if (
+    body.gateway_session_id !== gatewaySessionId ||
+    body.work_id !== opened.workId ||
+    requiredString(payload.gateway_session_id) !== gatewaySessionId ||
+    requiredString(payload.session_id) !== body.session_id ||
+    requiredString(payload.work_id) !== opened.workId ||
+    requiredString(payload.authorization_id) !== opened.workId ||
+    requiredString(payload.settlement_domain_id) !== opened.routeSnapshot.settlementDomainId ||
+    requiredString(payload.work_unit_name) !== opened.routeSnapshot.workUnit ||
+    safeUnits(payload.actual_units) !== 0 ||
+    safeUnits(payload.claimed_units) !== 0 ||
+    safeUnits(payload.debited_units) !== 0
+  ) throw invalidEvidence();
+  try {
+    const accounting = await loc.closeSession({
+      operationId: opened.operationId,
+      actualUnits: 0,
+      outcome,
+      settlement: envelope,
+    });
+    if (accounting.workId !== opened.workId || accounting.actualUnits !== 0) throw invalidEvidence();
+  } catch (error) {
+    if (error instanceof LocTransportError) {
+      throw new PaidSessionClientError(error.remoteCode ?? error.code, {
+        retryable: error.retryable,
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
 async function settlementLookup(
   fetchImpl: typeof globalThis.fetch,
   opened: { brokerUrl: string },
@@ -419,15 +511,18 @@ async function settlementLookup(
   return { wire, envelope: decodeEnvelope(encoded) };
 }
 
-function brokerOpenHeaders(opened: LocOpenSessionResult): Headers {
-  return new Headers({
+function brokerOpenHeaders(opened: LocOpenSessionResult, caller: CallerProofIdentity): Headers {
+  const headers = new Headers({
     [HEADER.CAPABILITY]: opened.routeSnapshot.capability,
     [HEADER.OFFERING]: opened.routeSnapshot.offering,
-    [HEADER.PAYMENT]: opened.paymentEnvelope,
+    [HEADER.AUTHORIZATION]: opened.spendAuthorization,
+    [HEADER.CALLER_PROOF]: caller.signAuthorization(opened.spendAuthorization),
     [HEADER.PROTOCOL]: PROTOCOL,
     [HEADER.REQUEST_ID]: opened.requestId,
     "Content-Type": "application/json",
   });
+  if (opened.paymentEnvelope) headers.set(HEADER.PAYMENT, opened.paymentEnvelope);
+  return headers;
 }
 
 function authHeaders(credential: string): Headers {
@@ -446,6 +541,12 @@ function controlDescriptor(opened: PaidSessionRefillRequest["opened"]): string {
 
 function controlWorkUnit(opened: PaidSessionRefillRequest["opened"]): string {
   return "workUnit" in opened ? opened.workUnit : opened.routeSnapshot.workUnit;
+}
+
+function controlSettlementDomain(opened: PaidSessionRefillRequest["opened"]): string {
+  return "settlementDomainId" in opened
+    ? opened.settlementDomainId
+    : opened.routeSnapshot.settlementDomainId;
 }
 
 async function jsonRequest<T extends z.ZodType>(
@@ -494,6 +595,13 @@ function mapBalance(value: z.infer<typeof balanceWire>): PaidSessionBalance {
     claimedUnits: value.claimed_units,
     debitedUnits: value.debited_units,
     unit: value.unit,
+    authorizationId: value.authorization_id,
+    authorizationMaxUnits: value.authorization_max_units,
+    authorizationCapRemainingUnits: value.authorization_cap_remaining_units,
+    authorizationReservedValueWei: value.authorization_reserved_value_wei,
+    cumulativeBilledValueWei: value.cumulative_billed_value_wei,
+    accountAvailableValueWei: value.account_available_value_wei ?? null,
+    accountVersion: value.account_version ?? null,
     runwayUnits: value.runway_units ?? null,
     runwaySecondsEstimate: value.runway_seconds_estimate ?? null,
     status: value.status,
@@ -514,7 +622,6 @@ function validateOpen(input: PaidSessionOpenRequest): void {
   if (
     input.route.protocol !== PROTOCOL ||
     input.route.session?.descriptorSchema !== input.descriptorSchema ||
-    input.gatewaySessionId.length === 0 ||
     input.requestId.length === 0 ||
     !Number.isSafeInteger(input.estimatedRunwayUnits) ||
     input.estimatedRunwayUnits < 1 ||
@@ -545,7 +652,8 @@ function validTimestamp(value: string): boolean {
 function validateRefill(input: PaidSessionRefillRequest): void {
   if (
     input.requestId.length === 0 ||
-    ((input.rebindFrom === undefined) !== (input.replacesRequestId === undefined))
+    !Number.isSafeInteger(input.maxTotalUnits) ||
+    input.maxTotalUnits < 1
   ) throw invalidRequest();
 }
 

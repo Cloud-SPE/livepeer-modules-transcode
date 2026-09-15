@@ -251,6 +251,7 @@ export const paidOperations = media.table(
     quoteVersion: text("quote_version").notNull(),
     constraintFingerprint: text("constraint_fingerprint").notNull(),
     routeFingerprint: text("route_fingerprint").notNull(),
+    settlementDomainId: text("settlement_domain_id"),
     settlementKey: text("settlement_key").notNull(),
     routeSnapshot: jsonb("route_snapshot").notNull(),
     status: text("status").notNull(),

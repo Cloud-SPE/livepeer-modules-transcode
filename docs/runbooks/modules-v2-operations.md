@@ -12,16 +12,23 @@ output-health enforcement.
 ## Required boundary
 
 - Configure resolver-only discovery with `LIVEPEER_RESOLVER_SOCKET`.
-- Configure LOC with both `LIVEPEER_LOC_URL` and `LIVEPEER_LOC_API_KEY`.
+- Use the current Modules catalog offering IDs: `abr-default` for customer
+  VOD/ABR and `gateway-ingest` for live, unless the deployment deliberately
+  overrides those catalog entries.
+- Configure LOC with `LIVEPEER_LOC_URL`, `LIVEPEER_LOC_API_KEY`, and a
+  secret-manager-backed `LIVEPEER_CALLER_PRIVATE_KEY` (64 lowercase hex
+  characters). Keep the delegated caller key stable across restart; drain all
+  paid work before rotating it.
 - Provide a canonical base64 32-byte `LIVEPEER_OPERATION_SECRETS_KEK` and an
   operator-visible `LIVEPEER_OPERATION_SECRETS_KEY_ID` outside Postgres.
 - Configure S3 for VOD. Live additionally requires
   `LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL` and `RTMP_RELAY_ENABLED=true`.
 - Remove all legacy payer/funding variables. Startup rejects them explicitly.
 
-Never log or copy LOC credentials, payment envelopes, grants, session
-credentials, or the private runner ingest URL/key. Database backups contain
-encrypted session material; the wrapping key must be backed up separately.
+Never log or copy LOC credentials, the caller private key, authorizations,
+caller proofs, payment envelopes, grants, session credentials, or the private
+runner ingest URL/key. Database backups contain encrypted session material;
+the wrapping key must be backed up separately.
 
 ## Observe
 
@@ -64,6 +71,16 @@ hosts, the ladder-start log includes bounded `encoder_sessions` and
 `live_gpu_telemetry_probes_total{result="unavailable"}` means the pressure
 snapshot failed, not that the customer session itself failed.
 
+On a member where live, ABR, and VOD share one physical GPU, all three runners
+must report `gpu_admission_configured` and use one `GPU_ADMISSION_LOCK` base
+derived from the physical GPU UUID. Live and batch work form separate cohorts:
+same-cohort concurrency is governed by each runner's local limit, while a
+cross-cohort request returns `capacity_reached` before FFmpeg. Rising
+`gpu_admission_rejections` or `live_gpu_admission_rejected_total` is expected
+during a conflicting cohort; a missing admission configuration on a co-located
+host is a deployment defect. Do not infer that increasing three independent
+queue limits increases safe physical-GPU capacity.
+
 ## Recover VOD jobs
 
 The recovery scanner claims expired leases and replays the encrypted canonical
@@ -94,6 +111,9 @@ the reconciler running and do not mark the stream successfully ended by hand.
 1. Pin the approved Modules, LOC, gateway, ABR runner, and live runner SHAs.
 2. Back up Postgres and verify access to the operation-secrets wrapping key.
 3. Run repository gates and the joint real-process VOD/live matrix.
+   On co-located GPU hosts, also verify that rendered runner services share one
+   GPU-UUID-keyed admission mount, then test same-cohort concurrency and
+   cross-cohort refusal in both start orders.
 4. Stop admission, drain or settle existing operations, then deploy LOC,
    Modules, runners, and gateway in the coordinated release order recorded by
    the release bead.

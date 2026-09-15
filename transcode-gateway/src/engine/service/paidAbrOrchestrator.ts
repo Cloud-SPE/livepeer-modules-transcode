@@ -255,7 +255,7 @@ async function destinations(storage: StorageProvider, assetId: string, name: str
 }
 
 function paidRoute(route: SelectedWorkerRoute): PaidRouteSnapshot {
-  if (!route.quoteId || !route.quoteVersion || !route.constraintFingerprint || !route.routeFingerprint || !route.unitsPerPrice) {
+  if (!route.quoteId || !route.quoteVersion || !route.constraintFingerprint || !route.routeFingerprint || !route.unitsPerPrice || !route.settlementDomainId) {
     throw new Error("paid ABR route binding is incomplete");
   }
   const key = route.settlementKeys[0];
@@ -281,11 +281,13 @@ function paidRoute(route: SelectedWorkerRoute): PaidRouteSnapshot {
     quoteVersion: route.quoteVersion,
     constraintFingerprint: Buffer.from(route.constraintFingerprint).toString("hex"),
     routeFingerprint: Buffer.from(route.routeFingerprint).toString("hex"),
+    settlementDomainId: route.settlementDomainId,
     settlementKey: key.publicKey,
     raw: {
       broker_url: route.workerUrl,
       eth_address: route.ethAddress,
       protocol: route.protocol,
+      settlement_domain_id: route.settlementDomainId,
     },
   };
 }

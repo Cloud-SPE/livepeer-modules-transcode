@@ -17,12 +17,13 @@ func TestEncryptedStoreCreateReplayAndRestart(t *testing.T) {
 	key := bytes.Repeat([]byte{0x2a}, 32)
 	store := newTestStoreV1(t, dir, key)
 	request, response := testCreatePairV1(t)
+	request.WorkID = "loc-auth:ce3fa091-844e-4004-b532-39d7d935061f"
 
 	record, secrets, replay, err := store.CreateOrReplay(request, response)
 	if err != nil || replay {
 		t.Fatalf("create replay=%v err=%v", replay, err)
 	}
-	if record.BrokerSessionID != request.SessionID || secrets.CreateRequest.CallbackToken != request.CallbackToken {
+	if record.BrokerSessionID != request.SessionID || secrets.CreateRequest.WorkID != request.WorkID || secrets.CreateRequest.CallbackToken != request.CallbackToken {
 		t.Fatal("created state does not preserve session identity and private callback state")
 	}
 	statePath := filepath.Join(dir, request.SessionID+".json")
@@ -45,7 +46,7 @@ func TestEncryptedStoreCreateReplayAndRestart(t *testing.T) {
 
 	restarted := newTestStoreV1(t, dir, key)
 	replayedRecord, replayedSecrets, replay, err := restarted.CreateOrReplay(request, response)
-	if err != nil || !replay || replayedRecord.RunnerSessionID != record.RunnerSessionID || replayedSecrets.CreateResponse.Runtime.Grants[0].Secret != "grant-secret-fixture" {
+	if err != nil || !replay || replayedRecord.RunnerSessionID != record.RunnerSessionID || replayedSecrets.CreateRequest.WorkID != request.WorkID || replayedSecrets.CreateResponse.Runtime.Grants[0].Secret != "grant-secret-fixture" {
 		t.Fatalf("restart replay=%v record=%+v err=%v", replay, replayedRecord, err)
 	}
 	changed := request

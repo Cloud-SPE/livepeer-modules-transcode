@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,7 +104,7 @@ func testVODServiceV2(t *testing.T) *VODServiceV2 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewVODServiceV2(store, []transcode.Preset{{Name: "h264-720p", VideoCodec: "h264", Width: 1280, Height: 720}}, transcode.HWProfile{}, 1)
+	service, err := NewVODServiceV2(store, []transcode.Preset{{Name: "h264-720p", VideoCodec: "h264", Width: 1280, Height: 720}}, transcode.HWProfile{}, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +124,41 @@ func TestVODRequestContractMatchesCertificationShape(t *testing.T) {
 	req.Rendition.Codec = "av1"
 	if _, err := service.validateAndResolve(req); err == nil {
 		t.Fatal("expected unsupported AV1 shape to fail without an AV1 preset")
+	}
+}
+
+func TestVODSharedGPUAdmissionRejectsActiveLiveCohort(t *testing.T) {
+	directory := t.TempDir()
+	gate, err := transcode.NewGPUAdmissionGate(filepath.Join(directory, "gpu.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveLease, err := gate.Acquire(transcode.GPUAdmissionLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveLease.Close()
+	store, err := NewVODStoreV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewVODServiceV2(store, []transcode.Preset{{Name: "h264-720p", VideoCodec: "h264", Width: 1280, Height: 720}}, transcode.HWProfile{}, 4, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testVODRequestV2()
+	hash, err := vodRequestHashV2(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.loadOrCreate(request.WorkloadID, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.subscribe(request, service.presets[0], hash, "new"); !errors.Is(err, errVODCapacity) {
+		t.Fatalf("subscribe error=%v, want capacity", err)
+	}
+	if service.gpuAdmissionRejected.Load() != 1 || service.active.Load() != 0 {
+		t.Fatalf("rejections=%d active=%d", service.gpuAdmissionRejected.Load(), service.active.Load())
 	}
 }
 

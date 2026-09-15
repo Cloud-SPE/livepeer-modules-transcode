@@ -20,6 +20,7 @@ function candidate(brokerUrl: string): VideoRouteCandidate {
     session: null,
     workUnitEstimator: null,
     settlementKeys: [],
+    settlementDomainId: null,
     quoteId: null,
     quoteVersion: null,
     constraintFingerprint: null,

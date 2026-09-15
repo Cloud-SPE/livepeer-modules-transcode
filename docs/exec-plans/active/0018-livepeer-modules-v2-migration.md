@@ -8,6 +8,7 @@ owner: livepeer-modules-transcode
 tracker: Beads epic lmt-65a
 related:
   - docs/references/2026-08-22-livepeer-modules-v2-contract-baseline.md
+  - docs/references/2026-09-11-wholesale-only-paid-workloads-transition.md
   - docs/design-docs/architecture-overview.md
   - docs/design-docs/transcode-pipeline.md
   - docs/design-docs/live-pipeline.md
@@ -27,7 +28,29 @@ This is a retrofit, not a compatibility project. The old wire path has been
 deleted. The plan remains active for upstream readiness evidence, the joint
 release matrix, and coordinated deployment/rollback acceptance.
 
+The payment model is also undergoing a coordinated hard cut. Every paid job,
+session open, and session cap revision will require a scoped wholesale-account
+authorization. A payment envelope may fund bounded account shortfall but can
+no longer authorize workload execution by itself. The 2026-09-11 transition
+reference records the decision and active upstream gates; it is not yet an
+approved immutable replacement for the 2026-08-24 baseline.
+
 ## Locked product contracts
+
+### Payment authorization
+
+LOC remains the gateway's sole network accounting boundary. It owns the
+stable payer-payee account, scoped authorization, optional shortfall funding,
+recovery, and settlement. The gateway persists operation
+identity and route/quote inputs before calling LOC; it never mints
+`Livepeer-Authorization` or falls back to a payment-only broker request. It
+does hold a delegated, non-payer caller key and signs the opaque LOC-issued
+authorization to create `Livepeer-Caller-Proof`.
+
+The cutover removes negotiated wholesale feature flags. Protocol identity
+implies authorization-backed accounting, and active legacy engagements must
+be drained before deployment rather than migrated by inventing authorization
+state.
 
 ### VOD
 
@@ -95,13 +118,16 @@ The migration cannot ship on repository-local evidence alone:
 
 - Modules must publish production-ready paid-job behavior, including a
   terminal response usage extractor that implements the agreed ABR formula
-  and timeout behavior suitable for long encodes (`lmt-65a.1.6`).
+  and timeout behavior suitable for long encodes, on the sole
+  authorization-backed accounting path (`lmt-65a.1.6`).
 - Modules must publish paid-session production evidence for external
-  attachment, grants, concurrency, lease/refill, control events, and winddown
-  (`lmt-65a.1.5`).
+  attachment, grants, concurrency, authorization cap revisions, control
+  events, and winddown (`lmt-65a.1.5`).
 - LOC must publish a stable TypeScript SDK and a live pilot demonstrating job
-  and session lifecycle, durable idempotency/recovery, and actionable protocol
-  errors (`lmt-65a.1.4`).
+  and session lifecycle through wholesale authorization only, durable
+  idempotency/recovery, and actionable protocol errors (`lmt-65a.1.4`).
+- Modules `lnm-4zb` and LOC `loc-0m4` must finish the authorization-only hard
+  cut and publish compatible immutable revisions (`lmt-65a.1.22`).
 - LOC/clearinghouse must resolve recipient-rand rotation sufficiently that a
   recoverable rotation cannot become an unrecoverable live outage.
 
@@ -118,15 +144,19 @@ funding cannot refill indefinitely.
 
 The joint matrix pins mutually compatible gateway, registry, broker, runner,
 and LOC revisions and exercises unary refusal, streaming VOD, live open/
-attach/refill/end, timeout and reconnect, restart recovery, malformed claims,
-and recipient rotation on production-shaped infrastructure.
+attach/cap-revision/end, timeout and reconnect, restart recovery, malformed
+claims, authorization replay/scope, optional shortfall funding, and recipient
+rotation on production-shaped infrastructure. It also proves that
+payment-only workload attempts fail before execution.
 
 ## Cutover and rollback
 
 Cutover is coordinated across route manifests, Modules broker/runners, LOC,
 and this gateway. The release removes legacy mode headers/adapters, `/v1/cap`
 calls, direct payer-daemon code, compensating settles, and stale configuration.
-No component is upgraded alone.
+It also removes payment-only workload admission and the negotiated wholesale
+feature flag. Active legacy jobs and sessions are drained before the upgrade;
+closed historical records remain audit-only. No component is upgraded alone.
 
 Transcode release images are built through `infra/scripts/build-images.sh`,
 which preserves the codec-base dependency order and hardware-specific runner

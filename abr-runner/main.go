@@ -29,6 +29,7 @@ var (
 	hw               transcode.HWProfile
 	abrPresets       []transcode.ABRPreset
 	abrCoordinatorV2 *ABRExecutionCoordinatorV2
+	gpuAdmission     *transcode.GPUAdmissionGate
 )
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -86,7 +87,11 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	if abrCoordinatorV2 != nil {
 		active = abrCoordinatorV2.Active()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "gpu": hw.GPUName, "vram_mb": hw.VRAM_MB, "active_jobs": active, "max_jobs": maxQueueSize, "presets": len(abrPresets)})
+	rejections := uint64(0)
+	if abrCoordinatorV2 != nil {
+		rejections = abrCoordinatorV2.gpuAdmissionRejected.Load()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "gpu": hw.GPUName, "vram_mb": hw.VRAM_MB, "active_jobs": active, "max_jobs": maxQueueSize, "presets": len(abrPresets), "gpu_admission_configured": gpuAdmission != nil && gpuAdmission.Configured(), "gpu_admission_rejections": rejections})
 }
 
 func checkRunnerHealth(ctx context.Context, addr string) error {
@@ -161,7 +166,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	abrCoordinatorV2, err = NewABRExecutionCoordinatorV2(store, executor, maxQueueSize)
+	gpuAdmission, err = transcode.NewGPUAdmissionGate(os.Getenv("GPU_ADMISSION_LOCK"))
+	if err != nil {
+		log.Fatalf("initialize GPU admission: %v", err)
+	}
+	abrCoordinatorV2, err = NewABRExecutionCoordinatorV2(store, executor, maxQueueSize, gpuAdmission)
 	if err != nil {
 		log.Fatal(err)
 	}

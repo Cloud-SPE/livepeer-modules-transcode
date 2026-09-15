@@ -66,6 +66,7 @@ export interface VideoRouteCandidate {
   session: PaidSessionAxes | null;
   workUnitEstimator: WorkUnitEstimator | null;
   settlementKeys: SettlementKey[];
+  settlementDomainId: string | null;
   quoteId: string | null;
   quoteVersion: string | null;
   constraintFingerprint: Uint8Array | null;
@@ -162,6 +163,7 @@ interface SelectedRoute {
   protocol?: string;
   settlementKeys?: unknown[];
   workUnitEstimator?: unknown;
+  settlementDomainId?: string;
 }
 
 interface ResolverNode {
@@ -386,6 +388,7 @@ function flattenResolveResult(resolved: ResolveResult): VideoRouteCandidate[] {
           // ResolveByAddress is an inspection surface; delegated keys are
           // available on the dispatch-safe Select/SelectMany result.
           settlementKeys: [],
+          settlementDomainId: null,
           quoteId: null,
           quoteVersion: null,
           constraintFingerprint: null,
@@ -407,7 +410,8 @@ function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate | null 
   const estimator = parseOptionalEstimator(route.workUnitEstimator);
   if (estimator === false) return null;
   const settlementKeys = parseSettlementKeys(route.settlementKeys ?? []);
-  if (!settlementKeys || settlementKeys.length === 0) return null;
+  const settlementDomainId = parseSettlementDomainId(route.settlementDomainId);
+  if (!settlementKeys || settlementKeys.length === 0 || !settlementDomainId) return null;
   return {
     brokerUrl: route.workerUrl,
     ethAddress: route.ethAddress,
@@ -420,6 +424,7 @@ function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate | null 
     session: declaration.session,
     workUnitEstimator: estimator,
     settlementKeys,
+    settlementDomainId,
     quoteId: route.quoteId ?? null,
     quoteVersion: parseOptionalUint64(route.quoteVersion),
     constraintFingerprint: parseOpaqueBytes(route.constraintFingerprint),
@@ -428,6 +433,12 @@ function flattenSelectedRoute(route: SelectedRoute): VideoRouteCandidate | null 
     extra,
     constraints: parseOpaqueJson(route.constraintsJson),
   };
+}
+
+function parseSettlementDomainId(value: unknown): string | null {
+  return typeof value === "string" && /^0x[0-9a-f]{64}$/.test(value) && !/^0x0{64}$/.test(value)
+    ? value
+    : null;
 }
 
 function protocolFromExtra(extra: JsonValue | null): string {

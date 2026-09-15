@@ -9,11 +9,12 @@ import (
 // LiveRunnerMetricsV1 is deliberately bounded: HTTP status is a finite label
 // domain, and callback bodies never become metric labels.
 type LiveRunnerMetricsV1 struct {
-	callbackRejected [600]atomic.Uint64
-	ladderStarts     [7]atomic.Uint64
-	ladderExits      [6]atomic.Uint64
-	sessionsStalled  atomic.Uint64
-	gpuProbes        [3]atomic.Uint64
+	callbackRejected     [600]atomic.Uint64
+	ladderStarts         [7]atomic.Uint64
+	ladderExits          [6]atomic.Uint64
+	sessionsStalled      atomic.Uint64
+	gpuProbes            [3]atomic.Uint64
+	gpuAdmissionRejected atomic.Uint64
 }
 
 var ladderMetricCodesV1 = [...]string{"encoder_init_failed", "hwaccel_init_failed", "input_unavailable", "output_rejected", "process_killed", "unknown", "started"}
@@ -60,6 +61,12 @@ func (m *LiveRunnerMetricsV1) RecordGPUProbe(result string) {
 	}
 }
 
+func (m *LiveRunnerMetricsV1) RecordGPUAdmissionRejected() {
+	if m != nil {
+		m.gpuAdmissionRejected.Add(1)
+	}
+}
+
 func (m *LiveRunnerMetricsV1) ServeHTTP(writer http.ResponseWriter, _ *http.Request) {
 	writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	_, _ = fmt.Fprintln(writer, "# HELP live_callback_rejected_total Permanently rejected live runner callbacks.")
@@ -93,6 +100,9 @@ func (m *LiveRunnerMetricsV1) ServeHTTP(writer http.ResponseWriter, _ *http.Requ
 			_, _ = fmt.Fprintf(writer, "live_gpu_telemetry_probes_total{result=\"%s\"} %d\n", result, count)
 		}
 	}
+	_, _ = fmt.Fprintln(writer, "# HELP live_gpu_admission_rejected_total Live sessions rejected by local or shared GPU admission.")
+	_, _ = fmt.Fprintln(writer, "# TYPE live_gpu_admission_rejected_total counter")
+	_, _ = fmt.Fprintf(writer, "live_gpu_admission_rejected_total %d\n", m.gpuAdmissionRejected.Load())
 }
 
 func ladderMetricCodeIndexV1(code string) int {

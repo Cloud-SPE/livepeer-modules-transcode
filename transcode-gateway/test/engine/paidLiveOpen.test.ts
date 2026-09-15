@@ -40,10 +40,10 @@ test("paid live open binds durable identities and encrypted private ingest befor
           operationId: "loc-operation-1",
           requestId: "broker-request-1",
           brokerUrl: "https://broker.example",
-          session: { descriptorSchema: "rtmp-hls/v1", maxRotations: 3 },
+          session: { descriptorSchema: "rtmp-hls/v1" },
           routeSnapshot: { workUnit: "output_seconds" },
         },
-        gatewaySessionId: "live-1",
+        gatewaySessionId: "f00ac946-92f7-4b47-9231-ecc360ef4c68",
         brokerSessionId: "broker-session-1",
         workId: "work-1",
         state: "active",
@@ -56,7 +56,7 @@ test("paid live open binds durable identities and encrypted private ingest befor
         },
         grants: [{ id: "grant-1", operations: ["stream-key-issue"], secret: "grant-secret", expiresAt: "2030-01-01T00:00:00Z" }],
         leaseExpiresAt: "2030-01-01T00:00:00Z",
-        balance: { claimedUnits: 0, debitedUnits: 0, unit: "output_seconds", runwayUnits: 60, runwaySecondsEstimate: 60, status: "ok", willRefuseNextRefill: false },
+        balance: { claimedUnits: 0, debitedUnits: 0, unit: "output_seconds", authorizationId: "work-1", authorizationMaxUnits: 60, authorizationCapRemainingUnits: 60, authorizationReservedValueWei: "60", cumulativeBilledValueWei: "0", accountAvailableValueWei: "1000", accountVersion: 1, runwayUnits: 60, runwaySecondsEstimate: 60, status: "ok", willRefuseNextRefill: false },
         control: { statusUrl: "https://broker.example/status", topupUrl: "https://broker.example/topup", endUrl: "https://broker.example/end", eventsWs: "wss://broker.example/events" },
       };
     },
@@ -110,7 +110,7 @@ function operationFixture(version: string): PaidOperation {
   return {
     id: "operation-1", kind: "session", apiKeyId: "api-key-1", liveStreamId: "live-1",
     requestId: "pending:req_1", requestContentSha256: "a".repeat(64), workId: "pending:req_1",
-    rotationGeneration: 0, route: { protocol: "paid-session/v1", capability: "video:transcode.live", offering: "live-standard", requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1", workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1", quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32), settlementKey: "key-1", raw: {} },
+    rotationGeneration: 0, route: { protocol: "paid-session/v1", capability: "video:transcode.live", offering: "live-standard", requestDescriptor: "rtmp-hls-session/v1", responseDescriptor: "rtmp-hls/v1", workUnit: "output_seconds", pricePerUnitWei: "1", unitsPerPrice: "1", quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: "01".repeat(32), routeFingerprint: "02".repeat(32), settlementDomainId: `0x${"03".repeat(32)}`, settlementKey: "key-1", raw: {} },
     status: "opening", fundedUnits: "60", settlementSequence: "0", lifecycleVersion: version,
     recoveryOwner: "gateway-1", recoveryLeaseExpiresAt: new Date("2030-01-01T00:00:00Z"),
     sessionRuntime: { publisherMode: "gateway-relay", relayStatus: "pending", relayGeneration: 0, lastRunnerSequence: "0", lastRunnerUsage: "0" },
@@ -123,8 +123,9 @@ function routeFixture(): SelectedWorkerRoute {
     workerUrl: "https://broker.example", ethAddress: "0x1111111111111111111111111111111111111111",
     capability: "video:transcode.live", offering: "live-standard", pricePerWorkUnitWei: "1",
     unitsPerPrice: "1", workUnit: "output_seconds", protocol: "paid-session/v1", job: null,
-    session: { descriptorSchema: "rtmp-hls/v1", attachment: "external", metering: "runner-reported", maxRotations: 3, refill: "extensible", heartbeat: { intervalSeconds: 5, missedThreshold: 3 }, lease: { policy: "funding-tracking" } },
+    session: { descriptorSchema: "rtmp-hls/v1", attachment: "external", metering: "runner-reported", refill: "extensible", heartbeat: { intervalSeconds: 5, missedThreshold: 3 }, lease: { policy: "funding-tracking" } },
     workUnitEstimator: null, settlementKeys: [{ publicKey: "key-1", notBefore: "2026-01-01T00:00:00Z", expiresAt: "2030-01-01T00:00:00Z", introducedInPublicationSeq: "1" }],
     quoteId: "quote-1", quoteVersion: "1", constraintFingerprint: Buffer.from("01".repeat(32), "hex"), routeFingerprint: Buffer.from("02".repeat(32), "hex"),
+    settlementDomainId: `0x${"03".repeat(32)}`,
   };
 }

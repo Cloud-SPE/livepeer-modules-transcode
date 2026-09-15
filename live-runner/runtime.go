@@ -146,8 +146,9 @@ func classifyLiveLadderExitV1(err error, tail []string) string {
 }
 
 type activeLiveSessionV1 struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel   context.CancelFunc
+	done     chan struct{}
+	gpuLease *transcode.GPUAdmissionLease
 }
 
 type LiveRuntimeCoordinatorV1 struct {
@@ -169,13 +170,14 @@ type LiveRuntimeCoordinatorV1 struct {
 	log               *slog.Logger
 	metrics           *LiveRunnerMetricsV1
 	gpuPressure       GPUPressureSamplerV1
+	gpuAdmission      *transcode.GPUAdmissionGate
 	capacity          chan struct{}
 
 	mu       sync.Mutex
 	sessions map[string]*activeLiveSessionV1
 }
 
-func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, meter LiveSessionMeterV1, presets []transcode.ABRPreset, hardware transcode.HWProfile, routerRTMPBase, internalTokenRoot string, pollInterval time.Duration, maxConcurrent int) (*LiveRuntimeCoordinatorV1, error) {
+func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, meter LiveSessionMeterV1, presets []transcode.ABRPreset, hardware transcode.HWProfile, routerRTMPBase, internalTokenRoot string, pollInterval time.Duration, maxConcurrent int, admission *transcode.GPUAdmissionGate) (*LiveRuntimeCoordinatorV1, error) {
 	if store == nil || router == nil || launcher == nil || meter == nil || len(presets) == 0 || len(internalTokenRoot) < 32 || pollInterval <= 0 || maxConcurrent < 0 {
 		return nil, errors.New("live runtime dependencies are incomplete")
 	}
@@ -201,7 +203,7 @@ func NewLiveRuntimeCoordinatorV1(store *EncryptedFileSessionStoreV1, router Medi
 	return &LiveRuntimeCoordinatorV1{
 		store: store, router: router, launcher: launcher, meter: meter, presets: byName, hardware: hardware,
 		routerRTMPBase: strings.TrimRight(routerRTMPBase, "/"), internalTokenRoot: internalTokenRoot,
-		pollInterval: pollInterval, capacity: capacity, sessions: make(map[string]*activeLiveSessionV1),
+		pollInterval: pollInterval, gpuAdmission: admission, capacity: capacity, sessions: make(map[string]*activeLiveSessionV1),
 		restartInitial: 250 * time.Millisecond, restartMax: 5 * time.Second, failureWindow: time.Minute,
 		maxFailures: 5, cleanupTimeout: 5 * time.Second, now: time.Now, log: slog.Default(), metrics: &LiveRunnerMetricsV1{},
 		gpuPressure: NVIDIASMIPressureSamplerV1{Timeout: time.Second},
@@ -243,8 +245,22 @@ func (c *LiveRuntimeCoordinatorV1) EnsureSession(_ context.Context, record Sessi
 		c.mu.Unlock()
 		return nil
 	}
+	if !c.acquireLocal() {
+		c.metrics.RecordGPUAdmissionRejected()
+		c.mu.Unlock()
+		return transcode.ErrGPUAdmissionCapacity
+	}
+	lease, err := c.gpuAdmission.Acquire(transcode.GPUAdmissionLive)
+	if err != nil {
+		c.releaseLocal()
+		if errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+			c.metrics.RecordGPUAdmissionRejected()
+		}
+		c.mu.Unlock()
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	active := &activeLiveSessionV1{cancel: cancel, done: make(chan struct{})}
+	active := &activeLiveSessionV1{cancel: cancel, done: make(chan struct{}), gpuLease: lease}
 	c.sessions[record.RunnerSessionID] = active
 	c.mu.Unlock()
 	if record.LastSequence == 0 {
@@ -252,6 +268,8 @@ func (c *LiveRuntimeCoordinatorV1) EnsureSession(_ context.Context, record Sessi
 		if err != nil {
 			cancel()
 			c.remove(record.RunnerSessionID, active)
+			_ = lease.Close()
+			c.releaseLocal()
 			return err
 		}
 		event := RunnerEventV1{
@@ -261,6 +279,8 @@ func (c *LiveRuntimeCoordinatorV1) EnsureSession(_ context.Context, record Sessi
 		if err := c.store.Advance(record.BrokerSessionID, event); err != nil {
 			cancel()
 			c.remove(record.RunnerSessionID, active)
+			_ = lease.Close()
+			c.releaseLocal()
 			return err
 		}
 	}
@@ -320,6 +340,8 @@ func (c *LiveRuntimeCoordinatorV1) Shutdown(ctx context.Context) error {
 func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSessionV1, record SessionRecordV1, secrets SessionSecretsV1) {
 	defer close(active.done)
 	defer c.remove(record.RunnerSessionID, active)
+	defer c.releaseLocal()
+	defer active.gpuLease.Close()
 	runContext, cancel := context.WithCancel(ctx)
 	meterDone := make(chan string, 1)
 	go func() {
@@ -347,9 +369,6 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		if _, err := c.router.WaitForRTMPPublisher(runContext, ingestPath, c.pollInterval); err != nil {
 			return
 		}
-		if !c.acquire(runContext) {
-			return
-		}
 		c.observeGPUPressure(runContext, record.RunnerSessionID)
 		process, startErr := c.launcher.Start(runContext, inputURL, outputs, c.hardware, transcode.ProbeResult{})
 		exit := LiveLadderExitV1{Code: classifyLiveLadderExitV1(startErr, nil), Err: startErr}
@@ -367,7 +386,6 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 				if reason != "" {
 					c.failSession(record, cancel, reason, processDone)
 				}
-				c.release()
 				return
 			case <-runContext.Done():
 				exit = <-processDone
@@ -375,7 +393,6 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		} else {
 			c.metrics.RecordLadderStart(exit.Code)
 		}
-		c.release()
 		if runContext.Err() != nil {
 			return
 		}
@@ -465,19 +482,19 @@ func (c *LiveRuntimeCoordinatorV1) failSession(record SessionRecordV1, cancel co
 	}
 }
 
-func (c *LiveRuntimeCoordinatorV1) acquire(ctx context.Context) bool {
+func (c *LiveRuntimeCoordinatorV1) acquireLocal() bool {
 	if c.capacity == nil {
 		return true
 	}
 	select {
 	case c.capacity <- struct{}{}:
 		return true
-	case <-ctx.Done():
+	default:
 		return false
 	}
 }
 
-func (c *LiveRuntimeCoordinatorV1) release() {
+func (c *LiveRuntimeCoordinatorV1) releaseLocal() {
 	if c.capacity != nil {
 		<-c.capacity
 	}

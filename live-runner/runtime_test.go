@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -170,6 +171,53 @@ func TestLiveRuntimeWaitsForPublisherLaunchesOnceAndTerminates(t *testing.T) {
 	}
 }
 
+func TestLiveGPUAdmissionRejectsBatchLeaseAndRecovers(t *testing.T) {
+	directory := t.TempDir()
+	gate, err := transcode.NewGPUAdmissionGate(filepath.Join(directory, "gpu.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchLease, err := gate.Acquire(transcode.GPUAdmissionBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x71}, 32))
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 4, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, secrets := createRuntimeSessionV1(t, store, "sess_gpu_admission", "runner_gpu_admission")
+	if err := coordinator.EnsureSession(context.Background(), record, secrets); !errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+		t.Fatalf("ensure error=%v, want capacity", err)
+	}
+	if coordinator.metrics.gpuAdmissionRejected.Load() != 1 || len(coordinator.sessions) != 0 {
+		t.Fatalf("rejections=%d sessions=%d", coordinator.metrics.gpuAdmissionRejected.Load(), len(coordinator.sessions))
+	}
+	if err := batchLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.EnsureSession(context.Background(), record, secrets); err != nil {
+		t.Fatalf("ensure after batch release: %v", err)
+	}
+	secondRecord, secondSecrets := createRuntimeSessionV1(t, store, "sess_gpu_admission_two", "runner_gpu_admission_two")
+	if err := coordinator.EnsureSession(context.Background(), secondRecord, secondSecrets); err != nil {
+		t.Fatalf("second live session in same cohort: %v", err)
+	}
+	if len(coordinator.sessions) != 2 {
+		t.Fatalf("same-cohort live sessions=%d, want 2", len(coordinator.sessions))
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := coordinator.Shutdown(shutdown); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := gate.Acquire(transcode.GPUAdmissionBatch)
+	if err != nil {
+		t.Fatalf("live shutdown did not release exclusive lease: %v", err)
+	}
+	defer probe.Close()
+}
+
 func TestLiveRuntimeTerminationWithoutActiveFFmpegPropagatesKickFailure(t *testing.T) {
 	kicked := make(chan string, 1)
 	wantErr := errors.New("router unavailable")
@@ -193,7 +241,7 @@ func TestLiveRuntimeTerminationWithoutActiveFFmpegPropagatesKickFailure(t *testi
 func TestLiveRuntimeTerminationJoinsSessionMeter(t *testing.T) {
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x77}, 32))
 	meter := trackingLiveMeterV1{started: make(chan struct{}), stopped: make(chan struct{})}
-	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, meter, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, meter, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +317,7 @@ func TestLiveRuntimeValidatesProfileAndMeteringRendition(t *testing.T) {
 
 func TestLiveRuntimeConstructorRejectsNonRTMPRouter(t *testing.T) {
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x75}, 32))
-	_, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "http://127.0.0.1:1935", strings.Repeat("x", 32), time.Millisecond, 1)
+	_, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: make(chan struct{})}, &fakeLiveLauncherV1{}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "http://127.0.0.1:1935", strings.Repeat("x", 32), time.Millisecond, 1, nil)
 	if err == nil {
 		t.Fatal("non-RTMP internal router URL was accepted")
 	}
@@ -280,7 +328,7 @@ func TestLiveRuntimeBoundsRestartsAndFailsOutput(t *testing.T) {
 	close(ready)
 	kicked := make(chan string, 2)
 	store := newTestStoreV1(t, t.TempDir(), bytes.Repeat([]byte{0x78}, 32))
-	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: ready, kicked: kicked}, failedLiveLauncherV1{code: "encoder_init_failed"}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1)
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, fakePublisherWaiterV1{ready: ready, kicked: kicked}, failedLiveLauncherV1{code: "encoder_init_failed"}, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +406,7 @@ func TestLiveRuntimeLogsSafeNVIDIAPressureAndDegradesTelemetryFailure(t *testing
 
 func newTestRuntimeCoordinatorV1(t *testing.T, store *EncryptedFileSessionStoreV1, router MediaPublisherWaiterV1, launcher LiveLadderLauncherV1, capacity int) *LiveRuntimeCoordinatorV1 {
 	t.Helper()
-	coordinator, err := NewLiveRuntimeCoordinatorV1(store, router, launcher, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, capacity)
+	coordinator, err := NewLiveRuntimeCoordinatorV1(store, router, launcher, noopLiveMeterV1{}, testLivePresetsV1(), transcode.HWProfile{}, "rtmp://127.0.0.1:1935", strings.Repeat("i", 32), time.Millisecond, capacity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,6 +417,7 @@ func createRuntimeSessionV1(t *testing.T, store *EncryptedFileSessionStoreV1, br
 	t.Helper()
 	request, response := testCreatePairV1(t)
 	request.SessionID = brokerSessionID
+	request.WorkID = "loc-auth:" + brokerSessionID
 	request.SessionParams.OutputProfile = "live-standard"
 	response.RunnerSessionID = runnerSessionID
 	response.Runtime.Public.HLSURL = "https://runner.example/hls/" + runnerSessionID + "/master.m3u8"

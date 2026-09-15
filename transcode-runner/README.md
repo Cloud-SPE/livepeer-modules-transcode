@@ -32,6 +32,15 @@ Operators supply one of:
 - **Intel QSV** — `--device /dev/dri/renderD128` + `i965-va-driver`
 - **AMD VAAPI** — `--device /dev/dri/renderD128` + `mesa-va-drivers`
 
+When VOD, ABR, and live runners share one physical GPU, mount one host-shared
+directory into every container and set `GPU_ADMISSION_LOCK` to the same clean,
+absolute lock-file base path. VOD joins the batch cohort for each execution,
+allowing batch concurrency while the live cohort is absent. An active live
+cohort causes new VOD work to return `429 capacity_reached` before FFmpeg starts.
+An invalid configured path fails runner startup. `/healthz` reports whether the
+domain is configured and the cumulative rejection count without exposing the
+path.
+
 ## License
 
 MIT — repo-root applies.

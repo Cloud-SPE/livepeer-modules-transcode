@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	transcode "github.com/Cloud-SPE/livepeer-modules-transcode/transcode-core"
 )
 
 const maxRunnerRequestBodyV1 = 256 * 1024
@@ -184,6 +186,10 @@ func (s *LiveRunnerServerV1) handleCreateV1(writer http.ResponseWriter, request 
 	}
 	secrets = *currentSecrets
 	if err := s.Runtime.EnsureSession(request.Context(), record, secrets); err != nil {
+		if errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+			writeRunnerErrorV1(writer, http.StatusTooManyRequests, "capacity_reached")
+			return
+		}
 		writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "runtime_unavailable")
 		return
 	}

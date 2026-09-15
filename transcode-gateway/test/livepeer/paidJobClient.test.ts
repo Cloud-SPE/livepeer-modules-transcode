@@ -11,11 +11,15 @@ import type { SelectedWorkerRoute } from "../../src/engine/types/index.js";
 import { HEADER } from "../../src/livepeer/headers.js";
 import { createPaidJobClient } from "../../src/livepeer/paidJobClient.js";
 
+const settlementDomainId = `0x${"55".repeat(32)}`;
+const caller = { publicKey: `02${"66".repeat(32)}`, signAuthorization: () => "caller-proof" };
+
 const binding = {
   quoteId: "quote-1",
   quoteVersion: "7",
   constraintFingerprint: "11".repeat(32),
   routeFingerprint: "22".repeat(32),
+  settlementDomainId,
 };
 const route = {
   workerUrl: "https://broker.example",
@@ -34,6 +38,7 @@ const route = {
   quoteVersion: binding.quoteVersion,
   constraintFingerprint: Buffer.from(binding.constraintFingerprint, "hex"),
   routeFingerprint: Buffer.from(binding.routeFingerprint, "hex"),
+  settlementDomainId,
 } satisfies SelectedWorkerRoute;
 const opened: LocOpenJobResult = {
   operationId: "b728b1a9-1ad8-4598-9382-92fca5d3bdf8",
@@ -54,6 +59,7 @@ const opened: LocOpenJobResult = {
     pricePerWorkUnitWei: "1",
     unitsPerPrice: "1",
     binding,
+    settlementDomainId,
     settlementKeys: [],
     workUnitEstimator: null,
     job: route.job,
@@ -61,7 +67,10 @@ const opened: LocOpenJobResult = {
     extra: {},
     raw: {},
   },
-  paymentEnvelope: "payment-1",
+  spendAuthorization: Buffer.from("authorization-1").toString("base64"),
+  paymentEnvelope: null,
+  expectedValueWei: "0",
+  fundedValueWei: "0",
   settleEndpoint: "/v1/jobs/b728b1a9-1ad8-4598-9382-92fca5d3bdf8/settle",
   openedAt: "2026-08-24T00:00:00Z",
 };
@@ -81,6 +90,8 @@ function envelope(overrides: Record<string, unknown> = {}) {
       debited_units: "12",
       outcome: "EXACT",
       work_id: opened.workId,
+      authorization_id: opened.workId,
+      settlement_domain_id: settlementDomainId,
       job_id: "broker-job-1",
       request_id: opened.requestId,
       ...overrides,
@@ -111,13 +122,16 @@ function fakeLoc() {
         operationId: input.operationId,
         workId: opened.workId,
         actualUnits: input.actualUnits,
-        billedValueWei: 12,
-        refundWei: 0,
+        billedValueWei: "12",
+        refundWei: "0",
         outcome: input.outcome,
         closedAt: "2026-08-24T00:01:00Z",
       };
     },
     async openSession() {
+      throw new Error("unused");
+    },
+    async prepareSession() {
       throw new Error("unused");
     },
     async refillSession() {
@@ -149,6 +163,7 @@ test("paid-job unary execution uses the v2 wire and forwards verified settlement
   const { loc, settlements } = fakeLoc();
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = createPaidJobClient(loc, {
+    caller,
     fetch: async (url, init) => {
       calls.push({ url: String(url), init });
       return new Response('{"output":"ok"}', {
@@ -170,16 +185,48 @@ test("paid-job unary execution uses the v2 wire and forwards verified settlement
   const headers = new Headers(calls[0]?.init?.headers);
   assert.equal(headers.get(HEADER.PROTOCOL), "paid-job/v1");
   assert.equal(headers.get(HEADER.REQUEST_ID), opened.requestId);
-  assert.equal(headers.get(HEADER.PAYMENT), opened.paymentEnvelope);
+  assert.equal(headers.get(HEADER.AUTHORIZATION), opened.spendAuthorization);
+  assert.equal(headers.get(HEADER.CALLER_PROOF), "caller-proof");
+  assert.equal(headers.has(HEADER.PAYMENT), false);
   assert.equal(Buffer.from(calls[0]?.init?.body as Uint8Array).toString(), '{"input":"asset-1"}');
   assert.equal(settlements[0]?.brokerJobId, "broker-job-1");
   assert.equal(settlements[0]?.actualUnits, 12);
+});
+
+test("post-admission runner capacity settles zero with LOC before surfacing the refusal", async () => {
+  const { loc, settlements } = fakeLoc();
+  const client = createPaidJobClient(loc, {
+    caller,
+    fetch: async () => new Response('{"error":{"code":"capacity_exhausted"}}', {
+      status: 503,
+      headers: {
+        [HEADER.ERROR]: "capacity_exhausted",
+        [HEADER.JOB_ID]: "broker-job-1",
+        [HEADER.WORK_UNITS]: "0",
+        [HEADER.WORK_UNIT]: route.workUnit,
+        [HEADER.SETTLEMENT]: encodedSettlement({
+          actual_units: "0",
+          billed_units: "0",
+          debited_units: "0",
+        }),
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.execute(request()),
+    (error: unknown) => error instanceof PaidJobClientError &&
+      error.code === "capacity_exhausted" && error.retryable,
+  );
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0]?.actualUnits, 0);
 });
 
 test("stream execution selects SSE and retrieves a terminal trailer claim by job id", async () => {
   const { loc } = fakeLoc();
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = createPaidJobClient(loc, {
+    caller,
     fetch: async (url, init) => {
       calls.push({ url: String(url), init });
       if (String(url).includes("/v1/settlement/")) {
@@ -207,6 +254,7 @@ test("exact retries preserve request id and body while changed-body reuse remain
   const { loc } = fakeLoc();
   const bodies: string[] = [];
   const client = createPaidJobClient(loc, {
+    caller,
     fetch: async (_url, init) => {
       const body = Buffer.from(init?.body as Uint8Array).toString();
       bodies.push(body);
@@ -246,6 +294,7 @@ test("recovery models every non-settled broker exchange outcome", async () => {
   ] as const;
   for (const [outcome, kind, extra] of cases) {
     const client = createPaidJobClient(fakeLoc().loc, {
+      caller,
       fetch: async () => Response.json({ request_id: opened.requestId, outcome, ...extra }),
     });
     assert.equal((await client.recover(opened)).kind, kind);
@@ -254,6 +303,7 @@ test("recovery models every non-settled broker exchange outcome", async () => {
 
 test("accounting pending is bounded and DEBIT_FAILED or identity drift fails closed", async () => {
   const pending = createPaidJobClient(fakeLoc().loc, {
+    caller,
     accountingPollAttempts: 2,
     accountingPollDelayMs: 0,
     fetch: async (url) =>
@@ -267,8 +317,14 @@ test("accounting pending is bounded and DEBIT_FAILED or identity drift fails clo
   });
   assert.equal((await pending.recover(opened)).kind, "accounting_pending");
 
-  for (const overrides of [{ outcome: "DEBIT_FAILED" }, { request_id: "different" }]) {
+  for (const overrides of [
+    { outcome: "DEBIT_FAILED" },
+    { request_id: "different" },
+    { authorization_id: "different" },
+    { settlement_domain_id: `0x${"77".repeat(32)}` },
+  ]) {
     const client = createPaidJobClient(fakeLoc().loc, {
+      caller,
       fetch: async () => Response.json({
         request_id: opened.requestId,
         job_id: "broker-job-1",
@@ -290,6 +346,7 @@ test("accounting pending is bounded and DEBIT_FAILED or identity drift fails clo
 test("product terminal validation runs before LOC settlement", async () => {
   const { loc, settlements } = fakeLoc();
   const client = createPaidJobClient(loc, {
+    caller,
     fetch: async () => new Response("data: unsafe\n\n", {
       headers: {
         [HEADER.JOB_ID]: "broker-job-1",

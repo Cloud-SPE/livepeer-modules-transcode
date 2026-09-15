@@ -49,25 +49,28 @@ type abrExecutionV2 struct {
 	requestSHA256 string
 	cancel        context.CancelFunc
 	subscribers   map[uint64]chan struct{}
+	gpuLease      *transcode.GPUAdmissionLease
 }
 
 type ABRExecutionCoordinatorV2 struct {
-	store    *FileWorkloadStoreV2
-	executor ABRExecutorV2
-	limit    int
+	store        *FileWorkloadStoreV2
+	executor     ABRExecutorV2
+	limit        int
+	gpuAdmission *transcode.GPUAdmissionGate
 
-	mu             sync.Mutex
-	active         map[string]*abrExecutionV2
-	nextSubscriber uint64
-	activeCount    atomic.Int32
+	mu                   sync.Mutex
+	active               map[string]*abrExecutionV2
+	nextSubscriber       uint64
+	activeCount          atomic.Int32
+	gpuAdmissionRejected atomic.Uint64
 }
 
-func NewABRExecutionCoordinatorV2(store *FileWorkloadStoreV2, executor ABRExecutorV2, limit int) (*ABRExecutionCoordinatorV2, error) {
+func NewABRExecutionCoordinatorV2(store *FileWorkloadStoreV2, executor ABRExecutorV2, limit int, admission *transcode.GPUAdmissionGate) (*ABRExecutionCoordinatorV2, error) {
 	if store == nil || executor == nil || limit <= 0 {
 		return nil, errors.New("store, executor, and positive execution limit are required")
 	}
 	return &ABRExecutionCoordinatorV2{
-		store: store, executor: executor, limit: limit, active: make(map[string]*abrExecutionV2),
+		store: store, executor: executor, limit: limit, gpuAdmission: admission, active: make(map[string]*abrExecutionV2),
 	}, nil
 }
 
@@ -108,11 +111,20 @@ func (c *ABRExecutionCoordinatorV2) Subscribe(req ABRWorkloadRequestV2, requestS
 		if len(c.active) >= c.limit {
 			return nil, false, errABRExecutionCapacityV2
 		}
+		lease, err := c.gpuAdmission.Acquire(transcode.GPUAdmissionBatch)
+		if errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+			c.gpuAdmissionRejected.Add(1)
+			return nil, false, errABRExecutionCapacityV2
+		}
+		if err != nil {
+			return nil, false, err
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		execution = &abrExecutionV2{
 			requestSHA256: requestSHA256,
 			cancel:        cancel,
 			subscribers:   make(map[uint64]chan struct{}),
+			gpuLease:      lease,
 		}
 		c.active[req.WorkloadID] = execution
 		c.activeCount.Add(1)
@@ -227,6 +239,7 @@ func (c *ABRExecutionCoordinatorV2) finish(workloadID string) {
 	}
 	delete(c.active, workloadID)
 	c.activeCount.Add(-1)
+	_ = execution.gpuLease.Close()
 	for _, subscriber := range execution.subscribers {
 		close(subscriber)
 	}

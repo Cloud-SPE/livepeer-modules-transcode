@@ -31,6 +31,15 @@ listener addresses, its internal auth URL, the state directory, binary path,
 and encoder concurrency have `LIVE_RUNNER_*` overrides; private HLS, API, and
 metrics addresses are still rejected unless loopback-only.
 
+`GPU_ADMISSION_LOCK` optionally names a clean, absolute lock-file base path on
+a host-shared mount. A live session joins the physical GPU's live cohort at
+create time and holds it through termination, while VOD and ABR join the batch
+cohort. Multiple same-cohort workloads remain allowed up to their runner-local
+limits; cross-cohort admission returns
+`429 capacity_reached` before a ladder starts. A configured path that is
+missing or unsafe fails startup; kernel lease release reconciles runner
+process crashes.
+
 Output health defaults to a 20-second stall deadline and a 60-second failure
 deadline after authenticated ingest appears. Operators may set
 `LIVE_RUNNER_OUTPUT_STALL_DEADLINE` and `LIVE_RUNNER_OUTPUT_FAIL_DEADLINE` as
@@ -96,9 +105,10 @@ opaque to callers but composes as
 `<runner-session-id>?token=<rotated-secret>`, so joining the two supplies
 MediaMTX with exactly the scoped `ingest/<runner-session-id>` path and token.
 
-An idempotent runtime coordinator watches the loopback MediaMTX path API for
-the session's authenticated RTMP publisher. Only then does it acquire encoder
-capacity and start one context-bound FFmpeg process that decodes once and
+An idempotent runtime coordinator reserves local and shared physical-GPU
+capacity when the session is created, then watches the loopback MediaMTX path
+API for the session's authenticated RTMP publisher. It starts one context-bound
+FFmpeg process that decodes once and
 publishes the selected ladder back to the private rendition paths. Unexpected
 exits while ingest remains online emit durable, safely classified restart
 events and retry with bounded exponential backoff. FFmpeg diagnostics are held

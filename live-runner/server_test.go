@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	transcode "github.com/Cloud-SPE/livepeer-modules-transcode/transcode-core"
 )
 
 const testBrokerTokenV1 = "broker-token-0123456789abcdef0123"
@@ -21,6 +23,7 @@ type fakeLiveRuntimeV1 struct {
 	ensureCount     int
 	terminateCount  int
 	failEnsure      bool
+	ensureErr       error
 	failTerminate   bool
 	failValidation  bool
 	activationCount int
@@ -41,7 +44,20 @@ func (f *fakeLiveRuntimeV1) EnsureSession(context.Context, SessionRecordV1, Sess
 	if f.failEnsure {
 		return errors.New("unsafe runtime detail")
 	}
+	if f.ensureErr != nil {
+		return f.ensureErr
+	}
 	return nil
+}
+
+func TestLiveRunnerReportsGPUAdmissionAsCapacity(t *testing.T) {
+	handler, _, runtime := testLiveRunnerHandlerV1(t)
+	runtime.ensureErr = transcode.ErrGPUAdmissionCapacity
+	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	response := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+	if response.Code != http.StatusTooManyRequests || !bytes.Contains(response.Body.Bytes(), []byte(`"error":"capacity_reached"`)) {
+		t.Fatalf("capacity response=%d %s", response.Code, response.Body.String())
+	}
 }
 
 func (f *fakeLiveRuntimeV1) TerminateSession(context.Context, SessionRecordV1) error {
@@ -67,6 +83,7 @@ func (f *fakeLiveRuntimeV1) ActivateStreamKey(context.Context, SessionRecordV1) 
 func TestLiveRunnerCreateReplayStatusAndTerminate(t *testing.T) {
 	handler, store, runtime := testLiveRunnerHandlerV1(t)
 	create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+	create.WorkID = "loc-auth:ce3fa091-844e-4004-b532-39d7d935061f"
 
 	unauthorized := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, "")
 	if unauthorized.Code != http.StatusUnauthorized {

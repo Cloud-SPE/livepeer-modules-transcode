@@ -32,12 +32,20 @@ their source paths are recorded in the introducing commit.
 
 ## 5. LOC owns the network payment boundary
 
-The Livepeer Open Clearinghouse (LOC) SDK/API owns funding, signing,
-opening, claiming, settlement, recovery, and payer-daemon interaction. The
+The Livepeer Open Clearinghouse (LOC) SDK/API owns funding, authorization
+issuance, opening, claiming, settlement, recovery, and payer-daemon interaction. The
 gateway supplies a selected route, a conservative funded ceiling, and a
 stable request ID; it does not mint payment headers or settle brokers
 directly. Customer pricing, Stripe, and a product usage ledger remain
 separate product concerns.
+
+Paid workloads are authorization-only. LOC maintains the stable payer-payee
+wholesale account and issues each route- and workload-scoped authorization.
+The gateway holds a delegated caller key and signs the opaque authorization to
+produce the caller proof required by every job, session open, and session cap
+revision; it never holds or uses the payer key.
+`Livepeer-Payment` may replenish bounded account shortfall, but never
+authorizes transcode work by itself. There is no payment-only fallback.
 
 **Why:** Payment state must converge in one durable system. Splitting it
 between the gateway, broker, payer daemon, and compensating queues recreates
