@@ -5,7 +5,7 @@ PROFILE      ?= vod-nvidia
 PROFILES := \
 	vod-nvidia vod-intel vod-amd vod-cpu \
 	abr-nvidia abr-intel abr-amd \
-	live-nvidia live-intel live-amd
+	live-nvidia live-intel live-amd live-cpu
 
 .PHONY: validate config up down logs
 

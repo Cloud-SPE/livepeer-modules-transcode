@@ -16,6 +16,7 @@
 # Env:
 #   REGISTRY  default: tztcloud
 #   TAG       default: v0.1.0 (from infra/build/image-versions.env)
+#   CODECS_IMAGE override the runner codec base with an immutable reference
 #   VERSION   default: derived from the exact git tag or git SHA
 #   PUSH      set to 1 to push deployable release images after each build
 
@@ -33,6 +34,7 @@ fi
 REGISTRY="${REGISTRY:-tztcloud}"
 TAG="${TAG:-${IMAGE_TAG_DEFAULT:-v0.1.0}}"
 PUSH="${PUSH:-0}"
+CODECS_IMAGE="${CODECS_IMAGE:-${REGISTRY}/codecs-builder:${TAG}}"
 DEFAULT_VERSION="$(VERSION_PREFIX="$TAG" FALLBACK_VERSION="$TAG" ./infra/build/git-version.sh)"
 VERSION="${VERSION:-$DEFAULT_VERSION}"
 REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
@@ -64,6 +66,7 @@ fi
 declare -a GLOBAL_BUILD_ARGS=(
   "--build-arg=REGISTRY=${REGISTRY}"
   "--build-arg=TAG=${TAG}"
+  "--build-arg=CODECS_IMAGE=${CODECS_IMAGE}"
   "--build-arg=GO_VERSION=${GO_VERSION:-1.25.7}"
   "--build-arg=NODE_VERSION=${NODE_VERSION:-24}"
   "--build-arg=UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}"

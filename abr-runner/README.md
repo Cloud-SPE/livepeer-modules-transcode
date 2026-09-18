@@ -120,3 +120,9 @@ make image TARGET=runtime-amd    TAG=v0.1.0
 ## License
 
 MIT — repo-root applies.
+
+For the current release, pass `TAG=v2.0.0`. The image target passes
+`CODECS_IMAGE` explicitly, defaulting to `tztcloud/codecs-builder:TAG`.
+Build that local base first, or set `CODECS_IMAGE` to a reviewed immutable
+reference. Release matrix commands and provenance are in
+[`infra/README.md`](../infra/README.md).

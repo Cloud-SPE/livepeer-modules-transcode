@@ -4,7 +4,10 @@ This directory is the deployable Portainer stack for one Docker Standalone
 host with NVIDIA Container Toolkit and a GTX 1080. It pulls the production
 `v2.0.0` images; it does not build on the server.
 
-VOD and ABR retain their immutable `v2.0.0` Docker Hub references. Set
+VOD and ABR pin the `v2.0.0-runtime-nvidia` images built from `9c726fd`,
+including shared GPU admission. These replace the old vendor-named image
+repositories. Stop all three runners before this coordinated upgrade so no
+older runner can execute outside the admission lock. Set
 `LIVE_NVIDIA_IMAGE` to the vendor-specific live image. During local
 qualification it may be `tztcloud/live-runner-nvidia:v2.0.0`; before a
 production redeploy, replace it with the immutable digest emitted by the

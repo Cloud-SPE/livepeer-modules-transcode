@@ -18,9 +18,10 @@ build/push helpers.
 
 - Image: `tztcloud/codecs-builder`
 - Default tag: `v0.1.0` (this repo)
-- Source repo uses `v1.2.0`; the runner Dockerfiles default to
-  `v1.2.0` too. Override at runner build time with
-  `--build-arg TAG=v0.1.0`.
+- Runner Dockerfiles default to this same development tag. Component
+  Makefiles and the release builder explicitly pass `CODECS_IMAGE`, defaulting
+  to `REGISTRY/codecs-builder:TAG`. Use `TAG=v2.0.0` for the current release
+  or select a reviewed immutable base with `CODECS_IMAGE`.
 - All libs install under `/usr/local/{lib,include}`. Downstream
   ffmpeg stages `COPY --from=codecs-builder /usr/local /usr/local`.
 

@@ -21,13 +21,48 @@ x-live-environment: &live-environment
   LIVE_RUNNER_MAX_CONCURRENT: ${LIVE_RUNNER_MAX_CONCURRENT:-1}
 
 services:
+  gpu-admission-init:
+    profiles: [vod-nvidia, vod-intel, vod-amd, abr-nvidia, abr-intel, abr-amd, live-nvidia, live-intel, live-amd]
+    platform: linux/amd64
+    image: ${LIVE_CPU_IMAGE:-tztcloud/live-runner-cpu:v2.0.0}
+    user: "0:0"
+    read_only: true
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - |
+        case "$${NVIDIA_GPU_ID}" in
+          ""|*[!a-zA-Z0-9_.-]*) echo "invalid NVIDIA_GPU_ID lock key" >&2; exit 1 ;;
+        esac
+        for key in "nvidia-$${NVIDIA_GPU_ID}" dri; do
+          for suffix in mutex live batch; do
+            touch "/var/lib/livepeer-gpu-admission/$$key.$$suffix"
+            chmod 0666 "/var/lib/livepeer-gpu-admission/$$key.$$suffix"
+          done
+        done
+    environment:
+      NVIDIA_GPU_ID: ${NVIDIA_GPU_ID:-0}
+    volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
+
   vod-nvidia:
     <<: *paid-job-runner
     profiles: [vod-nvidia]
-    image: ${VOD_NVIDIA_IMAGE:-tztcloud/transcode-runner:v2-dev-runtime-nvidia}
+    image: ${VOD_NVIDIA_IMAGE:-tztcloud/transcode-runner:v2.0.0-runtime-nvidia}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/nvidia-${NVIDIA_GPU_ID:-0}
     ports:
       - 127.0.0.1:${VOD_NVIDIA_PORT:-18080}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - vod-nvidia-state:/var/lib/transcode-runner
     deploy:
       resources:
@@ -40,10 +75,17 @@ services:
   vod-intel:
     <<: *paid-job-runner
     profiles: [vod-intel]
-    image: ${VOD_INTEL_IMAGE:-tztcloud/transcode-runner:v2-dev-runtime-intel}
+    image: ${VOD_INTEL_IMAGE:-tztcloud/transcode-runner:v2.0.0-runtime-intel}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
     ports:
       - 127.0.0.1:${VOD_INTEL_PORT:-18081}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - vod-intel-state:/var/lib/transcode-runner
     devices:
       - /dev/dri:/dev/dri
@@ -54,10 +96,17 @@ services:
   vod-amd:
     <<: *paid-job-runner
     profiles: [vod-amd]
-    image: ${VOD_AMD_IMAGE:-tztcloud/transcode-runner:v2-dev-runtime-amd}
+    image: ${VOD_AMD_IMAGE:-tztcloud/transcode-runner:v2.0.0-runtime-amd}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
     ports:
       - 127.0.0.1:${VOD_AMD_PORT:-18082}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - vod-amd-state:/var/lib/transcode-runner
     devices:
       - /dev/dri:/dev/dri
@@ -70,7 +119,7 @@ services:
   vod-cpu:
     <<: *paid-job-runner
     profiles: [vod-cpu]
-    image: ${VOD_CPU_IMAGE:-tztcloud/transcode-runner:v2-dev-runtime-cpu}
+    image: ${VOD_CPU_IMAGE:-tztcloud/transcode-runner:v2.0.0-runtime-cpu}
     ports:
       - 127.0.0.1:${VOD_CPU_PORT:-18083}:8080
     volumes:
@@ -79,10 +128,17 @@ services:
   abr-nvidia:
     <<: *paid-job-runner
     profiles: [abr-nvidia]
-    image: ${ABR_NVIDIA_IMAGE:-tztcloud/abr-runner:v2-dev-runtime-nvidia}
+    image: ${ABR_NVIDIA_IMAGE:-tztcloud/abr-runner:v2.0.0-runtime-nvidia}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/nvidia-${NVIDIA_GPU_ID:-0}
     ports:
       - 127.0.0.1:${ABR_NVIDIA_PORT:-18180}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - abr-nvidia-state:/var/lib/abr-runner
     deploy:
       resources:
@@ -95,10 +151,17 @@ services:
   abr-intel:
     <<: *paid-job-runner
     profiles: [abr-intel]
-    image: ${ABR_INTEL_IMAGE:-tztcloud/abr-runner:v2-dev-runtime-intel}
+    image: ${ABR_INTEL_IMAGE:-tztcloud/abr-runner:v2.0.0-runtime-intel}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
     ports:
       - 127.0.0.1:${ABR_INTEL_PORT:-18181}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - abr-intel-state:/var/lib/abr-runner
     devices:
       - /dev/dri:/dev/dri
@@ -109,10 +172,17 @@ services:
   abr-amd:
     <<: *paid-job-runner
     profiles: [abr-amd]
-    image: ${ABR_AMD_IMAGE:-tztcloud/abr-runner:v2-dev-runtime-amd}
+    image: ${ABR_AMD_IMAGE:-tztcloud/abr-runner:v2.0.0-runtime-amd}
+    environment:
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
     ports:
       - 127.0.0.1:${ABR_AMD_PORT:-18182}:8080
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - abr-amd-state:/var/lib/abr-runner
     devices:
       - /dev/dri:/dev/dri
@@ -124,15 +194,20 @@ services:
   live-nvidia:
     <<: *paid-job-runner
     profiles: [live-nvidia]
-    image: ${LIVE_NVIDIA_IMAGE:-tztcloud/live-runner-nvidia:v2-dev}
+    image: ${LIVE_NVIDIA_IMAGE:-tztcloud/live-runner-nvidia:v2.0.0}
     environment:
       <<: *live-environment
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/nvidia-${NVIDIA_GPU_ID:-0}
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVE_NVIDIA_PUBLIC_RTMP_URL:-rtmp://127.0.0.1:1935}
       LIVEPEER_PUBLIC_URL: ${LIVE_NVIDIA_PUBLIC_URL:-http://127.0.0.1:18280}
     ports:
       - ${LIVE_NVIDIA_HTTP_BIND:-127.0.0.1}:${LIVE_NVIDIA_HTTP_PORT:-18280}:8080
       - ${LIVE_NVIDIA_RTMP_BIND:-0.0.0.0}:${LIVE_NVIDIA_RTMP_PORT:-1935}:1935
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - live-nvidia-state:/var/lib/live-runner
     deploy:
       resources:
@@ -145,15 +220,20 @@ services:
   live-intel:
     <<: *paid-job-runner
     profiles: [live-intel]
-    image: ${LIVE_INTEL_IMAGE:-tztcloud/live-runner-intel:v2-dev}
+    image: ${LIVE_INTEL_IMAGE:-tztcloud/live-runner-intel:v2.0.0}
     environment:
       <<: *live-environment
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVE_INTEL_PUBLIC_RTMP_URL:-rtmp://127.0.0.1:1936}
       LIVEPEER_PUBLIC_URL: ${LIVE_INTEL_PUBLIC_URL:-http://127.0.0.1:18281}
     ports:
       - ${LIVE_INTEL_HTTP_BIND:-127.0.0.1}:${LIVE_INTEL_HTTP_PORT:-18281}:8080
       - ${LIVE_INTEL_RTMP_BIND:-0.0.0.0}:${LIVE_INTEL_RTMP_PORT:-1936}:1935
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - live-intel-state:/var/lib/live-runner
     devices:
       - /dev/dri:/dev/dri
@@ -164,15 +244,20 @@ services:
   live-amd:
     <<: *paid-job-runner
     profiles: [live-amd]
-    image: ${LIVE_AMD_IMAGE:-tztcloud/live-runner-amd:v2-dev}
+    image: ${LIVE_AMD_IMAGE:-tztcloud/live-runner-amd:v2.0.0}
     environment:
       <<: *live-environment
+      GPU_ADMISSION_LOCK: /var/lib/livepeer-gpu-admission/dri
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVE_AMD_PUBLIC_RTMP_URL:-rtmp://127.0.0.1:1937}
       LIVEPEER_PUBLIC_URL: ${LIVE_AMD_PUBLIC_URL:-http://127.0.0.1:18282}
     ports:
       - ${LIVE_AMD_HTTP_BIND:-127.0.0.1}:${LIVE_AMD_HTTP_PORT:-18282}:8080
       - ${LIVE_AMD_RTMP_BIND:-0.0.0.0}:${LIVE_AMD_RTMP_PORT:-1937}:1935
+    depends_on:
+      gpu-admission-init:
+        condition: service_completed_successfully
     volumes:
+      - gpu-admission:/var/lib/livepeer-gpu-admission
       - live-amd-state:/var/lib/live-runner
     devices:
       - /dev/dri:/dev/dri
@@ -184,7 +269,7 @@ services:
   live-cpu:
     <<: *paid-job-runner
     profiles: [live-cpu]
-    image: ${LIVE_CPU_IMAGE:-tztcloud/live-runner-cpu:v2-dev}
+    image: ${LIVE_CPU_IMAGE:-tztcloud/live-runner-cpu:v2.0.0}
     environment:
       <<: *live-environment
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVE_CPU_PUBLIC_RTMP_URL:-rtmp://127.0.0.1:1938}
@@ -196,6 +281,7 @@ services:
       - live-cpu-state:/var/lib/live-runner
 
 volumes:
+  gpu-admission:
   vod-nvidia-state:
   vod-intel-state:
   vod-amd-state:

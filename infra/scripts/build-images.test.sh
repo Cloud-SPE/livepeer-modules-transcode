@@ -53,6 +53,26 @@ PATH="${TMP_DIR}:${PATH}" REGISTRY=example.test TAG=test "$SCRIPT" abr-runner-in
 grep -Fq 'example.test/abr-runner:test-runtime-intel' "$DOCKER_LOG"
 grep -Fq -- '--target runtime-intel .' "$DOCKER_LOG"
 
+# The selected release tag must reach the codec base, independently of output tags.
+grep -Fq -- '--build-arg=CODECS_IMAGE=example.test/codecs-builder:test' "$DOCKER_LOG"
+: >"$DOCKER_LOG"
+PATH="${TMP_DIR}:${PATH}" CODECS_IMAGE=example.test/codecs@sha256:reviewed \
+  TAG=test "$SCRIPT" transcode-runner-nvidia >/dev/null 2>&1
+grep -Fq -- '--build-arg=CODECS_IMAGE=example.test/codecs@sha256:reviewed' "$DOCKER_LOG"
+
+for component in transcode-runner abr-runner; do
+  : >"$DOCKER_LOG"
+  PATH="${TMP_DIR}:${PATH}" make -s -C "$ROOT/$component" image \
+    REGISTRY=example.test TAG=test TARGET=runtime-intel >/dev/null 2>&1
+  grep -Fq -- '--build-arg CODECS_IMAGE=example.test/codecs-builder:test' "$DOCKER_LOG"
+  grep -Fq -- "-t example.test/$component:test-runtime-intel" "$DOCKER_LOG"
+  grep -Fq -- 'org.opencontainers.image.revision=0123456789abcdef0123456789abcdef01234567' "$DOCKER_LOG"
+  : >"$DOCKER_LOG"
+  PATH="${TMP_DIR}:${PATH}" make -s -C "$ROOT/$component" image \
+    TAG=test CODECS_IMAGE=example.test/codecs@sha256:reviewed >/dev/null 2>&1
+  grep -Fq -- '--build-arg CODECS_IMAGE=example.test/codecs@sha256:reviewed' "$DOCKER_LOG"
+done
+
 : >"$DOCKER_LOG"
 PATH="${TMP_DIR}:${PATH}" PUSH=1 REGISTRY=example.test TAG=test "$SCRIPT" transcode-tester >/dev/null 2>&1
 [[ "$(wc -l <"$DOCKER_LOG")" -eq 1 ]]

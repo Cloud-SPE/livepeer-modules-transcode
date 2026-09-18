@@ -1,5 +1,22 @@
 # Published v2.0.0 image digests
 
+Current stack pins reviewed on 2026-09-18 against local published-image metadata
+and the Modules catalog at `d8d369d`. VOD and ABR were built from transcode
+`9c726fdcad2af2b0d866a741b3d62297319e4b84` and include shared GPU admission.
+
+| Image | Immutable registry reference |
+|---|---|
+| VOD NVIDIA runner | `tztcloud/transcode-runner:v2.0.0-runtime-nvidia@sha256:ce0897c10695630efb666c03e71047c04888dc9c4d43148dec8de8505fd1da04` |
+| ABR NVIDIA runner | `tztcloud/abr-runner:v2.0.0-runtime-nvidia@sha256:fcd01a412a58a360b88746f0fa38b973ce7bbcc108c53c62aa1ac022cb41bce8` |
+| NVIDIA live runner | `tztcloud/live-runner-nvidia:v2.0.0@sha256:27b4a735e22e6e34565d18dacad665e2f495635f4a872c285bd662cc3c4d6137` |
+
+Use the live reference above for `LIVE_NVIDIA_IMAGE` after hardware qualification.
+Image provenance does not replace real encoding and joint Modules/LOC acceptance.
+Future rebuilds require updating these pins and the Modules catalog to the newly
+published digests, even when the release tags remain unchanged.
+
+## Historical images — do not deploy
+
 Published to Docker Hub on 2026-09-06 for the Linux AMD64 Portainer stack:
 
 Updated 2026-09-07: `abr-runner-nvidia` rebuilt at commit 766c9fa (the

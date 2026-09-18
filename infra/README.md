@@ -46,6 +46,32 @@ work tree, including no untracked files, and reports the registry digest for
 every pushed artifact. Deployments should pin those digests rather than the
 mutable tag.
 
+For the existing `v2.0.0` release, build without changing version tags:
+
+```sh
+TAG=v2.0.0 ./infra/scripts/build-images.sh
+```
+
+Both the release builder and VOD/ABR Makefiles explicitly pass `CODECS_IMAGE`.
+It defaults to `REGISTRY/codecs-builder:TAG`; a filtered rebuild can instead
+use a reviewed immutable base. The codecs base is normally local-only, so
+record its local image ID after building and retain that tag on this host
+for the dependent build:
+
+```sh
+TAG=v2.0.0 ./infra/scripts/build-images.sh codecs-builder
+docker image inspect --format '{{.Id}}' tztcloud/codecs-builder:v2.0.0
+CODECS_IMAGE=tztcloud/codecs-builder:v2.0.0 \
+  TAG=v2.0.0 ./infra/scripts/build-images.sh transcode-runner abr-runner
+```
+
+A published base can also be selected with `CODECS_IMAGE=repository@sha256:...`.
+The component equivalent is `make -C transcode-runner image TAG=v2.0.0
+CODECS_IMAGE=...` (likewise for ABR). Builds record OCI source, revision and
+version labels; dirty local builds carry a dirty version suffix. Publishing
+still requires a clean committed tree. After publishing, update deployment
+and Modules catalog digest pins: rebuilding the same tag does not move a pin.
+
 Component Makefiles remain the quick local-development interface. This script
 is the authoritative whole-product/release build path.
 

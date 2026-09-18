@@ -62,10 +62,30 @@ make down PROFILE=vod-nvidia
 `vod-cpu` is staged for the SVT-AV1 image tracked by `lmt-65a.3.10`; it will
 not pull successfully until that image ships.
 
-Do not start multiple profiles against one GPU. NVIDIA uses
-`NVIDIA_GPU_ID`; production should set it to the stable GPU UUID. Intel and AMD
-mount their device trees, matching the current Modules renderer. If those
-nodes use host-specific group IDs, set `VIDEO_GID` and `RENDER_GID` in `.env`.
+GPU profiles in this Compose project share initialized admission files.
+VOD and ABR may share the batch cohort; live excludes batch until its last
+lease ends. Runner-local concurrency limits still apply. For example:
+
+```sh
+docker compose --profile vod-nvidia --profile abr-nvidia --profile live-nvidia up -d
+```
+
+The one-shot `gpu-admission-init` must succeed before GPU runners start. It
+uses the CPU live image only to run a shell and initialize file permissions;
+GPU runners retain their vendor images and never fall back to CPU encoding.
+CPU profiles do not participate in GPU admission.
+
+NVIDIA lock domains use `NVIDIA_GPU_ID`; production should use the stable GPU
+UUID. Intel and AMD expose their full device trees and conservatively share
+one `dri` domain. To run separate DRI devices independently, first restrict
+device mappings and assign matching physical-device lock identities. Set
+`VIDEO_GID` and `RENDER_GID` to match the host's device permissions.
+
+The named admission volume is scoped to this Compose project. Do not manage
+the same GPU from a second Compose project, Portainer, or Modules at the same
+time: separate volumes do not coordinate leases. Stop every older runner on
+the GPU before upgrading to these admission-enabled images. Preserve the
+admission volume during rolling restarts so all runners see the same files.
 
 ## Verify
 
