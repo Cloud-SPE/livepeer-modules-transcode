@@ -8,20 +8,19 @@ const envSchema = z.object({
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(24),
   VERIFICATION_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(48),
   RESEND_API_KEY: z.string().optional(),
+  RESEND_BASE_URL: z.string().url().refine((value) => {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  }, "RESEND_BASE_URL must be an HTTP(S) URL without credentials, query, or fragment").default("https://api.resend.com"),
   FROM_EMAIL: z.string().default("Livepeer Transcode <noreply@example.com>"),
   BASE_URL: z.string().url().default("http://localhost:4000"),
+  SITE_URL: z.string().url().default("http://localhost:3000"),
   PORTAL_URL: z.string().url().default("http://localhost:3002"),
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   ALLOWED_ORIGINS: z.string().default("*"),
 
-  // Wire layer (plan 0004). All optional; when unset, stubs are used and
-  // dispatch fails loudly. Resolver-only — no static LIVEPEER_BROKER_URL.
-  LIVEPEER_RESOLVER_SOCKET: z.string().optional(),
-  LIVEPEER_RESOLVER_PROTO_ROOT: z.string().default("./proto"),
-  LIVEPEER_RESOLVER_SNAPSHOT_TTL_MS: z.coerce.number().int().positive().default(15_000),
-  LIVEPEER_ROUTE_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
-  LIVEPEER_ROUTE_COOLDOWN_MS: z.coerce.number().int().positive().default(30_000),
+  // Discovery and authorization share the LOC HTTP boundary.
   LIVEPEER_VOD_OFFERING_DEFAULT: z.string().default("abr-default"),
   LIVEPEER_LIVE_OFFERING_DEFAULT: z.string().default("gateway-ingest"),
   LIVEPEER_LIVE_INITIAL_RUNWAY_UNITS: z.coerce.number().int().positive().default(60),
@@ -107,6 +106,9 @@ type ParsedConfig = z.infer<typeof envSchema>;
 export type Config = Readonly<ParsedConfig>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  if (env.LIVEPEER_RESOLVER_SOCKET !== undefined) {
+    throw new Error("LIVEPEER_RESOLVER_SOCKET is removed; configure LIVEPEER_LOC_URL and LIVEPEER_LOC_API_KEY for LOC HTTP discovery");
+  }
   const removed = [
     "LIVEPEER_PAYER_SOCKET",
     "LIVEPEER_PAYER_PROTO_ROOT",

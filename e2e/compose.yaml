@@ -1,4 +1,40 @@
 services:
+  site:
+    profiles: [ui]
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.ui
+    environment:
+      GATEWAY_URL: http://gateway:4000
+    command: pnpm --dir site dev --host 0.0.0.0 --strictPort
+    depends_on: [gateway]
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  admin:
+    profiles: [ui]
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.ui
+    environment:
+      GATEWAY_URL: http://gateway:4000
+    command: pnpm --dir admin dev --host 0.0.0.0 --strictPort
+    depends_on: [gateway]
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  portal:
+    profiles: [ui]
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.ui
+    environment:
+      GATEWAY_URL: http://gateway:4000
+    command: pnpm --dir portal dev --host 0.0.0.0 --strictPort
+    depends_on: [gateway]
+    ports:
+      - "127.0.0.1:3002:3002"
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -12,7 +48,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
@@ -28,7 +64,7 @@ services:
 
   # One-shot: create the bucket then exit.
   minio-bucket-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -58,6 +94,7 @@ services:
       API_KEY_HASH_PEPPER: ${API_KEY_HASH_PEPPER:-dev-pepper-1234567890}
       SESSION_TTL_HOURS: "24"
       VERIFICATION_TOKEN_TTL_HOURS: "48"
+      SITE_URL: http://localhost:3000
       BASE_URL: http://localhost:4000
       PORTAL_URL: http://localhost:3002
       PORT: "4000"
@@ -72,9 +109,8 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_FORCE_PATH_STYLE: "true"
 
-      # Resolver stub — no resolver in the e2e smoke. The smoke asserts
-      # the documented 503 degradation paths.
-      # LIVEPEER_RESOLVER_SOCKET unset
+      # LOC is unset in the default smoke; discovery remains unconfigured.
+      # Use compose.demo.yaml for authenticated LOC HTTP discovery.
 
       # Gateway RTMP listener unwired in the e2e smoke (live route
       # returns 503 resolver_not_configured before even consulting it).

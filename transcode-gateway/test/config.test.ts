@@ -94,3 +94,7 @@ test("removed direct-payer configuration fails instead of falling back", () => {
     LIVEPEER_PAYER_SOCKET: "/run/livepeer/payer.sock",
   }), /Removed v0 configuration is not supported: LIVEPEER_PAYER_SOCKET/);
 });
+
+test("removed local resolver setting points operators to LOC discovery", () => {
+  assert.throws(() => loadConfig({ ...required, LIVEPEER_RESOLVER_SOCKET: "/tmp/resolver.sock" }), /LOC HTTP discovery/);
+});

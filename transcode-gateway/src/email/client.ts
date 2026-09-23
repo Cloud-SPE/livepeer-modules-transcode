@@ -30,7 +30,7 @@ export function createEmailClient(config: Config, logger: Logger): EmailClient {
       const timeout = setTimeout(() => controller.abort(), 10_000);
 
       try {
-        const res = await fetch("https://api.resend.com/emails", {
+        const res = await fetch(`${config.RESEND_BASE_URL.replace(/\/+$/, "")}/emails`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${config.RESEND_API_KEY}`,
@@ -43,13 +43,15 @@ export function createEmailClient(config: Config, logger: Logger): EmailClient {
             html,
           }),
           signal: controller.signal,
+          redirect: "error",
         });
 
         if (!res.ok) {
           const body = await res.text().catch(() => "");
           throw new Error(`Resend ${res.status}: ${body}`);
         }
-        logger.info("email.sent", { to, subject });
+        const receipt = await res.json().catch(() => ({})) as { id?: string };
+        logger.info("email.accepted", { to, subject, provider_id: receipt.id });
       } finally {
         clearTimeout(timeout);
       }

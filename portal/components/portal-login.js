@@ -1,3 +1,4 @@
+import { siteUrl } from "../../frontend/links.js";
 import { LitElement, html, nothing } from "lit";
 import { login } from "../lib/api.js";
 
@@ -38,22 +39,24 @@ export class PortalLogin extends LitElement {
   }
   render() {
     return html`
-      <section class="portal-main">
-        <div class="card" style="max-width: 480px; margin: 4rem auto;">
-          <h2>Sign in</h2>
+      <section class="page">
+        <header class="header"><span class="brand">Livepeer Transcode</span><nav class="nav" aria-label="Account"><a href=${siteUrl}>Request access</a><lmt-theme-toggle></lmt-theme-toggle></nav></header>
+        <main class="card">
+          <h1>Sign in</h1>
           <p class="muted">Paste the API key we emailed you when your waitlist signup was approved.</p>
-          <form @submit=${(e) => this._onSubmit(e)}>
+          <form class="form" @submit=${(e) => this._onSubmit(e)}>
             <label>
               API key
               <input name="api_key" type="password" required autocomplete="off"
                 placeholder="tc_..." minlength="4" maxlength="128">
             </label>
-            <button type="submit" ?disabled=${this.inFlight}>
+            <button class="primary" type="submit" ?disabled=${this.inFlight}>
               ${this.inFlight ? "Signing in…" : "Sign in"}
             </button>
             ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
           </form>
-        </div>
+        </main>
+
       </section>
     `;
   }

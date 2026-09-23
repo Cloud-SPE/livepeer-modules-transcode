@@ -60,13 +60,13 @@ export class PortalAssetDetail extends LitElement {
   }
   render() {
     if (this.loading) return html`<section class="portal-main"><p class="muted">Loading…</p></section>`;
-    if (this.error) return html`<section class="portal-main"><div class="error">${this.error}</div></section>`;
+    if (this.error) return html`<section class="portal-main"><div class="msg error" role="alert">${this.error}</div></section>`;
     const a = this.asset;
     if (!a) return nothing;
     return html`
       <section class="portal-main">
         <p><a href="#assets">← Back to asset library</a></p>
-        <h2>Asset ${a.asset_id.slice(0, 14)}…</h2>
+        <h1>Asset ${a.asset_id.slice(0, 14)}…</h1>
         <div class="card">
           <p>Status: <span class="badge ${a.status === "ready" ? "ok" : a.status === "errored" ? "error" : "warn"}">${a.status}</span></p>
           <p>Encoding tier: <strong>${a.encoding_tier}</strong></p>
@@ -93,7 +93,7 @@ export class PortalAssetDetail extends LitElement {
           <h3>Renditions (${a.renditions?.length ?? 0})</h3>
           ${a.renditions?.length
             ? html`
-              <table>
+              <div class="table-wrap"><table>
                 <thead><tr><th>Codec</th><th>Resolution</th><th>Bitrate</th><th>Status</th></tr></thead>
                 <tbody>
                   ${a.renditions.map((r) => html`
@@ -105,14 +105,14 @@ export class PortalAssetDetail extends LitElement {
                     </tr>
                   `)}
                 </tbody>
-              </table>`
+              </table></div>`
             : html`<p class="muted">No renditions yet.</p>`}
         </div>
         <div class="card">
           <h3>Jobs (${a.jobs?.length ?? 0})</h3>
           ${a.jobs?.length
             ? html`
-              <table>
+              <div class="table-wrap"><table>
                 <thead><tr><th>Kind</th><th>Status</th><th>Error</th></tr></thead>
                 <tbody>
                   ${a.jobs.map((j) => html`
@@ -123,7 +123,7 @@ export class PortalAssetDetail extends LitElement {
                     </tr>
                   `)}
                 </tbody>
-              </table>`
+              </table></div>`
             : html`<p class="muted">No jobs yet.</p>`}
         </div>
         ${a.status !== "deleted"

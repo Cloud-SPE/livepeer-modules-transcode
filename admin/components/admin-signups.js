@@ -1,3 +1,4 @@
+import { resendVerification } from "../lib/api.js";
 import { LitElement, html, nothing } from "lit";
 import { listWaitlist, approveBatch, rejectBatch, deleteOne, exportUrl } from "../lib/api.js";
 import { toast } from "./lmt-toast.js";
@@ -9,6 +10,8 @@ const STATUSES = ["", "pending", "approved", "rejected"];
 
 export class AdminSignups extends LitElement {
   static properties = {
+    actionMessage: { state: true },
+    resending: { state: true },
     rows: { state: true },
     page: { state: true },
     perPage: { state: true },
@@ -19,11 +22,13 @@ export class AdminSignups extends LitElement {
     sendEmails: { state: true },
     loading: { state: true },
     error: { state: true },
-    keysReveal: { state: true },       // post-approval { id -> raw key } map
+    issuedKeys: { state: true },       // one-time approval results, independent of list filters
   };
   createRenderRoot() { return this; }
   constructor() {
     super();
+    this.actionMessage = "";
+    this.resending = null;
     this.rows = [];
     this.page = 1;
     this.perPage = 50;
@@ -34,7 +39,7 @@ export class AdminSignups extends LitElement {
     this.sendEmails = true;
     this.loading = true;
     this.error = "";
-    this.keysReveal = {};
+    this.issuedKeys = [];
   }
   async connectedCallback() {
     super.connectedCallback();
@@ -78,15 +83,34 @@ export class AdminSignups extends LitElement {
     if (!confirm(`Approve ${this.selected.size} signup(s)?${this.sendEmails ? " Emails will be sent." : ""}`)) return;
     try {
       const res = await approveBatch([...this.selected], this.sendEmails);
-      const map = {};
-      for (const k of res.keys || []) map[k.waitlist_id] = k.key;
-      this.keysReveal = { ...this.keysReveal, ...map };
-      this.selected = new Set();
-      toast(`Approved ${res.approved}; emails sent: ${res.emails_sent}.`);
+      this.issuedKeys = [...(res.keys || []), ...this.issuedKeys];
+      const skipped = res.skipped || [];
+      this.selected = new Set(skipped.map(row => row.id));
+      const reasons = skipped.map(row => {
+        const email = this.rows.find(r => r.id === row.id)?.email || row.id;
+        return `${email}: ${row.reason === "email_not_verified" ? "Verify email first; use Resend verification below." : row.reason === "not_pending" ? "This signup is no longer pending." : row.reason}`;
+      });
+      this.actionMessage = [
+        `Approved ${res.approved}. Emails accepted by provider: ${res.emails_sent}.`,
+        ...(res.emails_dryrun ? ["Email is in dry-run mode; nothing was delivered."] : []),
+        ...reasons, ...(res.email_errors || []).map(e => `Email failed: ${e}`),
+      ].join(" ");
       await this._load();
     } catch (err) {
       toast(err.message || "Approve failed.");
     }
+  }
+  async _resend(row) {
+    if (this.resending) return;
+    this.resending = row.id;
+    this.actionMessage = "";
+    try {
+      const result = await resendVerification(row.id);
+      this.actionMessage = result.delivery === "accepted"
+        ? `Verification email accepted by the provider for ${row.email}. Open that link, then refresh and approve the signup.`
+        : "Email is in dry-run mode; no email was sent.";
+    } catch (error) { this.actionMessage = error.message || "Resend failed."; }
+    finally { this.resending = null; }
   }
   async _reject() {
     if (this.selected.size === 0) return;
@@ -120,8 +144,14 @@ export class AdminSignups extends LitElement {
   render() {
     return html`
       <section class="admin-main">
-        <h2>Waitlist</h2>
+        <h1>Waitlist</h1>
+        ${this.actionMessage ? html`<div class="msg mb-2" role="status">${this.actionMessage}</div>` : nothing}
 
+        ${this.issuedKeys.length ? html`<div class="card">
+          <div class="page-heading"><h3>New API keys — save now</h3><button type="button" class="ghost small" @click=${() => { this.issuedKeys = []; }}>Dismiss keys</button></div>
+          <p class="muted">These keys are shown only for this approval response. Save them before leaving this page.</p>
+          ${this.issuedKeys.map(key => html`<p>${key.email}</p><div class="key-display mb-2">${key.key}</div>`)}
+        </div>` : nothing}
         <div class="card">
           <div class="toolbar">
             <label>
@@ -140,17 +170,17 @@ export class AdminSignups extends LitElement {
             <a href=${exportUrl()} target="_blank" rel="noopener" class="badge">Export CSV</a>
           </div>
 
-          ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+          ${this.error ? html`<div class="msg error" role="alert">${this.error}</div>` : nothing}
 
           ${this.loading
             ? html`<p class="muted">Loading…</p>`
             : this.rows.length === 0
             ? html`<p class="muted">No signups match.</p>`
             : html`
-              <table>
+              <div class="table-wrap"><table>
                 <thead>
                   <tr>
-                    <th><input type="checkbox" ?checked=${this.selected.size === this.rows.length && this.rows.length > 0} @change=${() => this._toggleAll()}></th>
+                    <th><input type="checkbox" aria-label="Select all signups" ?checked=${this.selected.size === this.rows.length && this.rows.length > 0} @change=${() => this._toggleAll()}></th>
                     <th>Email</th>
                     <th>Name</th>
                     <th>Status</th>
@@ -161,22 +191,19 @@ export class AdminSignups extends LitElement {
                 <tbody>
                   ${this.rows.map((r) => html`
                     <tr>
-                      <td><input type="checkbox" ?checked=${this.selected.has(r.id)} @change=${() => this._toggle(r.id)}></td>
+                      <td><input type="checkbox" aria-label=${`Select ${r.email}`} ?checked=${this.selected.has(r.id)} @change=${() => this._toggle(r.id)}></td>
                       <td>${r.email}</td>
                       <td>${r.name}</td>
                       <td>${this._badge(r)}</td>
                       <td>${new Date(r.created_at).toLocaleString()}</td>
-                      <td><button type="button" class="danger" @click=${() => this._delete(r.id)}>Delete</button></td>
+                      <td><div class="lmt-actions">
+                        ${r.status === "pending" && !r.email_verified ? html`<button type="button" class="ghost" ?disabled=${this.resending !== null} @click=${() => this._resend(r)}>${this.resending === r.id ? "Sending…" : "Resend verification"}</button>` : nothing}
+                        <button type="button" class="danger" @click=${() => this._delete(r.id)}>Delete</button></div></td>
                     </tr>
-                    ${this.keysReveal[r.id]
-                      ? html`<tr><td colspan="6">
-                          <div class="muted" style="margin-bottom: var(--gap-xs);">One-time API key for ${r.email}:</div>
-                          <div class="code-block">${this.keysReveal[r.id]}</div>
-                        </td></tr>`
-                      : nothing}
+
                   `)}
                 </tbody>
-              </table>
+              </table></div>
               <admin-pagination .page=${this.page} .totalPages=${this.totalPages}
                 @page-change=${(e) => { this.page = e.detail.page; this._load(); }}></admin-pagination>
             `}
@@ -189,7 +216,7 @@ export class AdminSignups extends LitElement {
               @change=${(e) => { this.sendEmails = e.target.checked; }}>
             Email API keys on approve
           </label>
-          <div style="display:flex; gap: var(--gap-sm); margin-top: var(--gap-md);">
+          <div class="lmt-actions lmt-space-top">
             <button type="button" class="success" ?disabled=${this.selected.size === 0} @click=${() => this._approve()}>Approve</button>
             <button type="button" class="danger"  ?disabled=${this.selected.size === 0} @click=${() => this._reject()}>Reject</button>
           </div>

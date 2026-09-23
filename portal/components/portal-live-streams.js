@@ -1,25 +1,6 @@
 import { LitElement, html, nothing } from "lit";
-import { createLiveStream, endLiveStream } from "../lib/api.js";
+import { createLiveStream, endLiveStream, listLiveStreamsByApi } from "../lib/api.js";
 import { toast } from "./lmt-toast.js";
-
-// Live streams (plan 0006). Lists streams created in this session
-// (sessionStorage-backed; gateway has no list-live-streams endpoint
-// in this release). POST /v1/live/streams creates; POST :id/end ends.
-
-const STORE = "lmt-live-streams";
-
-function readSessionStreams() {
-  try {
-    const raw = sessionStorage.getItem(STORE);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSessionStreams(items) {
-  sessionStorage.setItem(STORE, JSON.stringify(items));
-}
 
 export class PortalLiveStreams extends LitElement {
   static properties = {
@@ -32,11 +13,29 @@ export class PortalLiveStreams extends LitElement {
   createRenderRoot() { return this; }
   constructor() {
     super();
-    this.items = readSessionStreams();
+    this.items = [];
     this.inFlight = false;
     this.name = "";
     this.encodingTier = "standard";
     this.error = "";
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    this._load();
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    clearTimeout(this._pollTimer);
+  }
+  async _load() {
+    try {
+      this.items = await listLiveStreamsByApi();
+    } catch (err) {
+      this.error = err.message || "Could not load streams.";
+    } finally {
+      clearTimeout(this._pollTimer);
+      if (this.isConnected) this._pollTimer = setTimeout(() => this._load(), 5000);
+    }
   }
   async _create(e) {
     e.preventDefault();
@@ -49,9 +48,10 @@ export class PortalLiveStreams extends LitElement {
         encoding_tier: this.encodingTier,
       });
       this.items = [body, ...this.items];
-      writeSessionStreams(this.items);
+
       this.name = "";
-      toast("Live stream created.");
+      toast(body.status === "opening" ? "Stream setup is pending. It will update automatically." : "Stream ready. Open its details for publishing instructions.");
+      await this._load();
     } catch (err) {
       this.error = err.message || "Could not create stream.";
     } finally {
@@ -62,9 +62,9 @@ export class PortalLiveStreams extends LitElement {
     if (!confirm("End this live stream?")) return;
     try {
       await endLiveStream(id);
-      this.items = this.items.map((s) => s.stream_id === id ? { ...s, _ended: true } : s);
-      writeSessionStreams(this.items);
-      toast("Stream ended.");
+      this.items = this.items.map((s) => s.stream_id === id ? { ...s, status: "ending" } : s);
+      toast("Ending stream. Waiting for the network to confirm closure.");
+      await this._load();
     } catch (err) {
       toast(err.message || "End failed.");
     }
@@ -72,10 +72,10 @@ export class PortalLiveStreams extends LitElement {
   render() {
     return html`
       <section class="portal-main">
-        <h2>Live streams</h2>
+        <h1>Live streams</h1>
         <div class="card">
           <h3>Start a new stream</h3>
-          <form @submit=${(e) => this._create(e)}>
+          <form class="form" @submit=${(e) => this._create(e)}>
             <label>
               Name (optional)
               <input maxlength="160" .value=${this.name} @input=${(e) => { this.name = e.target.value; }}>
@@ -88,37 +88,35 @@ export class PortalLiveStreams extends LitElement {
                 <option value="premium">premium (h264 + hevc + av1)</option>
               </select>
             </label>
-            <button type="submit" ?disabled=${this.inFlight}>
+            <button type="submit" ?disabled=${this.inFlight || this.items.some((s) => s.status === "opening")}>
               ${this.inFlight ? "Creating…" : "Create"}
             </button>
             ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
           </form>
         </div>
         <div class="card">
-          <h3>Created in this tab (${this.items.length})</h3>
+          <h3>Your streams (${this.items.length})</h3>
           <p class="muted">
-            Live streams aren't listed server-side yet (no list route
-            yet). This view holds streams created in this browser tab.
+            The latest 100 streams for your API key appear here. Status updates automatically.
           </p>
           ${this.items.length === 0
             ? html`<p class="muted">No streams yet.</p>`
             : html`
-              <table>
-                <thead><tr><th>Name</th><th>RTMP URL</th><th>Kind</th><th>Status</th><th></th></tr></thead>
+              <div class="table-wrap"><table>
+                <thead><tr><th>Name</th><th>Setup</th><th>Status</th><th></th></tr></thead>
                 <tbody>
                   ${this.items.map((s) => html`
                     <tr>
                       <td><a href=${"#live/" + s.stream_id}>${s.name || s.stream_id.slice(0, 14)}…</a></td>
-                      <td><code>${s.rtmp_push_url}</code></td>
-                      <td><span class="badge ${s.rtmp_push_url_kind === "gateway_relay" ? "live" : ""}">${s.rtmp_push_url_kind}</span></td>
-                      <td>${s._ended ? html`<span class="badge">ended</span>` : html`<span class="badge live">active</span>`}</td>
-                      <td>${!s._ended
+                      <td><a href=${"#live/" + s.stream_id}>View details</a></td>
+                      <td>${html`<span class="badge ${s.status === "live" ? "live" : ""}">${s.status}</span>`}</td>
+                      <td>${["ready", "live"].includes(s.status)
                         ? html`<button type="button" class="danger" @click=${() => this._end(s.stream_id)}>End</button>`
                         : nothing}</td>
                     </tr>
                   `)}
                 </tbody>
-              </table>
+              </table></div>
             `}
         </div>
       </section>

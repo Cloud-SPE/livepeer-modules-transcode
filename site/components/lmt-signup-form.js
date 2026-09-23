@@ -53,12 +53,12 @@ export class LmtSignupForm extends LitElement {
     return html`
       <form class="signup-form" @submit=${(e) => this._onSubmit(e)}>
         <label>
-          Name
-          <input name="name" required minlength="1" maxlength="200" autocomplete="name">
+          <span class="sr-only">Name</span>
+          <input placeholder="Your name" name="name" required minlength="1" maxlength="200" autocomplete="name">
         </label>
         <label>
-          Email
-          <input type="email" name="email" required maxlength="320" autocomplete="email">
+          <span class="sr-only">Email</span>
+          <input placeholder="you@example.com" type="email" name="email" required maxlength="320" autocomplete="email">
         </label>
         <button type="submit" ?disabled=${this.inFlight}>
           ${this.inFlight ? "Submitting…" : "Join the waitlist"}

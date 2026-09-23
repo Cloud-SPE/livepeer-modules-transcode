@@ -10,25 +10,25 @@
   <script>
     (function () {
       var s = localStorage.getItem("lmt-theme");
-      var t = s || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      var t = s === "light" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", t);
     })();
   </script>
   <script type="module" src="/components/index.js"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="site-brand">
+  <header class="topbar">
+    <div class="brand">
       <a href="/">
         <strong>Livepeer Transcode</strong>
       </a>
     </div>
-    <nav class="site-nav">
-      <lmt-theme-toggle></lmt-theme-toggle>
+    <nav aria-label="Main">
+      <a href="/portal/" data-portal-link class="nav-link">Portal</a><lmt-theme-toggle></lmt-theme-toggle>
     </nav>
   </header>
 
-  <main class="site-main">
+  <main class="verify">
     <section>
       <h1>Email verification</h1>
       <lmt-email-verify></lmt-email-verify>

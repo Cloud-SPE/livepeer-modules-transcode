@@ -56,7 +56,7 @@ export function registerPublicAuth(app: FastifyInstance, deps: Deps): void {
     );
 
     if (result.inserted && result.rawVerificationToken) {
-      const verifyUrl = `${deps.config.BASE_URL}/api/v1/waitlist/verify?token=${result.rawVerificationToken}`;
+      const verifyUrl = `${deps.config.SITE_URL.replace(/\/$/, "")}/verify.html?token=${result.rawVerificationToken}`;
       const tpl = verificationEmail({ name, verifyUrl });
       void deps.email.send({ to: email, subject: tpl.subject, html: tpl.html }).catch((err) => {
         req.log.error({ err: err.message, to: email }, "email.verification.failed");

@@ -35,7 +35,7 @@ export class PortalKeyDisplay extends LitElement {
     return html`
       <div>
         <div class="key-display">${this.revealed ? (this.key || "(no key cached)") : this._mask(this.key)}</div>
-        <div style="margin-top: var(--gap-md); display: flex; gap: var(--gap-sm);">
+        <div class="lmt-actions lmt-space-top">
           <button type="button" class="secondary" @click=${() => { this.revealed = !this.revealed; }}>
             ${this.revealed ? "Hide" : "Reveal"}
           </button>
@@ -44,7 +44,7 @@ export class PortalKeyDisplay extends LitElement {
           </button>
         </div>
         ${!this.key
-          ? html`<p class="muted" style="margin-top: var(--gap-md);">
+          ? html`<p class="muted lmt-space-top">
               The raw key is only cached in this browser tab after login or
               key rotation. If you switched tabs, sign out and sign in again
               (or rotate your key).

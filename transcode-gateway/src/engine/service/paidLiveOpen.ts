@@ -97,109 +97,115 @@ export async function openPaidLiveStream(deps: PaidLiveOpenDeps, input: PaidLive
     loc: { idempotency_key: requestId, key_request_id: keyRequestId },
     credentials: { customer_stream_key: customerStreamKey },
   });
-  const opened = await deps.paidSessionClient.open({
-    requestId,
-    route: input.route,
-    descriptorSchema: RUNTIME_SCHEMA,
-    sessionParams,
-    estimatedRunwayUnits: deps.estimatedRunwayUnits,
-    maxTotalUnits: openIntent.max_total_units,
-  });
-  const runtime = runtimePublicWire.parse(opened.runtimePublic);
-  const grant = opened.grants.length === 1 && opened.grants[0]?.operations.length === 1 && opened.grants[0].operations[0] === "stream-key-issue"
-    ? opened.grants[0]
-    : null;
-  if (!grant) throw new Error("paid live stream-key grant is invalid");
-  const progressed = await deps.paidSessionStore.recordProgress(owned, {
-    status: "issuing_key",
-    requestId: opened.opened.requestId,
-    locOperationId: opened.opened.operationId,
-    brokerSessionId: opened.brokerSessionId,
-    fundedUnits: String(opened.balance.authorizationMaxUnits),
-    claimedUnits: String(opened.balance.claimedUnits),
-    balanceUnits: String(opened.balance.runwayUnits ?? Math.max(0, deps.estimatedRunwayUnits - opened.balance.debitedUnits)),
-    willRefuseNextRefill: opened.balance.willRefuseNextRefill,
-    leaseExpiresAt: timestamp(opened.leaseExpiresAt),
-    sessionRuntime: {
-      ...owned.operation.sessionRuntime!,
-      runnerHlsUrl: runtime.hls_url,
-    },
-  });
-  if (!progressed) throw new Error("paid live open fence was lost");
-  owned = progressed;
-  const issued = await deps.paidSessionClient.issueStreamKey({
-    keyIssueUrl: runtime.key_issue_url,
-    grant,
-    requestId: keyRequestId,
-    audience: "gateway-relay",
-  });
-  const secretsStored = await deps.paidSessionStore.putSecrets(owned, {
-    openIntent: openIntent as JsonValue,
-    routeIntent: recoveryRoute(input.route),
-    sessionParams,
-    grants: opened.grants as unknown as JsonValue,
-    control: opened.control as unknown as JsonValue,
-    loc: {
-      idempotency_key: requestId,
-      key_request_id: keyRequestId,
-      control_handle: {
-        operation_id: opened.opened.operationId,
-        broker_url: opened.opened.brokerUrl,
-        gateway_session_id: opened.gatewaySessionId,
-        descriptor_schema: opened.opened.session.descriptorSchema,
-        work_unit: opened.opened.routeSnapshot.workUnit,
-        settlement_domain_id: opened.opened.routeSnapshot.settlementDomainId,
-        max_total_units: opened.balance.authorizationMaxUnits,
+  try {
+    const opened = await deps.paidSessionClient.open({
+      requestId,
+      route: input.route,
+      descriptorSchema: RUNTIME_SCHEMA,
+      sessionParams,
+      estimatedRunwayUnits: deps.estimatedRunwayUnits,
+      maxTotalUnits: openIntent.max_total_units,
+    });
+    const runtime = runtimePublicWire.parse(opened.runtimePublic);
+    const grant = opened.grants.length === 1 && opened.grants[0]?.operations.length === 1 && opened.grants[0].operations[0] === "stream-key-issue"
+      ? opened.grants[0]
+      : null;
+    if (!grant) throw new Error("paid live stream-key grant is invalid");
+    const progressed = await deps.paidSessionStore.recordProgress(owned, {
+      status: "issuing_key",
+      requestId: opened.opened.requestId,
+      locOperationId: opened.opened.operationId,
+      brokerSessionId: opened.brokerSessionId,
+      fundedUnits: String(opened.balance.authorizationMaxUnits),
+      claimedUnits: String(opened.balance.claimedUnits),
+      balanceUnits: String(opened.balance.runwayUnits ?? Math.max(0, deps.estimatedRunwayUnits - opened.balance.debitedUnits)),
+      willRefuseNextRefill: opened.balance.willRefuseNextRefill,
+      leaseExpiresAt: timestamp(opened.leaseExpiresAt),
+      sessionRuntime: {
+        ...owned.operation.sessionRuntime!,
+        runnerHlsUrl: runtime.hls_url,
       },
-    },
-    runnerIngestUrl: runtime.rtmp_url,
-    runnerIngestKey: issued.streamKey,
-    credentials: {
-      customer_stream_key: customerStreamKey,
-      broker_session_credential: opened.credential,
-    },
-  });
-  if (!secretsStored) throw new Error("paid live secrets fence was lost");
-  const active = await deps.paidSessionStore.recordProgress(owned, {
-    status: "active",
-    sessionRuntime: { ...owned.operation.sessionRuntime!, relayStatus: "pending" },
-  });
-  if (!active) throw new Error("paid live activation fence was lost");
-  await deps.liveStreamRepo.updateStatus(input.streamId, "active", {
-    sessionId: opened.brokerSessionId,
-    workerUrl: input.route.workerUrl,
-    lastSeenAt: new Date(),
-  });
-  const playback = await deps.playbackIdRepo.insert({
-    id: `pb_${randomBytes(12).toString("hex")}`,
-    apiKeyId: input.apiKeyId,
-    liveStreamId: input.streamId,
-    policy: "public",
-    tokenRequired: false,
-  });
-  deps.liveSessions.record({
-    streamId: input.streamId,
-    sessionId: opened.brokerSessionId,
-    brokerUrl: input.route.workerUrl,
-    brokerRtmpUrl: `${runtime.rtmp_url.replace(/\/$/, "")}/${issued.streamKey}`,
-    streamKey: customerStreamKey,
-    hlsPlaybackUrl: runtime.hls_url,
-  });
-  deps.logger?.info("orchestrator.live_active", {
-    stream_id: input.streamId,
-    operation_id: active.operation.id,
-    broker_session_id: opened.brokerSessionId,
-  });
-  return {
-    streamId: input.streamId,
-    brokerSessionId: opened.brokerSessionId,
-    streamKey: customerStreamKey,
-    rtmpPushUrl: `${deps.gatewayRtmpUrl.replace(/\/$/, "")}/${customerStreamKey}`,
-    hlsPlaybackUrl: runtime.hls_url,
-    playbackId: playback.id,
-    expiresAt: opened.leaseExpiresAt,
-    requestId: opened.opened.requestId,
-  };
+    });
+    if (!progressed) throw new Error("paid live open fence was lost");
+    owned = progressed;
+    const issued = await deps.paidSessionClient.issueStreamKey({
+      keyIssueUrl: runtime.key_issue_url,
+      grant,
+      requestId: keyRequestId,
+      audience: "gateway-relay",
+    });
+    const secretsStored = await deps.paidSessionStore.putSecrets(owned, {
+      openIntent: openIntent as JsonValue,
+      routeIntent: recoveryRoute(input.route),
+      sessionParams,
+      grants: opened.grants as unknown as JsonValue,
+      control: opened.control as unknown as JsonValue,
+      loc: {
+        idempotency_key: requestId,
+        key_request_id: keyRequestId,
+        control_handle: {
+          operation_id: opened.opened.operationId,
+          broker_url: opened.opened.brokerUrl,
+          gateway_session_id: opened.gatewaySessionId,
+          descriptor_schema: opened.opened.session.descriptorSchema,
+          work_unit: opened.opened.routeSnapshot.workUnit,
+          settlement_domain_id: opened.opened.routeSnapshot.settlementDomainId,
+          max_total_units: opened.balance.authorizationMaxUnits,
+        },
+      },
+      runnerIngestUrl: runtime.rtmp_url,
+      runnerIngestKey: issued.streamKey,
+      credentials: {
+        customer_stream_key: customerStreamKey,
+        broker_session_credential: opened.credential,
+      },
+    });
+    if (!secretsStored) throw new Error("paid live secrets fence was lost");
+    const active = await deps.paidSessionStore.recordProgress(owned, {
+      status: "active",
+      sessionRuntime: { ...owned.operation.sessionRuntime!, relayStatus: "pending" },
+    });
+    if (!active) throw new Error("paid live activation fence was lost");
+    owned = active;
+    await deps.liveStreamRepo.updateStatus(input.streamId, "active", {
+      sessionId: opened.brokerSessionId,
+      workerUrl: input.route.workerUrl,
+      lastSeenAt: new Date(),
+    });
+    const playback = await deps.playbackIdRepo.insert({
+      id: `pb_${randomBytes(12).toString("hex")}`,
+      apiKeyId: input.apiKeyId,
+      liveStreamId: input.streamId,
+      policy: "public",
+      tokenRequired: false,
+    });
+    deps.liveSessions.record({
+      streamId: input.streamId,
+      sessionId: opened.brokerSessionId,
+      brokerUrl: input.route.workerUrl,
+      brokerRtmpUrl: `${runtime.rtmp_url.replace(/\/$/, "")}/${issued.streamKey}`,
+      streamKey: customerStreamKey,
+      hlsPlaybackUrl: runtime.hls_url,
+    });
+    deps.logger?.info("orchestrator.live_active", {
+      stream_id: input.streamId,
+      operation_id: active.operation.id,
+      broker_session_id: opened.brokerSessionId,
+    });
+    return {
+      streamId: input.streamId,
+      brokerSessionId: opened.brokerSessionId,
+      streamKey: customerStreamKey,
+      rtmpPushUrl: `${deps.gatewayRtmpUrl.replace(/\/$/, "")}/${customerStreamKey}`,
+      hlsPlaybackUrl: runtime.hls_url,
+      playbackId: playback.id,
+      expiresAt: opened.leaseExpiresAt,
+      requestId: opened.opened.requestId,
+    };
+  } finally {
+    // Release the latest fence so reconciliation need not wait for lease expiry.
+    await deps.paidSessionStore.release(owned);
+  }
 }
 
 function validateRoute(route: SelectedWorkerRoute): void {

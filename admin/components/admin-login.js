@@ -41,21 +41,23 @@ export class AdminLogin extends LitElement {
   }
   render() {
     return html`
-      <section class="admin-main">
-        <div class="card" style="max-width: 480px; margin: 4rem auto;">
-          <h2>Admin sign in</h2>
-          <p class="muted">Paste the value of the gateway's <code>ADMIN_TOKEN</code> env variable.</p>
-          <form @submit=${(e) => this._onSubmit(e)}>
+      <section class="page">
+        <header class="header"><span class="brand">Livepeer Transcode · Admin</span><nav class="nav" aria-label="Account"><lmt-theme-toggle></lmt-theme-toggle></nav></header>
+        <main class="card">
+          <h1>Operator login</h1>
+          <p class="muted">Use your operator token to access the transcode dashboard.</p>
+          <form class="form" @submit=${(e) => this._onSubmit(e)}>
             <label>
               Admin token
               <input name="token" type="password" required autocomplete="off">
             </label>
-            <button type="submit" ?disabled=${this.inFlight}>
+            <button class="primary" type="submit" ?disabled=${this.inFlight}>
               ${this.inFlight ? "Verifying…" : "Sign in"}
             </button>
             ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
           </form>
-        </div>
+        </main>
+
       </section>
     `;
   }

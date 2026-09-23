@@ -508,10 +508,14 @@ export function createPaidOperationRepo(
       const sets = [
         "status = $2",
         "updated_at = NOW()",
-        "last_error_code = NULL",
+        ...(value.lastErrorCode === undefined ? ["last_error_code = NULL"] : []),
+        ...(value.nextRetryAt === undefined ? ["next_retry_at = NULL"] : []),
       ];
       const params: unknown[] = [id, value.status];
       const fields: Array<[string, unknown]> = [
+        ["last_error_code", value.lastErrorCode],
+        ["retry_count", value.retryCount],
+        ["next_retry_at", value.nextRetryAt],
         ["work_id", value.workId],
         ["rotation_generation", value.rotationGeneration],
         ["request_id", value.requestId],

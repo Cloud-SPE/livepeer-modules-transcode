@@ -1,3 +1,6 @@
+import { resendVerification } from "../../auth/resendVerification.js";
+import { createRateLimiter } from "../../auth/rateLimit.js";
+import { emailEnabled } from "../../config.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Config } from "../../config.js";
@@ -12,7 +15,7 @@ import {
   stats,
 } from "../../auth/waitlist.js";
 import { approveBatch, deleteOne, rejectBatch } from "../../auth/approval.js";
-import { apiKeyEmail } from "../../email/templates.js";
+import { apiKeyEmail, verificationEmail } from "../../email/templates.js";
 import { adminOperationStatus } from "../paidOperationStatus.js";
 
 interface Deps {
@@ -48,6 +51,25 @@ const operationsQuery = z.object({
 
 export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
   const admin = makeAdminAuth(deps.config.ADMIN_TOKEN);
+
+  const resendLimiter = createRateLimiter();
+  app.addHook("onClose", async () => resendLimiter.stop());
+  app.post("/api/v1/admin/waitlist/:id/resend-verification", { preHandler: admin }, async (req, reply) => {
+    const parsed = idParam.safeParse(req.params);
+    if (!parsed.success) return reply.code(400).send({ message: "Invalid signup ID." });
+    if (!resendLimiter.check(parsed.data.id, 1, 60)) return reply.code(429).send({ message: "Wait a minute before resending verification." });
+    try {
+      const sent = await resendVerification(deps.pool, parsed.data.id, deps.config.VERIFICATION_TOKEN_TTL_HOURS, async (entry, token) => {
+        const tpl = verificationEmail({ name: entry.name, verifyUrl: `${deps.config.SITE_URL.replace(/\/$/, "")}/verify.html?token=${token}` });
+        await deps.email.send({ to: entry.email, ...tpl });
+      });
+      if (!sent) return reply.code(409).send({ message: "Only pending, unverified signups can receive a new verification link." });
+      return { status: "ok", delivery: emailEnabled(deps.config) ? "accepted" : "dryrun" };
+    } catch (error) {
+      req.log.error({ err: (error as Error).message }, "email.verification.failed");
+      return reply.code(502).send({ message: "Email provider rejected or could not accept the verification email. The previous link remains valid; check gateway logs." });
+    }
+  });
 
   // GET /api/v1/admin/waitlist
   app.get("/api/v1/admin/waitlist", { preHandler: admin }, async (req, reply) => {
@@ -121,6 +143,7 @@ export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
     const result = await approveBatch(deps.pool, parsed.data.ids, deps.config.API_KEY_HASH_PEPPER);
 
     let emailsSent = 0;
+    let emailsDryrun = 0;
     const emailErrors: string[] = [];
 
     if (sendEmails) {
@@ -132,7 +155,7 @@ export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
         });
         try {
           await deps.email.send({ to: row.email, subject: tpl.subject, html: tpl.html });
-          emailsSent++;
+          if (emailEnabled(deps.config)) emailsSent++; else emailsDryrun++;
         } catch (err) {
           emailErrors.push(`${row.email}: ${(err as Error).message}`);
           req.log.error({ err: (err as Error).message, to: row.email }, "email.apiKey.failed");
@@ -145,6 +168,7 @@ export function registerAdminAuth(app: FastifyInstance, deps: Deps): void {
       approved: result.approved.length,
       skipped: result.skipped,
       emails_sent: emailsSent,
+      emails_dryrun: emailsDryrun,
       email_errors: emailErrors,
       keys: result.approved.map((r) => ({
         waitlist_id: r.waitlistId,

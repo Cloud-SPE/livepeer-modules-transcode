@@ -31,31 +31,43 @@ export class PortalLiveDetail extends LitElement {
   async _load() {
     try {
       this.stream = await getLiveStream(this.id);
+      this.error = "";
       clearTimeout(this._pollTimer);
-      if (this.stream.status !== "ended" && shouldPollOperation(this.stream.paid_operation)) {
+      if (this.isConnected && this.stream.status !== "ended" && shouldPollOperation(this.stream.paid_operation)) {
         this._pollTimer = setTimeout(() => this._load(), 5000);
       }
     } catch (err) {
-      this.error = err.message || "Not found.";
+      this.error = err.message || "Could not refresh stream.";
+      if (this.isConnected) this._pollTimer = setTimeout(() => this._load(), 5000);
     } finally {
       this.loading = false;
     }
   }
   render() {
     if (this.loading) return html`<section class="portal-main"><p class="muted">Loading…</p></section>`;
-    if (this.error) return html`<section class="portal-main"><div class="error">${this.error}</div></section>`;
+    if (this.error && !this.stream) return html`<section class="portal-main"><div class="msg error" role="alert">${this.error}</div></section>`;
     const s = this.stream;
     if (!s) return nothing;
     return html`
       <section class="portal-main">
         <p><a href="#live">← Back to live streams</a></p>
-        <h2>${s.name || s.stream_id}</h2>
+        <h1>${s.name || s.stream_id}</h1>
         <div class="card">
           <p>Status: <span class="badge ${s.status === "live" ? "live" : ""}">${s.status}</span></p>
           ${s.session_id ? html`<p>Session: <code>${s.session_id}</code></p>` : nothing}
           ${s.playback_url ? html`<p>Playback: <a href=${s.playback_url}><code>${s.playback_url}</code></a></p>` : nothing}
           <p class="muted">Created ${new Date(s.created_at).toLocaleString()}${s.ended_at ? `; ended ${new Date(s.ended_at).toLocaleString()}` : ""}</p>
         </div>
+        ${s.status === "opening" ? html`<p role="status">Stream setup is pending. Keep this page open; do not submit another stream.</p>` : nothing}
+        ${s.status === "ending" ? html`<p role="status">Ending stream. Network cleanup and settlement are still pending.</p>` : nothing}
+        ${s.stream_key && s.rtmp_push_url ? html`
+          <div class="card">
+            <h3>Publish with OBS or FFmpeg</h3>
+            <label>RTMP server<input readonly .value=${s.rtmp_push_url}></label>
+            <label>Stream key<input readonly type="password" .value=${s.stream_key}></label>
+            <button type="button" @click=${() => navigator.clipboard.writeText(s.stream_key)}>Copy stream key</button>
+            <p class="muted">Keep your stream key private. Paste the server and key into your streaming software.</p>
+          </div>` : nothing}
         ${s.paid_operation ? html`
           <div class="card" aria-live="polite">
             <h3>Paid session</h3>

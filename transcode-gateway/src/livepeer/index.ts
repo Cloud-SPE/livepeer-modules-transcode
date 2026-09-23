@@ -8,6 +8,7 @@ export * from "./requestId.js";
 export * from "./operationSecrets.js";
 export * from "./locHttpTransport.js";
 export * from "./locClient.js";
+export * from "./locWorkerResolver.js";
 export * from "./paidJobClient.js";
 export * from "./paidSessionClient.js";
 export * from "./v2Outcome.js";

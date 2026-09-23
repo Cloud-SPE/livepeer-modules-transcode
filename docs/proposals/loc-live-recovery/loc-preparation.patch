@@ -1,0 +1,151 @@
+--- a/src/livepeer_open_clearinghouse/providers/registry_daemon/client.py
++++ b/src/livepeer_open_clearinghouse/providers/registry_daemon/client.py
+@@ -563,11 +563,18 @@
+         return _selected_route_proto_to_dataclass(resp.route)
+ 
+     async def select_many(self, capability: str, offering: str) -> list[SelectedRoute]:
++        import grpc  # noqa: PLC0415
+         from livepeer.registry.v1 import resolver_pb2  # noqa: PLC0415
++        from livepeer_open_clearinghouse.errors import DaemonUnavailable  # noqa: PLC0415
+ 
+         stub = await self._ensure_stub()
+         req = resolver_pb2.SelectRequest(capability=capability, offering=offering)
+-        resp = await stub.SelectMany(req)
++        try:
++            resp = await stub.SelectMany(req, timeout=10.0)
++        except grpc.aio.AioRpcError as exc:
++            if exc.code() == grpc.StatusCode.NOT_FOUND:
++                return []
++            raise DaemonUnavailable(daemon="registry", reason=exc.code().name) from exc
+         return [_selected_route_proto_to_dataclass(r) for r in resp.routes]
+ 
+     async def _resolve(self, eth_address: str):  # type: ignore[no-untyped-def]
+--- a/src/livepeer_open_clearinghouse/domains/payments/service.py
++++ b/src/livepeer_open_clearinghouse/domains/payments/service.py
+@@ -60,6 +60,7 @@
+     broker_request_id: str
+     replay_status: int | None = None
+     replay_payload: dict[str, Any] | None = None
++    lease_expires_at: datetime | None = None
+ 
+     @property
+     def is_replay(self) -> bool:
+@@ -160,6 +161,7 @@
+     the primary key, then observes the winner after its save attempt loses.
+     """
+ 
++    claim_expires_at = clock.now() + timedelta(seconds=inflight_timeout_seconds)
+     row = await _get_create_request(
+         session,
+         user_id=user_id,
+@@ -181,14 +183,14 @@
+                 )
+                 .values(
+                     status="in_flight",
+-                    expires_at=clock.now() + timedelta(seconds=inflight_timeout_seconds),
++                    expires_at=claim_expires_at,
+                 )
+                 .execution_options(synchronize_session=False)
+             )
+             if int(reclaimed.rowcount or 0) == 1:  # type: ignore[attr-defined]
+                 broker_request_id = row.broker_request_id
+                 await session.commit()
+-                return CreateRequestClaim(broker_request_id=broker_request_id)
++                return CreateRequestClaim(broker_request_id=broker_request_id, lease_expires_at=claim_expires_at)
+             await session.rollback()
+             winner = await _get_create_request(
+                 session,
+@@ -212,7 +214,7 @@
+         http_status=None,
+         response_payload=None,
+         payment_id=None,
+-        expires_at=clock.now() + timedelta(seconds=inflight_timeout_seconds),
++        expires_at=claim_expires_at,
+     )
+     session.add(row)
+     try:
+@@ -228,7 +230,7 @@
+         if winner is None:  # pragma: no cover - defensive DB anomaly
+             raise
+         return _claim_from_existing(winner, request_fingerprint=request_fingerprint)
+-    return CreateRequestClaim(broker_request_id=row.broker_request_id)
++    return CreateRequestClaim(broker_request_id=row.broker_request_id, lease_expires_at=claim_expires_at)
+ 
+ 
+ async def complete_create_request(
+@@ -257,6 +259,36 @@
+     row.response_payload = response_payload
+     row.payment_id = payment_id
+     row.expires_at = clock.now() + timedelta(seconds=retention_seconds)
++    await session.commit()
++
++
++async def release_failed_session_preparation(
++    session: AsyncSession,
++    *,
++    user_id: uuid.UUID,
++    idempotency_key: str,
++    lease_expires_at: datetime | None,
++    clock: Clock,
++) -> None:
++    """Release only this preparation attempt; it has no payment side effects.
++
++    Preserve fingerprint and request identity. The expiry fence prevents a late
++    failed attempt from releasing a newer claimant. Never use for paid opens.
++    """
++    if lease_expires_at is None:
++        return
++    await session.execute(
++        update(PaymentIdempotencyKey)
++        .where(
++            PaymentIdempotencyKey.user_id == user_id,
++            PaymentIdempotencyKey.operation == "sessions.prepare",
++            PaymentIdempotencyKey.idempotency_key == idempotency_key,
++            PaymentIdempotencyKey.status == "in_flight",
++            PaymentIdempotencyKey.expires_at == lease_expires_at,
++        )
++        .values(expires_at=clock.now())
++        .execution_options(synchronize_session=False)
++    )
+     await session.commit()
+ 
+ 
+--- a/src/livepeer_open_clearinghouse/domains/sessions/runtime.py
++++ b/src/livepeer_open_clearinghouse/domains/sessions/runtime.py
+@@ -90,17 +90,25 @@
+     )
+     if claim.is_replay:
+         return PrepareSessionResponse.model_validate(claim.replay_payload or {})
+-    response = await service.prepare_session(
+-        user_id=user.id,
+-        api_key_id=api_key.id,
+-        capability=body.capability,
+-        offering=body.offering,
+-        descriptor_schema=body.descriptor_schema,
+-        route_binding=body.route_binding,
+-        registry=registry,
+-        clock=clock,
+-        settings=settings,
+-    )
++    try:
++        response = await service.prepare_session(
++            user_id=user.id,
++            api_key_id=api_key.id,
++            capability=body.capability,
++            offering=body.offering,
++            descriptor_schema=body.descriptor_schema,
++            route_binding=body.route_binding,
++            registry=registry,
++            clock=clock,
++            settings=settings,
++        )
++    except OpenClearinghouseError:
++        await db.rollback()
++        await payments_service.release_failed_session_preparation(
++            db, user_id=user.id, idempotency_key=idempotency_key,
++            lease_expires_at=claim.lease_expires_at, clock=clock
++        )
++        raise
+     await payments_service.complete_create_request(
+         db,
+         user_id=user.id,

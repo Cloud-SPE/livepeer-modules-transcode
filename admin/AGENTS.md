@@ -8,6 +8,9 @@ cross-cutting map.
 
 ## Routes (HashRouter)
 
+`#catalog` displays LOC capabilities and wholesale prices via the authenticated
+gateway catalog endpoint; credentials never enter the browser.
+
 ```
 #dashboard   admin-dashboard   (GET /api/v1/admin/stats)
 #signups     admin-signups     (GET /api/v1/admin/waitlist + approve/reject/delete + CSV)

@@ -17,7 +17,8 @@ work behind the broker.
 ```mermaid
 flowchart LR
     C[Customer / portal / admin] --> G[transcode-gateway]
-    G -->|resolve SelectedRoute| R[service-registry-daemon]
+    G -->|GET /v1/routes| L[LOC SDK/API]
+    L -->|resolve| R[service-registry-daemon]
     G -->|open, recover, refill, close| L[LOC SDK/API]
     L -->|funded protocol requests| B[capability-broker]
     B -->|ABR request + SSE result| A[abr-runner]

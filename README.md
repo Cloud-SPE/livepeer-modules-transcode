@@ -35,8 +35,8 @@ A single deployable product:
   `capability-broker` service that runs the actual encodes.
 - A payment system. Network funding and settlement are delegated to the
   Livepeer Open Clearinghouse (LOC); the gateway never acts as a payer.
-- A discovery layer. Broker resolution goes through an external
-  `service-registry-daemon` resolver socket.
+- A discovery layer. Broker resolution goes through LOC’s authenticated
+  HTTP discovery API; no local resolver daemon is required.
 - A CDN. Operators front the gateway with their CDN of choice for
   caching, edge replication, and geographic routing.
 

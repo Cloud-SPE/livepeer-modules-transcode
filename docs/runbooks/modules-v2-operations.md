@@ -11,7 +11,8 @@ output-health enforcement.
 
 ## Required boundary
 
-- Configure resolver-only discovery with `LIVEPEER_RESOLVER_SOCKET`.
+- Configure LOC HTTP discovery with `LIVEPEER_LOC_URL` and `LIVEPEER_LOC_API_KEY`.
+  Remove `LIVEPEER_RESOLVER_SOCKET`; the registry now runs behind LOC.
 - Use the current Modules catalog offering IDs: `abr-default` for customer
   VOD/ABR and `gateway-ingest` for live, unless the deployment deliberately
   overrides those catalog entries.

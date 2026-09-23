@@ -243,3 +243,12 @@ per-session key and encrypted payload from durable runner state.
 The runner persists a stopping intent before touching media; restart retries
 that same termination reason and never re-authorizes ingest while cleanup is
 incomplete.
+
+### Termination reason compatibility
+
+The runner accepts the finite set of descriptor close reasons, broker lifecycle
+codes, and historical gateway aliases that may already be pinned in durable
+broker sessions (including `lease_exhausted` and `customer_end`). It retains the
+first recorded reason and idempotent termination response. Arbitrary strings,
+URLs, and credentials remain invalid reasons. New gateway requests map product
+reasons to descriptor codes such as `lease_expired` and `gateway_close`.

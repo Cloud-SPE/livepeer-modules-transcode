@@ -63,7 +63,7 @@ export class PortalUpload extends LitElement {
   render() {
     return html`
       <section class="portal-main">
-        <h2>Upload a VOD file</h2>
+        <h1>Upload a VOD file</h1>
         ${this.phase === "done"
           ? html`
               <div class="card">
@@ -75,11 +75,10 @@ export class PortalUpload extends LitElement {
           : html`
               <div class="card">
                 <p class="muted">
-                  Files upload directly to S3 via a presigned URL — the
-                  gateway only orchestrates. Default encoding tier is
-                  <code>standard</code> (h264 + hevc).
+                  Upload a video to create adaptive streaming renditions.
+                  Standard encoding includes H.264 and HEVC.
                 </p>
-                <form @submit=${(e) => { e.preventDefault(); this._start(); }}>
+                <form class="form" @submit=${(e) => { e.preventDefault(); this._start(); }}>
                   <label>
                     File
                     <input type="file" accept="video/*" required @change=${(e) => this._onFile(e)} ?disabled=${this.phase !== "idle"}>

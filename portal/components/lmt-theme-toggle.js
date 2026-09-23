@@ -11,7 +11,7 @@ export class LmtThemeToggle extends LitElement {
   createRenderRoot() { return this; }
   constructor() {
     super();
-    this.theme = document.documentElement.getAttribute("data-theme") || "light";
+    this.theme = document.documentElement.getAttribute("data-theme") || "dark";
   }
   _toggle() {
     this.theme = this.theme === "dark" ? "light" : "dark";

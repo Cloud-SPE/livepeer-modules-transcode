@@ -5,3 +5,6 @@ import "./lmt-theme-toggle.js";
 import "./lmt-signup-form.js";
 import "./lmt-email-verify.js";
 import "./lmt-toast.js";
+
+import { portalUrl } from "../../frontend/links.js";
+for (const link of document.querySelectorAll("[data-portal-link]")) link.href = portalUrl;

@@ -579,3 +579,17 @@ test("publisher reconnect grace polls authoritatively before ending the existing
   assert.equal(endCalls, 1);
   assert.equal(h.operation().status, "settled");
 });
+
+test("broker pending closure keeps credentials and schedules recovery instead of terminal failure", async () => {
+  const h = harness({
+    operation: operation({ status: "winddown_failed", sessionRuntime: { ...operation().sessionRuntime!, winddownReason: "customer_end" } }),
+    client: { async end() { throw new PaidSessionClientError("paid_session_close_pending", { retryable: true }); } },
+  });
+  await reconcilePaidLiveSessions(h.deps);
+  assert.equal(h.operation().status, "winddown_pending");
+  assert.equal(h.operation().terminalAt, undefined);
+  assert.equal(h.operation().lastErrorCode, "paid_session_close_pending");
+  assert.equal(h.operation().retryCount, 1);
+  assert.ok(h.operation().nextRetryAt);
+  assert.equal(h.calls.includes("terminal"), false);
+});

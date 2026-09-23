@@ -1,0 +1,12 @@
+FROM node:24-alpine
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY site/package.json site/
+COPY admin/package.json admin/
+COPY portal/package.json portal/
+RUN pnpm install --frozen-lockfile
+COPY site/ site/
+COPY admin/ admin/
+COPY portal/ portal/
+COPY frontend/ frontend/

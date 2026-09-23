@@ -185,7 +185,7 @@ export interface LocSessionStatus {
 export interface LocCloseSessionInput {
   operationId: string;
   actualUnits: number;
-  outcome: string;
+  outcome?: string;
   settlement: LocSettlementEnvelope;
 }
 

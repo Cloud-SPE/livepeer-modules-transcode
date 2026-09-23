@@ -90,6 +90,10 @@ for 32 random bytes held outside Postgres) and an operator-visible
 paid work fails closed before route selection until durable encrypted operation
 storage is configured.
 
+Discovery uses LOC `GET /v1/routes` and validates its complete route snapshot
+before opening paid work. A local resolver daemon is not needed. Remove
+`LIVEPEER_RESOLVER_SOCKET` from existing deployments; startup rejects it.
+
 The LOC boundary is enabled only when `LIVEPEER_LOC_URL`,
 `LIVEPEER_LOC_API_KEY`, and `LIVEPEER_CALLER_PRIVATE_KEY` are set; partial
 configuration fails startup. The caller key is a lowercase 32-byte secp256k1
@@ -151,3 +155,42 @@ On gateway restart, incomplete opens replay the encrypted original LOC/open
 and runner key request identities exactly. Active sessions rebuild their
 live-stream linkage, playback row when absent, and in-memory HLS route from
 encrypted durable state before normal status reconciliation resumes.
+
+The email verification link opens `SITE_URL/verify.html` (`http://localhost:3000`
+by default); that page calls the gateway verification API. Set `SITE_URL` to the
+public signup origin in deployment, separately from `BASE_URL` and `PORTAL_URL`.
+Admins can resend a verification email for a pending unverified signup using
+`POST /api/v1/admin/waitlist/:id/resend-verification` (admin bearer required,
+one request per signup per minute per instance). Provider acceptance is not
+inbox delivery; failures preserve the previous verification token.
+Approval responses include `skipped`, `email_errors`, and `emails_dryrun`;
+only provider-accepted emails count in `emails_sent`.
+
+The authenticated `GET /api/v1/user/catalog` and `GET /api/v1/admin/catalog`
+endpoints fetch LOC's advertised capabilities and exact wholesale prices.
+Credentials stay server-side and opaque registry metadata is stripped.
+`price_per_work_unit_wei` is the amount per `units_per_price` work units;
+both remain decimal strings to prevent rounding. Catalog presence is not a
+reservation or guarantee of a runnable route. The UI marks the configured
+ABR/live offerings and can show other network offerings for discovery.
+
+Live creation reports LOC discovery timeouts as HTTP 504 (`loc_timeout`),
+retryable discovery outages as 503, and nonretryable upstream/configuration
+failures as 502. These responses include `request_id` and `retryable` and occur
+before a paid session is opened. The `live.discovery_failed` log records the
+LOC error code, upstream status and correlation ID without route secrets.
+
+### Live creation and closure recovery
+
+Live creation returns `201` when ready or `202` with a durable `stream_id` and
+`Location` when setup was saved but its network outcome needs recovery. Poll
+that stream; do not submit replacement work. `GET /v1/live/streams` lists the
+latest 100 streams for the authenticated API key, including interrupted creates.
+Owner-only detail returns the RTMP server and customer stream key once ready,
+with `Cache-Control: no-store`; runner credentials remain private.
+
+Ending returns `202` until broker termination and LOC settlement are confirmed.
+Broker `winding_down` is pending, not a final settlement. Recovery records a safe
+error code and retries with bounded backoff. Settlement parsing follows the
+broker protobuf JSON shape (omitted zero fields and unspecified outcome); the
+unchanged signed envelope goes to LOC for authoritative verification/accounting.

@@ -460,3 +460,38 @@ func TestLiveRunnerAdmitsUnauthenticatedCreateWithoutBrokerToken(t *testing.T) {
 		t.Fatalf("create=%d %s", created.Code, created.Body.String())
 	}
 }
+
+func TestBrokerAndHistoricalReasonsCanFinishPinnedWinddown(t *testing.T) {
+	for _, reason := range []string{"lease_exhausted", "customer_end", "publisher_disconnect", "broker_ended", "relay_failure", "refill_preannounced_refusal", "refill_policy_exhausted", "refill_total_exceeded", "runner_ended", "insufficient_balance", "authorization_exhausted", "open_failed", "capacity_exhausted"} {
+		t.Run(reason, func(t *testing.T) {
+			handler, _, runtime := testLiveRunnerHandlerV1(t)
+			create := readStrictFixtureV1[RunnerCreateRequestV1](t, "create-request.json")
+			response := runnerRequestV1(t, handler, http.MethodPost, "/v1/sessions", create, testBrokerTokenV1)
+			if response.Code != http.StatusOK {
+				t.Fatalf("create=%d", response.Code)
+			}
+			var created RunnerCreateResponseV1
+			if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			terminated := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: reason}, testBrokerTokenV1)
+			if terminated.Code != http.StatusOK {
+				t.Fatalf("terminate=%d %s", terminated.Code, terminated.Body.String())
+			}
+			var ended TerminateResponseV1
+			if err := json.Unmarshal(terminated.Body.Bytes(), &ended); err != nil {
+				t.Fatal(err)
+			}
+			if ended.CloseReason != reason {
+				t.Fatalf("lost pinned reason: %q", ended.CloseReason)
+			}
+			replay := runnerRequestV1(t, handler, http.MethodDelete, "/v1/sessions/"+created.RunnerSessionID, TerminateRequestV1{Reason: reason}, testBrokerTokenV1)
+			if replay.Code != http.StatusOK || replay.Body.String() != terminated.Body.String() {
+				t.Fatal("termination replay drift")
+			}
+			if runtime.terminateCount != 1 {
+				t.Fatalf("terminate calls=%d", runtime.terminateCount)
+			}
+		})
+	}
+}

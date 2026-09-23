@@ -12,6 +12,7 @@ import type { SelectedWorkerRoute } from "../../src/engine/types/index.js";
 import { HEADER } from "../../src/livepeer/headers.js";
 import {
   createPaidSessionClient,
+  runnerCloseReason,
   parsePaidSessionControlEvent,
 } from "../../src/livepeer/paidSessionClient.js";
 
@@ -191,7 +192,7 @@ function fakeLoc() {
         actualUnits: input.actualUnits,
         billedValueWei: "12",
         refundWei: "88",
-        outcome: input.outcome,
+        outcome: input.outcome ?? "OVERFUNDED",
         closedAt: "2026-08-24T00:10:00Z",
       };
     },
@@ -488,8 +489,6 @@ test("end retrieves the authoritative settlement by gateway id and closes LOC on
           gateway_session_id: gatewaySessionId,
           work_id: "work-1",
           authorization_id: "work-1",
-          predecessor_work_id: "",
-          rotation_generation: 0,
           state: "closed",
           unit: route.workUnit,
           claimed_units: 12,
@@ -549,7 +548,7 @@ test("terminal identity drift and debit failure are rejected before LOC close", 
           }),
     });
     await assert.rejects(
-      () => client.end({ opened, gatewaySessionId, brokerSessionId, credential: "credential", reason: "end" }),
+      () => client.end({ opened, gatewaySessionId, brokerSessionId, credential: "credential", reason: "gateway_close" }),
       (error: unknown) => error instanceof PaidSessionClientError && !error.retryable,
     );
     assert.equal(closes.length, 0);
@@ -589,4 +588,57 @@ test("control frames are typed advisory signals for HTTP reconciliation", () => 
     type: "session.output.health",
     body: { output_state: "stalled", output_state_since: "not-a-time" },
   }));
+});
+
+for (const [method, operation] of [["prepareSession", "prepare_session"], ["openSession", "open_session"]] as const) {
+  test(`live open preserves typed LOC failure and identifies ${operation}`, async () => {
+    const { loc } = fakeLoc();
+    const failure = new LocTransportError("loc_timeout", { retryable: true });
+    loc[method] = async () => { throw failure; };
+    const client = createPaidSessionClient(loc, { caller, fetch: async () => { throw new Error("broker must not be called"); } });
+    await assert.rejects(() => client.open({
+      requestId: "stable-open-request", route, descriptorSchema: "rtmp-hls/v1",
+      sessionParams: {}, estimatedRunwayUnits: 60, maxTotalUnits: 600,
+    }), (error: unknown) => error === failure && failure.operation === operation && failure.retryable);
+  });
+}
+
+
+test("broker winddown is pending and never settles LOC prematurely", async () => {
+  const { loc, closes } = fakeLoc();
+  let calls = 0;
+  const client = createPaidSessionClient(loc, { caller, fetch: async (_url, init) => {
+    assert.equal(JSON.parse(String(init?.body)).reason, "gateway_close");
+    calls++;
+    return Response.json({ session_id: brokerSessionId, work_id: "work-1", state: "winding_down",
+      close_reason: "customer_end", ended_at: "0001-01-01T00:00:00Z" });
+  } });
+  await assert.rejects(() => client.end({ opened, gatewaySessionId, brokerSessionId, credential: "credential", reason: "customer_end" }),
+    (e: unknown) => e instanceof PaidSessionClientError && e.code === "paid_session_close_pending" && e.retryable);
+  assert.equal(calls, 1);
+  assert.equal(closes.length, 0);
+});
+
+
+test("zero-usage broker protobuf settlement preserves omitted fields and lets LOC determine outcome", async () => {
+  const { loc, closes } = fakeLoc();
+  const envelope = signedSettlement();
+  const payload: Record<string, unknown> = { ...envelope.payload };
+  delete payload.actual_units; delete payload.claimed_units; delete payload.debited_units; delete payload.outcome;
+  const encoded = Buffer.from(JSON.stringify({ ...envelope, payload })).toString("base64");
+  const client = createPaidSessionClient(loc, { caller, fetch: async url => String(url).includes("/settlement/")
+    ? Response.json({ session_id: brokerSessionId, gateway_session_id: gatewaySessionId, work_id: "work-1", authorization_id: "work-1", state: "closed", unit: route.workUnit, claimed_units: 0, debited_units: 0, settlement_seq: 1 }, { headers: { [HEADER.SETTLEMENT]: encoded } })
+    : Response.json({ session_id: brokerSessionId, work_id: "work-1", state: "ended", close_reason: "customer_end", ended_at: "2026-08-24T00:10:00Z" }) });
+  const result = await client.end({ opened, gatewaySessionId, brokerSessionId, credential: "credential", reason: "customer_end" });
+  assert.equal(result.actualUnits, 0); assert.equal(result.outcome, "OVERFUNDED");
+  assert.equal(closes[0]?.outcome, undefined);
+  assert.equal(Object.hasOwn(closes[0]!.settlement.payload, "actual_units"), false);
+});
+
+
+test("product and broker close reasons map to runner descriptor codes", () => {
+  for (const [reason, expected] of Object.entries({ customer_end: "gateway_close", lease_exhausted: "lease_expired", publisher_disconnect: "gateway_close", relay_failure: "ingest_failed", refill_preannounced_refusal: "refill_refused", refill_policy_exhausted: "refill_refused", refill_total_exceeded: "refill_refused", broker_ended: "gateway_close", runner_ended: "gateway_close", insufficient_balance: "runway_exhausted", authorization_exhausted: "runway_exhausted", open_failed: "recovery_failed", capacity_exhausted: "recovery_failed" })) assert.equal(runnerCloseReason(reason), expected);
+  assert.equal(runnerCloseReason("lease_expired"), "lease_expired");
+  assert.throws(() => runnerCloseReason("https://example.test?secret=private"));
+  assert.throws(() => runnerCloseReason("toString"));
 });

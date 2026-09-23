@@ -1,3 +1,4 @@
+import { registerCatalog } from "./routes/catalog.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { Config } from "./config.js";
@@ -66,6 +67,7 @@ export async function createServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Auth surface (plan 0002).
   registerHealth(app);
+  registerCatalog(app, deps);
   registerPublicAuth(app, deps);
   registerUserAuth(app, { pool: deps.pool, config: deps.config });
   registerAdminAuth(app, {

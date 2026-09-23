@@ -6,7 +6,7 @@ import type {
   PaidSessionControlEvent,
   PaidSessionControlHandle,
 } from "../interfaces/index.js";
-import { PaidSessionClientError } from "../interfaces/index.js";
+import { LocTransportError, PaidSessionClientError } from "../interfaces/index.js";
 import type { JsonValue, PaidOperation, PaidOperationSecrets, SelectedWorkerRoute } from "../types/index.js";
 import type { LiveStreamRepo, PlaybackIdRepo } from "../repo/index.js";
 import type { OwnedPaidSession, PaidSessionStore } from "../../livepeer/paidSessionStore.js";
@@ -144,6 +144,7 @@ async function reconcileOne(
       owned.operation.status === "winddown_requested" ||
       owned.operation.status === "winddown_pending" ||
       owned.operation.status === "winddown_retry" ||
+      owned.operation.status === "winddown_failed" ||
       disconnectExpired ||
       leaseExpired
     ) {
@@ -265,9 +266,14 @@ async function reconcileOne(
     if (!persisted) return;
     await executeRefill(deps, owned, { ...secrets, refillIntent: intent as JsonValue }, intent, handle, context.credentials.broker_session_credential);
   } catch (error) {
+    await deps.paidSessionStore.recordProgress(owned, {
+      status: owned.operation.status,
+      ...retryProgress(owned.operation, error, deps.now),
+    });
     deps.logger?.error("orchestrator.live_reconcile_failed", {
       operation_id: owned.operation.id,
-      code: error instanceof PaidSessionClientError ? error.code : "reconcile_failed",
+      code: error instanceof PaidSessionClientError || error instanceof LocTransportError ? error.code : "reconcile_failed",
+      ...(error instanceof LocTransportError ? { loc_operation: error.operation, upstream_status: error.status, remote_code: error.remoteCode } : {}),
     });
   } finally {
     const released = await deps.paidSessionStore.release(owned).catch(() => false);
@@ -593,7 +599,9 @@ async function executeWinddown(
   } catch (error) {
     const typed = error instanceof PaidSessionClientError ? error : null;
     await deps.paidSessionStore.recordProgress(owned, {
-      status: typed?.retryable === false ? "winddown_failed" : "winddown_retry",
+      status: typed?.code === "paid_session_close_pending" ? "winddown_pending"
+        : typed?.retryable === false ? "winddown_failed" : "winddown_retry",
+      ...retryProgress(owned.operation, error, deps.now),
       sessionRuntime: {
         ...owned.operation.sessionRuntime!,
         winddownReason: reason,
@@ -628,4 +636,13 @@ function decimalUnits(value: string): number {
   const parsed = /^(?:0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error("paid session units are invalid");
   return parsed;
+}
+
+function retryProgress(operation: PaidOperation, error: unknown, now = () => new Date()) {
+  const retryCount = operation.retryCount + 1;
+  const code = error instanceof PaidSessionClientError ? error.code
+    : error instanceof LocTransportError ? error.remoteCode ?? error.code : "reconcile_failed";
+  const delaySeconds = error instanceof LocTransportError && error.retryAfterSeconds !== undefined
+    ? Math.max(5, error.retryAfterSeconds) : Math.min(60, 5 * 2 ** Math.min(retryCount - 1, 4));
+  return { retryCount, lastErrorCode: code, nextRetryAt: new Date(now().getTime() + delaySeconds * 1000) };
 }

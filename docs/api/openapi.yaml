@@ -4,6 +4,52 @@ info:
   version: 2.0.0
   description: Breaking paid-job/v1 and paid-session/v1 status surface.
 paths:
+  /api/v1/user/catalog:
+    get:
+      summary: List LOC advertised capabilities and network wholesale prices
+      security: [{ UserSession: [] }]
+      responses:
+        "200":
+          description: Current catalog; advertised prices are not reserved execution quotes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NetworkCatalog" }
+        "401": { description: Authentication required }
+        "503": { description: LOC is unconfigured or unavailable }
+  /api/v1/admin/catalog:
+    get:
+      summary: List LOC advertised capabilities and network wholesale prices
+      security: [{ AdminToken: [] }]
+      responses:
+        "200":
+          description: Current catalog; advertised prices are not reserved execution quotes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NetworkCatalog" }
+        "401": { description: Authentication required }
+        "503": { description: LOC is unconfigured or unavailable }
+  /api/v1/admin/waitlist/{id}/resend-verification:
+    post:
+      summary: Resend a pending unverified signup's verification email
+      security: [{ AdminToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Provider accepted the email, or email is in dry-run mode; acceptance does not guarantee inbox delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, delivery]
+                properties:
+                  status: { type: string, const: ok }
+                  delivery: { type: string, enum: [accepted, dryrun] }
+        "400": { description: Invalid signup ID }
+        "401": { description: Admin authentication required }
+        "409": { description: Signup is not pending and unverified }
+        "429": { description: One resend per signup per minute per gateway instance }
+        "502": { description: Provider failed; previous verification token remains valid }
   /v1/videos/assets/{id}:
     get:
       summary: Get an API-key-owned VOD asset and its paid job status
@@ -16,6 +62,52 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AssetDetail" }
+  /v1/live/streams:
+    get:
+      summary: List the latest 100 streams owned by this API key
+      security: [{ ProductApiKey: [] }]
+      responses:
+        "200":
+          description: Durable stream summaries; no ingest credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [streams]
+                properties:
+                  streams: { type: array, items: { type: object } }
+    post:
+      summary: Create a live stream or return its durable recovery identity
+      security: [{ ProductApiKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 160 }
+                encoding_tier: { type: string, enum: [baseline, standard, premium], default: standard }
+                offering: { type: string }
+      responses:
+        "201": { description: Ready; includes customer publishing credentials }
+        "202":
+          description: Durable setup pending; poll Location instead of creating a replacement
+          headers:
+            Location: { schema: { type: string } }
+            Retry-After: { schema: { type: integer } }
+        "502": { description: Setup failed before a recoverable paid operation was saved }
+        "503": { description: Live service or discovery unavailable }
+        "504": { description: Discovery timed out before a paid operation was created }
+  /v1/live/streams/{id}/end:
+    post:
+      summary: Request durable session closure
+      security: [{ ProductApiKey: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "202": { description: Ending; poll detail until settlement completes }
+        "200": { description: Already ended }
   /v1/live/streams/{id}:
     get:
       summary: Get an API-key-owned live stream and its paid session status
@@ -50,9 +142,50 @@ paths:
                     items: { $ref: "#/components/schemas/AdminPaidOperationStatus" }
 components:
   securitySchemes:
+    UserSession: { type: http, scheme: bearer }
     ProductApiKey: { type: http, scheme: bearer }
     AdminToken: { type: http, scheme: bearer }
   schemas:
+    NetworkCatalog:
+      type: object
+      required: [source, price_basis, fetched_at, items]
+      properties:
+        source: { type: string, const: LOC }
+        price_basis: { type: string, const: network_wholesale }
+        fetched_at: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [name, offerings]
+            properties:
+              name: { type: string }
+              work_unit: { type: [string, "null"] }
+              offerings:
+                type: array
+                items:
+                  type: object
+                  required: [id, protocol, price_per_work_unit_wei, units_per_price, configured_for_gateway]
+                  properties:
+                    id: { type: string }
+                    protocol: { type: string }
+                    work_unit: { type: [string, "null"] }
+                    price_per_work_unit_wei:
+                      type: [string, "null"]
+                      description: Exact wei amount per units_per_price work units, not necessarily per one unit
+                      pattern: '^\d+$'
+                    units_per_price: { type: string, pattern: '^0*[1-9][0-9]*$' }
+                    configured_for_gateway: { type: boolean }
+                    job:
+                      type: [object, "null"]
+                      properties:
+                        transports: { type: array, items: { type: string } }
+                    session:
+                      type: [object, "null"]
+                      properties:
+                        descriptor_schema: { type: string }
+                        attachment: { type: string }
+                        metering: { type: string }
     PaidOperationStatus:
       type: object
       required: [operation_id, protocol, state, request_id, work_unit, funded_units, warnings, recovered, retry_count, output_state, output_status, output_state_since, last_failure_code]
@@ -122,7 +255,10 @@ components:
         stream_id: { type: string }
         api_key_id: { type: string }
         name: { type: string }
-        status: { type: string }
+        status: { type: string, enum: [idle, opening, ready, live, ending, ended, failed] }
+        rtmp_push_url: { type: [string, "null"], description: RTMP server URL; null until ready }
+        stream_key: { type: [string, "null"], description: Customer publishing key for authenticated owner only; never a runner credential }
+        rtmp_push_url_kind: { type: string, const: gateway_relay }
         paid_operation:
           anyOf: [{ $ref: "#/components/schemas/PaidOperationStatus" }, { type: "null" }]
         created_at: { type: string, format: date-time }

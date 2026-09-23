@@ -28,6 +28,9 @@ export interface PaidOperationClaim {
 }
 
 export interface PaidOperationProgress {
+  lastErrorCode?: string;
+  nextRetryAt?: Date;
+  retryCount?: number;
   status: string;
   workId?: string;
   rotationGeneration?: number;

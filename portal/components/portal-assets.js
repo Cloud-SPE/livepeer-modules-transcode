@@ -45,11 +45,11 @@ export class PortalAssets extends LitElement {
   render() {
     return html`
       <section class="portal-main">
-        <h2>Asset library</h2>
+        <h1>Asset library</h1>
         <p class="muted">
           VOD assets you've uploaded. <a href="#upload">Upload a new one</a>.
         </p>
-        ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+        ${this.error ? html`<div class="msg error" role="alert">${this.error}</div>` : nothing}
         ${this.loading && this.items.length === 0
           ? html`<p class="muted">Loading…</p>`
           : this.items.length === 0
@@ -59,7 +59,7 @@ export class PortalAssets extends LitElement {
               </div>
             `
           : html`
-              <table>
+              <div class="table-wrap"><table>
                 <thead>
                   <tr><th>ID</th><th>Status</th><th>Tier</th><th>Created</th><th></th></tr>
                 </thead>
@@ -74,7 +74,7 @@ export class PortalAssets extends LitElement {
                     </tr>
                   `)}
                 </tbody>
-              </table>
+              </table></div>
               ${this.nextCursor
                 ? html`<button type="button" class="secondary" @click=${() => this._load(this.nextCursor)}>
                     Load more

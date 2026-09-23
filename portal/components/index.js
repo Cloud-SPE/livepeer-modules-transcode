@@ -10,3 +10,5 @@ import "./portal-upload.js";
 import "./portal-live-streams.js";
 import "./portal-live-detail.js";
 import "./portal-app.js";
+
+import "./portal-catalog.js";

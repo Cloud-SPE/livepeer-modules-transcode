@@ -4,6 +4,7 @@ import type { LiveStream, LiveStreamStatus } from "../types/index.js";
 
 export interface LiveStreamRepo {
   insert(stream: Omit<LiveStream, "createdAt"> & { createdAt?: Date }): Promise<LiveStream>;
+  listForApiKey(apiKeyId: string): Promise<LiveStream[]>;
   byId(id: string): Promise<LiveStream | null>;
   byStreamKeyHash(hash: string): Promise<LiveStream | null>;
   updateStatus(

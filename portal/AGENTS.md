@@ -9,6 +9,9 @@ cross-cutting map.
 
 ## Routes (HashRouter)
 
+`#catalog` displays LOC capabilities and wholesale prices via the authenticated
+gateway catalog endpoint; credentials never enter the browser.
+
 ```
 #dashboard        portal-dashboard
 #account          portal-account     (rotate key)

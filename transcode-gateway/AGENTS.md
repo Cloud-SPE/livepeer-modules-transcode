@@ -22,9 +22,9 @@ Plus:
   `media.paid_operations` is the durable v2 recovery record. Encrypted
   protocol secrets are separated in `media.paid_operation_secrets` and
   cleared when the operation becomes terminal.
-- **Resolver-only broker resolution.** No `LIVEPEER_BROKER_URL`
-  static fallback (see core-beliefs §2). The resolver wiring lands in
-  plan 0004 (livepeer wire layer).
+- **LOC-owned broker resolution.** Use authenticated LOC HTTP discovery
+  and validate the canonical route snapshot/binding (core-beliefs §2).
+  No local resolver socket or static broker fallback. See plan 0020.
 - **Parse-don't-validate at boundaries.** Every route uses Zod to
   parse request bodies, params, and queries. Internal types are
   derived from Zod schemas.
@@ -77,9 +77,9 @@ Plus the vendored resolver proto contract under `proto/livepeer/`:
   fingerprints, and overlapping delegated settlement keys; job/session
   axes remain losslessly mirrored in `extra_json` and are parsed strictly
   before dispatch.
-The resolver protos are loaded at runtime by the resolver gRPC client when
-`LIVEPEER_RESOLVER_SOCKET` is set. Payment behavior is delegated exclusively
-to LOC; the gateway carries no direct payer client or payment proto.
+The older gRPC selector and proto fixtures remain for contract regression tests;
+gateway startup uses `locWorkerResolver.ts` over the same HTTP transport as
+funding and settlement. No resolver socket is mounted into the gateway.
 
 `runtime/rtmp/` (live RTMP listener) lands under plan 0006. VOD routes
 land under plan 0005.

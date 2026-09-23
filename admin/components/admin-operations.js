@@ -33,24 +33,24 @@ export class AdminOperations extends LitElement {
   }
   render() {
     return html`<section class="admin-main">
-      <h2>Paid operations</h2>
+      <h1>Paid operations</h1>
       <div class="toolbar">
         <label>Kind <select .value=${this.kind} @change=${(event) => { this.kind = event.target.value; void this._load(); }}>
           <option value="">all</option><option value="job">job</option><option value="session">session</option>
         </select></label>
         <label>Status <input .value=${this.status} @change=${(event) => { this.status = event.target.value.trim(); void this._load(); }}></label>
       </div>
-      ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+      ${this.error ? html`<div class="msg error" role="alert">${this.error}</div>` : nothing}
       ${this.loading ? html`<p class="muted">Loading…</p>` : html`
-        <div class="card"><table><thead><tr><th>Protocol</th><th>Product</th><th>State</th><th>Usage</th><th>Correlation</th><th>Warning / error</th></tr></thead>
-        <tbody>${this.items.map((item) => html`<tr>
+        <div class="card"><div class="table-wrap"><table><thead><tr><th>Protocol</th><th>Product</th><th>State</th><th>Usage</th><th>Correlation</th><th>Warning / error</th></tr></thead>
+        <tbody>${this.items.length === 0 ? html`<tr><td colspan="6" class="muted">No operations match these filters.</td></tr>` : nothing}${this.items.map((item) => html`<tr>
           <td><code>${item.protocol}</code><br><span class="muted">${item.kind}</span></td>
           <td><code>${item.asset_id ?? item.live_stream_id ?? "—"}</code></td>
           <td><span class="badge ${item.state === "settled" && item.output_status !== "output_failed" ? "ok" : item.terminal_at || item.output_status === "stalled" || item.output_status === "output_failed" ? "error" : "warn"}">${item.state}</span>${item.recovered ? html`<br><span class="muted">recovered</span>` : nothing}${item.output_status ? html`<br><span class="muted">output: ${item.output_status.replaceAll("_", " ")}</span>` : nothing}</td>
           <td>${item.claimed_units ?? item.delivered_units ?? "pending"} ${item.work_unit}</td>
           <td><code>${item.operation_id}</code><br><code>${item.request_id}</code></td>
           <td>${item.last_failure_code ?? item.error_code ?? item.winddown_reason ?? (item.warnings.join(", ") || html`<span class="muted">—</span>`)}</td>
-        </tr>`)}</tbody></table></div>`}
+        </tr>`)}</tbody></table></div></div>`}
     </section>`;
   }
 }

@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 
 // Modeled on blue-claw-network/web-platform/site/components/cc-theme-toggle.js.
 // Light DOM (per frontend-dom-and-css-invariants.md §1). Persists choice to
-// localStorage; respects prefers-color-scheme on first visit (handled by the
+// localStorage; defaults to the reference dark design on first visit (handled by the
 // inline script in <head> to avoid FOUC).
 
 const KEY = "lmt-theme";
@@ -14,7 +14,7 @@ export class LmtThemeToggle extends LitElement {
 
   constructor() {
     super();
-    this.theme = document.documentElement.getAttribute("data-theme") || "light";
+    this.theme = document.documentElement.getAttribute("data-theme") || "dark";
   }
 
   _toggle() {

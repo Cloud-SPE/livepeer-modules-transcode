@@ -4,7 +4,7 @@ Repo-wide implementation contract for all three frontends (`site/`,
 `portal/`, `admin/`). These rules are enforceable mechanically; treat
 any violation as a bug. They are inherited from
 `livepeer-network-modules`'s equivalent doc (where the rationale was
-litigated in plan 0023) and apply unchanged here.
+litigated in plan 0023) with the explicit visual adaptations documented in plan 0021.
 
 ## 1. Light DOM only
 
@@ -69,6 +69,25 @@ Component-scoped styles are not allowed (they would imply shadow DOM
 or styled-components patterns). All styles cascade from the top-level
 sheet using class names and semantic-element selectors.
 
+Portal and admin entry stylesheets import `frontend/theme.css`. The public site
+uses the OpenAI demo stylesheet adapted in `site/index.css`. The shared console foundation
+owns theme tokens, typography, controls, cards, tables, status badges, and the
+responsive console shell. Customer surfaces use emerald accents; admin uses
+sky accents selected by `data-product="admin"` on the document element.
+Component entry sheets contain only product-specific rules. The visual
+references are LOC's `web/portal` and `web/admin`, and the OpenAI module's
+`web/site` and `web/portal`; adapt their appearance without importing their
+authentication or routing contracts.
+
+The portal and admin reproduce LOC Path A: 44px topbar, 240px icon sidebar,
+20px headings, translucent zinc cards, emerald/sky accents. At 760px and
+below a 260px fixed drawer overlays the content with a backdrop. Escape,
+backdrop dismissal and route selection close it; keyboard focus is contained
+while open and restored to the toggle. The site follows OpenAI web/site
+composition. Source provenance and deliberate accessibility extensions are
+recorded in plan 0021. Secondary text uses readable zinc400 rather than the
+reference's lower-contrast zinc500/600.
+
 Class naming: kebab-case, component-scoped by prefix
 (`portal-`, `admin-`, `lmt-`). Example: `.portal-key-display`,
 `.admin-waitlist-row`.
@@ -93,9 +112,9 @@ also carries Node-native unit tests where it can be kept DOM-independent.
 ## 7. Light / dark theme
 
 CSS custom properties drive theming. Both themes are checked in.
-Theme preference is persisted to `localStorage` and respects
-`prefers-color-scheme` on first visit. This is consistent with
-Blueclaw's frontend pattern.
+Theme preference is persisted to `localStorage`. The initial theme is dark,
+matching LOC and OpenAI. Explicit light preference is retained as a transcode
+extension; OS light preference does not override the reference first visit.
 
 ## Enforcement
 

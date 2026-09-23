@@ -6,3 +6,5 @@ import "./admin-dashboard.js";
 import "./admin-signups.js";
 import "./admin-operations.js";
 import "./admin-app.js";
+
+import "./admin-catalog.js";

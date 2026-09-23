@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-product="admin">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,7 +11,7 @@
     (function () {
       var s = localStorage.getItem("lmt-theme");
       document.documentElement.setAttribute("data-theme",
-        s || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+        (s === "light" ? "light" : "dark"));
     })();
   </script>
   <script type="module" src="/components/index.js"></script>

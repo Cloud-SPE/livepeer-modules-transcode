@@ -21,7 +21,7 @@ export class AdminPagination extends LitElement {
   render() {
     if (this.totalPages <= 1) return nothing;
     return html`
-      <nav style="display:flex; gap: var(--gap-sm); align-items:center; margin-top: var(--gap-md);">
+      <nav class="lmt-actions lmt-space-top">
         <button type="button" class="secondary" ?disabled=${this.page <= 1} @click=${() => this._go(this.page - 1)}>← Prev</button>
         <span class="muted">Page ${this.page} of ${this.totalPages}</span>
         <button type="button" class="secondary" ?disabled=${this.page >= this.totalPages} @click=${() => this._go(this.page + 1)}>Next →</button>

@@ -9,6 +9,7 @@ export type LocTransportErrorCode =
 
 export class LocTransportError extends Error {
   readonly code: LocTransportErrorCode;
+  operation?: "prepare_session" | "open_session";
   readonly status?: number;
   readonly remoteCode?: string;
   readonly retryable: boolean;

@@ -11,57 +11,41 @@
     // Set theme before first paint to prevent FOUC
     (function () {
       var s = localStorage.getItem("lmt-theme");
-      var t = s || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      var t = s === "light" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", t);
     })();
   </script>
   <script type="module" src="/components/index.js"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="site-brand">
-      <strong>Livepeer Transcode</strong>
-    </div>
-    <nav class="site-nav">
-      <lmt-theme-toggle></lmt-theme-toggle>
-    </nav>
+  <header class="topbar">
+    <h1 class="brand">Livepeer Transcode</h1>
+    <nav aria-label="Main"><a href="/portal/" data-portal-link class="nav-link">Portal</a><lmt-theme-toggle></lmt-theme-toggle></nav>
   </header>
-
-  <main class="site-main">
+  <main>
     <section class="hero">
-      <h1>VOD + live RTMP transcode, no rate limits.</h1>
-      <p class="lede">
-        Open-source Livepeer-backed video transcoding behind a single
-        API. Submit batch VOD jobs or push live RTMP — we resolve a
-        worker, mint payment, and return a playback URL.
-      </p>
+      <h2>Video on demand. Live streaming.</h2>
+      <p class="lead">Transcode video on the Livepeer network. One API for adaptive playback and live streams.</p>
+      <pre class="code"><code># List your video assets
+curl "$TRANSCODE_GATEWAY_URL/v1/videos/assets" \
+  -H "Authorization: Bearer $TRANSCODE_API_KEY"</code></pre>
     </section>
-
-    <section class="signup-section">
-      <h2>Join the waitlist</h2>
-      <p>
-        We're inviting accounts in batches. Sign up; we'll email you an
-        API key when your account is approved.
-      </p>
+    <section class="signup">
+      <h3>Request access</h3>
+      <p>Join the waitlist. We email a verification link; once verified, an admin reviews your request and emails an API key.</p>
       <lmt-signup-form></lmt-signup-form>
     </section>
-
-    <section class="how-it-works">
-      <h2>What's in the box</h2>
+    <section class="endpoints">
+      <h3>Transcode API</h3>
       <ul>
-        <li><strong>VOD</strong> — presigned upload → ABR ladder
-          encode → signed HLS playback URL.</li>
-        <li><strong>Live</strong> — RTMP ingest → broker session →
-          LL-HLS strict-proxy.</li>
-        <li><strong>API-first</strong> — one bearer token gates the
-          whole product API.</li>
+        <li><code>POST /v1/uploads</code> — prepare a video upload</li>
+        <li><code>POST /v1/vod/submit</code> — transcode an uploaded asset</li>
+        <li><code>GET /v1/videos/assets</code> — browse your video library</li>
+        <li><code>POST /v1/live/streams</code> — create a live stream</li>
       </ul>
     </section>
   </main>
-
-  <footer class="site-footer">
-    <p>Livepeer Transcode</p>
-  </footer>
+  <footer><p>Backed by the <a href="https://livepeer.org">Livepeer</a> decentralized GPU network.</p></footer>
 
   <lmt-toast></lmt-toast>
 </body>

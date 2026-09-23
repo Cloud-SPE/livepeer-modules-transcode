@@ -77,6 +77,11 @@ export function createLiveStreamRepo(pool: DbPool): LiveStreamRepo {
       return rowToLiveStream(result.rows[0]!);
     },
 
+    async listForApiKey(apiKeyId) {
+      const result = await pool.query<Row>(`SELECT ${SELECT_COLS} FROM media.live_streams WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT 100`, [apiKeyId]);
+      return result.rows.map(rowToLiveStream);
+    },
+
     async byId(id) {
       const result = await pool.query<Row>(
         `SELECT ${SELECT_COLS} FROM media.live_streams WHERE id = $1`,

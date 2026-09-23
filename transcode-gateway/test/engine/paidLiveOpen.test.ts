@@ -16,6 +16,7 @@ test("paid live open binds durable identities and encrypted private ingest befor
   });
   let storedSecrets: unknown;
   const paidSessionStore = {
+    async release(value: OwnedPaidSession) { assert.equal(value.claim.version, "3"); events.push("claim-released"); return true; },
     async create(value: { requestId: string }, secrets: unknown) {
       events.push("operation-created");
       assert.match(value.requestId, /^pending:req_/);
@@ -96,7 +97,7 @@ test("paid live open binds durable identities and encrypted private ingest befor
   assert.deepEqual(events, [
     "stream-created", "operation-created", "session-opened", "progress:issuing_key",
     "key-issued", "secrets-stored", "progress:active", "stream:active",
-    "playback-created", "cache-recorded",
+    "playback-created", "cache-recorded", "claim-released",
   ]);
   assert.match(JSON.stringify(storedSecrets), /private-runner-key/);
   assert.match(JSON.stringify(storedSecrets), /grant-secret/);
@@ -129,3 +130,18 @@ function routeFixture(): SelectedWorkerRoute {
     settlementDomainId: `0x${"03".repeat(32)}`,
   };
 }
+
+
+test("failed open releases its durable claim for same-identity recovery", async () => {
+  let released = false;
+  const operation = operationFixture("1");
+  const owned = { operation, claim: { owner: "gateway-1", version: "1", leaseExpiresAt: new Date("2030-01-01T00:00:00Z") } };
+  await assert.rejects(() => openPaidLiveStream({
+    liveStreamRepo: { async insert() {} } as unknown as LiveStreamRepo,
+    playbackIdRepo: {} as PlaybackIdRepo,
+    paidSessionStore: { async create() { return owned; }, async release(value: OwnedPaidSession) { assert.equal(value, owned); released = true; return true; } } as unknown as PaidSessionStore,
+    paidSessionClient: { async open() { throw new Error("upstream timeout"); } } as unknown as PaidSessionClient,
+    liveSessions: {} as LiveSessionDirectory, gatewayRtmpUrl: "rtmp://gateway.example/live", estimatedRunwayUnits: 60, maxTotalUnits: 3600,
+  }, { streamId: "live-1", apiKeyId: "api-key-1", name: "Test", encodingTier: "standard", route: routeFixture() }), /upstream timeout/);
+  assert.equal(released, true);
+});

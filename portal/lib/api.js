@@ -144,9 +144,7 @@ export async function submitVod(input) {
 }
 
 export async function listLiveStreamsByApi() {
-  // The gateway doesn't currently have a list-live-streams route; the portal
-  // tracks streams created in this session client-side. See plan 0014 §3.6.
-  return [];
+  return (await productRequest("/v1/live/streams")).streams;
 }
 
 export async function createLiveStream(input) {
@@ -190,3 +188,5 @@ export function putToPresignedUrl(url, file, onProgress) {
     xhr.send(file);
   });
 }
+
+export async function fetchCatalog() { return userRequest("/api/v1/user/catalog"); }

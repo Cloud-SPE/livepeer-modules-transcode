@@ -38,7 +38,7 @@ export class PortalAccount extends LitElement {
   render() {
     return html`
       <section class="portal-main">
-        <h2>Account</h2>
+        <h1>Account</h1>
         <div class="card">
           <h3>Current API key</h3>
           <portal-key-display></portal-key-display>
@@ -52,10 +52,10 @@ export class PortalAccount extends LitElement {
           </p>
           ${this.confirming
             ? html`
-                <div class="warn" style="margin-bottom: var(--gap-md);">
+                <div class="warn lmt-space-bottom">
                   Are you sure? This action cannot be undone.
                 </div>
-                <div style="display: flex; gap: var(--gap-sm);">
+                <div class="lmt-actions">
                   <button type="button" class="danger" ?disabled=${this.inFlight} @click=${() => this._doRotate()}>
                     ${this.inFlight ? "Rotating…" : "Yes, rotate now"}
                   </button>

@@ -34,9 +34,8 @@ services:
       LOG_LEVEL: info
       ALLOWED_ORIGINS: "*"
       # RESEND_API_KEY unset — emails logged, not sent
-      # Modules v2 requires a resolver socket, LOC URL/key, and an external
+      # Modules v2 uses LOC HTTP discovery/authorization and an external
       # 32-byte wrapping key. Keep real secrets outside checked-in compose:
-      # LIVEPEER_RESOLVER_SOCKET: /run/livepeer/resolver.sock
       # LIVEPEER_LOC_URL: http://loc:8080
       # LIVEPEER_LOC_API_KEY: supplied-by-secret-manager
       # LIVEPEER_CALLER_PRIVATE_KEY: supplied-by-secret-manager

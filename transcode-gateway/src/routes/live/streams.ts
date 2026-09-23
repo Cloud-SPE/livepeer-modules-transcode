@@ -1,8 +1,10 @@
+import { LocTransportError } from "../../engine/interfaces/index.js";
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Config } from "../../config.js";
 import type { DbPool } from "../../db/pool.js";
+import type { LiveStream, PaidOperation } from "../../engine/types/index.js";
 import type { Logger, PaidSessionClient, WorkerResolver } from "../../engine/interfaces/index.js";
 import type { LiveStreamRepo, PlaybackIdRepo } from "../../engine/repo/index.js";
 import type { LiveSessionDirectory } from "../../livepeer/liveSessionDirectory.js";
@@ -38,9 +40,14 @@ function newStreamId(): string {
   return `live_${randomBytes(8).toString("hex")}`;
 }
 
-function publicStatus(status: string): string {
-  if (status === "active" || status === "reconnecting") return "live";
-  return status;
+function publicStatus(stream: LiveStream, operation: PaidOperation | null): string {
+  if (operation?.status === "failed") return "failed";
+  if (stream.endedAt || operation?.terminalAt) return "ended";
+  if (operation?.status.startsWith("winddown") || operation?.sessionRuntime?.winddownReason) return "ending";
+  if (operation?.status === "opening" || operation?.status === "issuing_key") return "opening";
+  if (operation?.sessionRuntime?.outputState === "producing") return "live";
+  if (stream.status === "active" || stream.status === "reconnecting") return "ready";
+  return stream.status;
 }
 
 export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps): void {
@@ -48,6 +55,7 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
 
   // POST /v1/live/streams
   app.post("/v1/live/streams", { preHandler: auth }, async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
     if (
       !deps.paidSessionClient ||
       !deps.paidSessionStore ||
@@ -57,7 +65,7 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
       reply.code(503).send({
         status: "error",
         error: "paid_session_not_configured",
-        message: "live streaming requires resolver, LOC, encrypted operation storage, and gateway RTMP relay",
+        message: "live streaming requires LOC discovery, encrypted operation storage, and gateway RTMP relay",
       });
       return;
     }
@@ -76,11 +84,36 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
     const offering = parsed.data.offering ?? deps.config.LIVEPEER_LIVE_OFFERING_DEFAULT;
     const name = parsed.data.name?.trim() || streamId;
 
-    const route = await deps.workerResolver.selectWorker({
-      capability: "video:transcode.live",
-      offering,
-      tier: parsed.data.encoding_tier,
-    });
+    let route: Awaited<ReturnType<WorkerResolver["selectWorker"]>>;
+    try {
+      route = await deps.workerResolver.selectWorker({
+        capability: "video:transcode.live",
+        offering,
+        tier: parsed.data.encoding_tier,
+      });
+    } catch (error) {
+      if (!(error instanceof LocTransportError)) throw error;
+      const requestId = req.requestId ?? req.id;
+      const authFailure = error.status === 401 || error.status === 403;
+      const status = error.code === "loc_timeout" ? 504 : error.retryable ? 503 : 502;
+      req.log.warn({
+        request_id: requestId, loc_code: error.code, upstream_status: error.status,
+        remote_code: error.remoteCode, retryable: error.retryable,
+        capability: "video:transcode.live", offering,
+      }, "live.discovery_failed");
+      if (error.retryAfterSeconds !== undefined) reply.header("Retry-After", error.retryAfterSeconds);
+      return reply.code(status).send({
+        status: "error", error: authFailure ? "loc_auth_failed" : error.code,
+        message: authFailure
+          ? "LOC rejected this gateway's credentials. Ask the operator to check LOC configuration. No live stream was created."
+          : error.code === "loc_timeout"
+            ? "LOC route discovery timed out. No live stream was created. Please try again."
+            : error.retryable
+              ? "LOC route discovery is temporarily unavailable. No live stream was created. Please try again."
+              : "LOC could not provide a valid live route. No live stream was created. Ask the operator to check gateway logs.",
+        retryable: error.retryable, request_id: requestId,
+      });
+    }
     if (!route) {
       reply.code(503).send({ status: "error", error: "no_live_route", message: "no video:transcode.live route is currently available" });
       return;
@@ -106,16 +139,23 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "live_session_open_failed";
-      reply.code(502).send({
-        status: "error",
-        error: "live_session_open_failed",
-        message: "the paid live session could not be opened",
+      const operation = await deps.paidSessionStore.byLiveStreamId(streamId);
+      if (operation) {
+        reply.header("Location", `/v1/live/streams/${streamId}`).header("Retry-After", "5").code(202).send({
+          stream_id: streamId, name, status: "opening", paid_operation: customerOperationStatus(operation),
+          message: "Stream setup is pending. This request will be recovered automatically; do not submit another stream.",
+        });
+      } else {
+        reply.code(502).send({ status: "error", error: "live_session_open_failed", message: "Stream setup failed before a recoverable operation was saved." });
+      }
+      deps.logger?.error("live.open_failed", { stream_id: streamId, error: message,
+        ...(err instanceof LocTransportError ? { loc_code: err.code, loc_operation: err.operation, upstream_status: err.status, remote_code: err.remoteCode } : {}),
       });
-      deps.logger?.error("live.open_failed", { stream_id: streamId, error: message });
       return;
     }
 
     reply.code(201).send({
+      status: "ready",
       stream_id: session.streamId,
       api_key_id: apiKey.id,
       name,
@@ -129,6 +169,16 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
       expires_at: session.expiresAt,
       request_id: session.requestId,
     });
+  });
+
+  app.get("/v1/live/streams", { preHandler: auth }, async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const streams = await deps.liveStreamRepo.listForApiKey(req.apiKey!.id);
+    return { streams: await Promise.all(streams.map(async (stream) => {
+      const operation = await deps.paidSessionStore?.byLiveStreamId(stream.id) ?? null;
+      return { stream_id: stream.id, name: stream.name ?? stream.id, status: publicStatus(stream, operation),
+        paid_operation: customerOperationStatus(operation), created_at: stream.createdAt.toISOString(), ended_at: stream.endedAt?.toISOString() ?? null };
+    })) };
   });
 
   // GET /v1/live/streams/:id
@@ -149,11 +199,17 @@ export function registerLiveStreams(app: FastifyInstance, deps: LiveStreamsDeps)
       : deps.liveSessions.getByStreamId(stream.id);
     const operation = await deps.paidSessionStore?.byLiveStreamId(stream.id) ?? null;
 
+    reply.header("Cache-Control", "no-store");
+    const status = publicStatus(stream, operation);
+    const ready = status === "ready" || status === "live";
     return {
       stream_id: stream.id,
       api_key_id: stream.apiKeyId,
       name: stream.name ?? stream.id,
-      status: publicStatus(stream.status),
+      status,
+      rtmp_push_url: ready && session ? deps.config.LIVEPEER_GATEWAY_EXTERNAL_RTMP_URL : null,
+      stream_key: ready ? session?.streamKey ?? null : null,
+      rtmp_push_url_kind: "gateway_relay",
       paid_operation: customerOperationStatus(operation),
       session_id: stream.sessionId ?? null,
       playback_url: session?.hlsPlaybackUrl ?? null,

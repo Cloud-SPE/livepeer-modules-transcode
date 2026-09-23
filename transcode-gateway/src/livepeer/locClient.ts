@@ -42,7 +42,7 @@ const httpUrl = z.string().url().refine((value) => {
     url.password === ""
   );
 });
-const routeBindingWire = z
+export const routeBindingWire = z
   .object({
     quote_id: z.string().min(1),
     quote_version: positiveUint64,
@@ -68,7 +68,7 @@ const estimatorWire = z
     fixtures: z.string().min(1),
   })
   .strict();
-const routeSnapshotWire = z
+export const routeSnapshotWire = z
   .object({
     schema_version: z.literal("route-snapshot/v1"),
     broker_url: httpUrl,
@@ -418,7 +418,7 @@ function mapClose(
   if (
     value.session_id !== input.operationId ||
     value.actual_units !== input.actualUnits ||
-    value.outcome !== input.outcome
+    (input.outcome !== undefined && value.outcome !== input.outcome)
   ) throw invalidResponse();
   return {
     operationId: value.session_id,
@@ -535,7 +535,7 @@ function mapSessionOpen(
   };
 }
 
-function mapRouteSnapshot(value: z.infer<typeof routeSnapshotWire>): LocRouteSnapshot {
+export function mapRouteSnapshot(value: z.infer<typeof routeSnapshotWire>): LocRouteSnapshot {
   const axes = parseRouteProtocolDeclaration(value.protocol, {
     ...(value.job === undefined || value.job === null
       ? {}
@@ -663,7 +663,7 @@ function validateClose(input: LocCloseSessionInput): void {
     !z.string().uuid().safeParse(input.operationId).success ||
     !Number.isSafeInteger(input.actualUnits) ||
     input.actualUnits < 0 ||
-    input.outcome.length === 0 ||
+    (input.outcome !== undefined && input.outcome.length === 0) ||
     !settlementEnvelopeWire.safeParse(input.settlement).success
   ) throw invalidRequest();
 }

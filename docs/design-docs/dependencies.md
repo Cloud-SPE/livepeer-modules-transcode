@@ -20,13 +20,14 @@ finite session refill policy, authoritative session HTTP state, optional
 control-WebSocket consumption, and SDK error/result types that preserve
 protocol codes and correlation IDs.
 
-### `service-registry-daemon`
+### Discovery through LOC
 
-The resolver is the only broker-discovery path. Its selected route must carry
-protocol, transport, request/response descriptors, work unit, estimator,
-quote/fingerprint, settlement-key, and session-parameter metadata without
-collapsing the job and session axes. The gateway filters incompatibility
-before invoking LOC. There is no static URL fallback.
+`GET /v1/routes` on LOC selects a ranked broker for the capability and offering.
+Its canonical route snapshot carries protocol, transport, estimator, price,
+quote/fingerprints, settlement domain/keys, and session metadata. The gateway
+validates those fields before authorization and binds paid opens to that exact
+selection. The registry daemon is a LOC dependency, not a local gateway peer.
+There is no static broker fallback. No extra discovery credentials are needed.
 
 ### `capability-broker`
 
@@ -70,7 +71,7 @@ safe local email sink; raw secrets must not be written to production logs.
 
 - Fastify, Postgres/Drizzle, AWS S3 SDK, RTMP runtime, Zod, and the local
   strict LOC HTTP adapter.
-- Resolver protobuf/gRPC support remains for `service-registry-daemon`.
+- Discovery and authorization use the same authenticated LOC HTTP transport.
 - No direct payer-daemon protobuf or client library is shipped.
 
 ## Deliberately excluded

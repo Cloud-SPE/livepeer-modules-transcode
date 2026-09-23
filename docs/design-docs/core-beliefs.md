@@ -11,12 +11,15 @@ job or push an RTMP live stream without standing up the broader
 `livepeer-network-modules` suite.* Surfaces that do not serve that pin are
 out of scope.
 
-## 2. Resolver-only broker discovery
+## 2. LOC-owned broker discovery
 
-The gateway resolves brokers only through `service-registry-daemon`. There
-is no static broker URL fallback. Selection consumes the resolver's
-protocol-aware `SelectedRoute` contract and rejects an incompatible
-protocol, transport, descriptor, work unit, or quote before funding.
+The gateway resolves brokers through LOC's authenticated HTTP discovery API.
+LOC owns the underlying `service-registry-daemon`; no local resolver socket or
+static broker URL fallback is required or supported by gateway startup.
+Selection consumes LOC's canonical route snapshot and binding, preserves
+lossless quote/domain identity, and rejects incompatible protocol, transport,
+work unit, or live descriptor before funding. This boundary was approved in
+[plan 0020](../exec-plans/completed/0020-loc-http-discovery.md).
 
 ## 3. Mainnet-only — no Livepeer testnets
 

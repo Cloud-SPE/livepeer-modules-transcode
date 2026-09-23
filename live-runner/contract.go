@@ -37,6 +37,14 @@ var (
 		"runway_exhausted": {}, "refill_refused": {}, "recovery_failed": {},
 		"payment_unrecoverable": {}, "runner_failed": {}, "ingest_failed": {},
 		"output_failed": {},
+		// Broker lifecycle codes and historical gateway reasons may already be
+		// durably pinned in winding-down sessions. Accept these finite codes
+		// so retries can finish without changing the recorded close reason.
+		"runner_ended": {}, "insufficient_balance": {}, "authorization_exhausted": {},
+		"open_failed": {}, "capacity_exhausted": {},
+		"lease_exhausted": {}, "customer_end": {}, "publisher_disconnect": {},
+		"broker_ended": {}, "relay_failure": {}, "refill_preannounced_refusal": {},
+		"refill_policy_exhausted": {}, "refill_total_exceeded": {},
 	}
 	ladderFailureCodesV1 = map[string]struct{}{
 		"encoder_init_failed": {}, "hwaccel_init_failed": {}, "input_unavailable": {},

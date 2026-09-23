@@ -11,7 +11,7 @@ import type { PaidJobClient, PaidSessionClient, StorageProvider, WorkerResolver 
 import type { PaidOperationRepo } from "./engine/repo/index.js";
 import {
   createStubWorkerResolver,
-  createResolverWorkerResolver,
+  createLocWorkerResolver,
   createLiveSessionDirectory,
   createLocClient,
   createLocHttpTransport,
@@ -73,22 +73,6 @@ async function main(): Promise<void> {
 
   // Wire layer — real impls when env vars set, stubs otherwise.
   let workerResolver: WorkerResolver = createStubWorkerResolver();
-  let resolverHandle: { close(): Promise<void> } | null = null;
-
-  if (config.LIVEPEER_RESOLVER_SOCKET) {
-    const handle = createResolverWorkerResolver({
-      resolverSocket: config.LIVEPEER_RESOLVER_SOCKET,
-      resolverProtoRoot: config.LIVEPEER_RESOLVER_PROTO_ROOT,
-      resolverSnapshotTtlMs: config.LIVEPEER_RESOLVER_SNAPSHOT_TTL_MS,
-      routeFailureThreshold: config.LIVEPEER_ROUTE_FAILURE_THRESHOLD,
-      routeCooldownMs: config.LIVEPEER_ROUTE_COOLDOWN_MS,
-    });
-    workerResolver = handle.resolver;
-    resolverHandle = handle;
-    consoleLogger.info("wire.resolver.connected", { socket: config.LIVEPEER_RESOLVER_SOCKET });
-  } else {
-    consoleLogger.info("wire.resolver.stub", { reason: "LIVEPEER_RESOLVER_SOCKET unset" });
-  }
   // S3-compat storage. Routes return 503 s3_not_configured when null.
   let storage: StorageProvider | null = null;
   const s3Cfg = loadS3ConfigFromEnv(process.env);
@@ -119,12 +103,15 @@ async function main(): Promise<void> {
   let paidSessionStore: PaidSessionStore | null = null;
   if (config.LIVEPEER_LOC_URL && config.LIVEPEER_LOC_API_KEY) {
     const caller = createCallerProofIdentity(config.LIVEPEER_CALLER_PRIVATE_KEY!);
-    const loc = createLocClient(createLocHttpTransport({
+    const locTransport = createLocHttpTransport({
       baseUrl: config.LIVEPEER_LOC_URL,
       apiKey: config.LIVEPEER_LOC_API_KEY,
       clientId: config.LIVEPEER_LOC_CLIENT_ID,
       timeoutMs: config.LIVEPEER_LOC_TIMEOUT_MS,
-    }));
+    });
+    const loc = createLocClient(locTransport);
+    workerResolver = createLocWorkerResolver(locTransport);
+    consoleLogger.info("wire.discovery.loc", { configured: true });
     paidJobClient = createPaidJobClient(loc, { caller });
     paidSessionClient = createPaidSessionClient(loc, { caller });
     if (config.LIVEPEER_OPERATION_SECRETS_KEK) {
@@ -140,6 +127,8 @@ async function main(): Promise<void> {
       });
     }
   }
+
+  if (!config.LIVEPEER_LOC_URL) consoleLogger.info("wire.resolver.stub", { reason: "LOC discovery is not configured" });
 
   const app = await createServer({
     config,
@@ -257,7 +246,6 @@ async function main(): Promise<void> {
     if (liveRecoveryTimer) clearInterval(liveRecoveryTimer);
     if (rtmpHandle) await rtmpHandle.stop();
     await app.close();
-    if (resolverHandle) await resolverHandle.close();
     await pool.end();
     process.exit(0);
   };

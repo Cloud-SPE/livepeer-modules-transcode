@@ -104,3 +104,9 @@ export async function deleteOne(id) {
 export function exportUrl() {
   return `${API_BASE}/api/v1/admin/waitlist/export?_auth=${encodeURIComponent(getAdminToken())}`;
 }
+
+export async function resendVerification(id) {
+  return adminRequest(`/api/v1/admin/waitlist/${encodeURIComponent(id)}/resend-verification`, { method: "POST", body: "{}" });
+}
+
+export async function fetchCatalog() { return adminRequest("/api/v1/admin/catalog"); }

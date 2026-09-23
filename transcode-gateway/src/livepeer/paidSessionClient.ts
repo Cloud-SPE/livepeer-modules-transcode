@@ -113,8 +113,8 @@ const settlementLookupWire = z.object({
   gateway_session_id: z.string().min(1),
   work_id: z.string().min(1),
   authorization_id: z.string().min(1),
-  predecessor_work_id: z.string(),
-  rotation_generation: z.number().int().nonnegative(),
+  predecessor_work_id: z.string().optional(),
+  rotation_generation: z.number().int().nonnegative().optional(),
   state: z.string().min(1),
   unit: z.string().min(1),
   claimed_units: z.number().int().nonnegative(),
@@ -167,19 +167,19 @@ export function createPaidSessionClient(
     async open(input) {
       validateOpen(input);
       const routeBinding = routeBindingFor(input.route);
-      const prepared = await loc.prepareSession({
+      const prepared = await sessionLocCall("prepare_session", () => loc.prepareSession({
         requestId: input.requestId,
         capability: input.route.capability,
         offering: input.route.offering,
         descriptorSchema: input.descriptorSchema,
         routeBinding,
-      });
+      }));
       const brokerOpenBody = JSON.stringify({
         gateway_session_id: prepared.gatewaySessionId,
         session_params: input.sessionParams,
       });
       if (prepared.brokerUrl !== input.route.workerUrl) throw invalidEvidence();
-      const opened = await loc.openSession({
+      const opened = await sessionLocCall("open_session", () => loc.openSession({
         requestId: input.requestId,
         capability: input.route.capability,
         offering: input.route.offering,
@@ -192,7 +192,7 @@ export function createPaidSessionClient(
         preparationToken: prepared.preparationToken,
         workloadRequestDigest: createHash("sha256").update(brokerOpenBody).digest("hex"),
         callerPublicKey: options.caller.publicKey,
-      });
+      }));
       const response = await fetchImpl(`${opened.brokerUrl.replace(/\/$/, "")}/v1/session`, {
         method: "POST",
         headers: brokerOpenHeaders(opened, options.caller),
@@ -340,17 +340,24 @@ export function createPaidSessionClient(
         {
           method: "POST",
           headers: new Headers({ ...Object.fromEntries(authHeaders(input.credential)), "Content-Type": "application/json" }),
-          body: JSON.stringify({ reason: input.reason }),
+          body: JSON.stringify({ reason: runnerCloseReason(input.reason) }),
         },
       );
       const body = await parseResponse(response, endWire);
       if (body.session_id !== input.brokerSessionId) throw invalidEvidence();
+      if (body.state === "winding_down" || body.state === "open" || body.state === "active") {
+        throw new PaidSessionClientError("paid_session_close_pending", { retryable: true });
+      }
+      if (!["closed", "ended", "failed"].includes(body.state)) throw invalidEvidence();
       const lookup = await settlementLookup(
         fetchImpl,
         input.opened,
         input.gatewaySessionId,
         response.headers.get(HEADER.SETTLEMENT),
       );
+      if (lookup.wire.state === "winding_down" || lookup.wire.state === "open") {
+        throw new PaidSessionClientError("paid_session_close_pending", { retryable: true });
+      }
       if (
         lookup.wire.session_id !== input.brokerSessionId ||
         lookup.wire.gateway_session_id !== input.gatewaySessionId ||
@@ -361,10 +368,14 @@ export function createPaidSessionClient(
         lookup.wire.state !== "closed"
       ) throw invalidEvidence();
       const payload = lookup.envelope.payload;
-      const actualUnits = safeUnits(payload.actual_units);
-      const outcome = requiredString(payload.outcome);
+      // Protobuf JSON omits zero-valued uint64 fields and the unspecified
+      // outcome. Keep the signed envelope unchanged for LOC verification.
+      const actualUnits = safeUnits(payload.actual_units ?? "0");
+      const outcome = payload.outcome === undefined || payload.outcome === "SETTLEMENT_OUTCOME_UNSPECIFIED"
+        ? undefined : requiredString(payload.outcome);
       if (
         outcome === "DEBIT_FAILED" ||
+        payload.state !== "closed" ||
         requiredString(payload.gateway_session_id) !== input.gatewaySessionId ||
         requiredString(payload.session_id) !== input.brokerSessionId ||
         requiredString(payload.work_id) !== lookup.wire.work_id ||
@@ -372,8 +383,8 @@ export function createPaidSessionClient(
         requiredString(payload.settlement_domain_id) !== controlSettlementDomain(input.opened) ||
         requiredString(payload.work_unit_name) !== lookup.wire.unit ||
         actualUnits !== lookup.wire.claimed_units ||
-        safeUnits(payload.claimed_units) !== actualUnits ||
-        safeUnits(payload.debited_units) !== actualUnits ||
+        safeUnits(payload.claimed_units ?? "0") !== actualUnits ||
+        safeUnits(payload.debited_units ?? "0") !== actualUnits ||
         safeUnits(payload.settlement_seq) !== lookup.wire.settlement_seq
       ) {
         throw new PaidSessionClientError(
@@ -406,7 +417,7 @@ export function createPaidSessionClient(
         closeReason: body.close_reason,
         settlementSequence: lookup.wire.settlement_seq,
         actualUnits,
-        outcome,
+        outcome: accounting.outcome,
         envelope: lookup.envelope,
         accounting,
       };
@@ -683,4 +694,25 @@ function invalidRequest(): PaidSessionClientError {
 
 function invalidEvidence(): PaidSessionClientError {
   return new PaidSessionClientError("paid_session_evidence_invalid", { retryable: false });
+}
+
+async function sessionLocCall<T>(operation: "prepare_session" | "open_session", call: () => Promise<T>): Promise<T> {
+  try { return await call(); } catch (error) {
+    if (error instanceof LocTransportError) error.operation = operation;
+    throw error;
+  }
+}
+
+// Keep product reasons in our durable record; send descriptor-compatible codes.
+export function runnerCloseReason(reason: string): string {
+  const aliases: Record<string, string> = {
+    customer_end: "gateway_close", publisher_disconnect: "gateway_close", broker_ended: "gateway_close",
+    lease_exhausted: "lease_expired", relay_failure: "ingest_failed",
+    refill_preannounced_refusal: "refill_refused", refill_policy_exhausted: "refill_refused", refill_total_exceeded: "refill_refused",
+    runner_ended: "gateway_close", insufficient_balance: "runway_exhausted", authorization_exhausted: "runway_exhausted",
+    open_failed: "recovery_failed", capacity_exhausted: "recovery_failed",
+  };
+  const mapped = Object.hasOwn(aliases, reason) ? aliases[reason]! : reason;
+  if (!["gateway_close", "lease_expired", "heartbeat_lost", "runway_exhausted", "refill_refused", "recovery_failed", "payment_unrecoverable", "runner_failed", "ingest_failed", "output_failed"].includes(mapped)) throw invalidRequest();
+  return mapped;
 }
